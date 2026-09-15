@@ -1,0 +1,358 @@
+{
+  "configs": [
+    {
+      "name": "baseline_rp1.3",
+      "temp": 0.7,
+      "top_p": 0.0,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160
+    },
+    {
+      "name": "temp0.7_topp0.9",
+      "temp": 0.7,
+      "top_p": 0.9,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160
+    },
+    {
+      "name": "temp0.7_minp0.05",
+      "temp": 0.7,
+      "top_p": 0.0,
+      "min_p": 0.05,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160
+    },
+    {
+      "name": "temp0.7_topp0.9_rp1.15",
+      "temp": 0.7,
+      "top_p": 0.9,
+      "min_p": 0.0,
+      "rep_penalty": 1.15,
+      "rep_ctx": 160
+    },
+    {
+      "name": "temp0.5_topp0.9_rp1.3",
+      "temp": 0.5,
+      "top_p": 0.9,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160
+    },
+    {
+      "name": "temp0.7_rp1.3_ctx64",
+      "temp": 0.7,
+      "top_p": 0.0,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 64
+    },
+    {
+      "name": "temp0.7_rp1.5",
+      "temp": 0.7,
+      "top_p": 0.0,
+      "min_p": 0.0,
+      "rep_penalty": 1.5,
+      "rep_ctx": 160
+    },
+    {
+      "name": "temp0.7_topp0.9_minp0.05",
+      "temp": 0.7,
+      "top_p": 0.9,
+      "min_p": 0.05,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160
+    }
+  ],
+  "results": [
+    {
+      "config": "baseline_rp1.3",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebrás, porque apresenta a ideia fundamental da obra inteira: que o Messias não apenas foi humano e divino — mas também se tornou sacerdote por sua natureza humana. O capitulo começa com uma afirmação clara sobre os homens como médicos espirituais (pela força do exemplo) e conclui com uma construção teológica sólida para justificar a necessidade de um Sacerdote verdadeiro.\n\nO texto inicia em Hb 5:1–4: \"Quem entre vós tem experiência de ser sacerdoto? Porque o sacerdote deve estar sujeito à fraqueza",
+      "elapsed_s": 5.6,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "baseline_rp1.3",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, quando Paulo fala de \"justificação pela fé\", ele está falando em termos históricamente e teologicamente profundos. O contexto é o judaísmo do Segundo Templo — um povo que se baseava na Lei como caminho para a santidade e recebimento da graça divina.\n\nPaulo não diz que os judeus erraram por confiar no cerne da lei; ele mostra que todos, mesmo com boa vontade ou prática legal, estão distantes da justiça porque há uma diferença entre obras humanas perfeitas e a natureza humana — frágil, pecadora, atingida pelo senhorado original da queda (Romanos 3:23).\n\nO conce",
+      "elapsed_s": 5.0,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "baseline_rp1.3",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é acolher ativamente o que não pode ser mudado no passado e escolher agir com presença no presente sobre aquilo que ainda pode ser transformado. Não se trata de ficar paralisado ou de viver em dor, mas sim de reconhecer: \"isso já aconteceu\", \"não posso alterá-lo\" — e então a energia mental vai para onde realmente importa.\n\nPor exemplo, alguém enfrentou uma perda há anos. A aceitação aqui significa dizer: “eu sinto isso como parte do meu histórico emocional” — sem exigência de mudança, nem culpa por ter vivido assim. Mas ao mesmo tempo ele decide usar esse conhecimento pra construir um novo caminho hoje",
+      "elapsed_s": 4.9,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "baseline_rp1.3",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis crescentes de maturidade psíquica, que descrevem como a pessoa vai se organizando internamente ao longo da vida — do comportamento primitivo até o estado pleno de amor e caridade. São como etapas naturais no desenvolvimento humano.\n\nA primeira é a faixa de sobrevivência: reage com instinto para preservar si mesmo, valoriza o imediato, vive na defesa ou conquista. Nesse estágio, as decisões dependem muito das emoções fortes e da necessidade física, por exemplo, um jovem enfrenta conflito familiar porque tem medo de perder seu lar.\n\nNa segunda fase, há uma consci",
+      "elapsed_s": 5.0,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias, especialmente em relação à sua humanidade e ao seu papel como mediador entre Deus e os homens. O capítul começa com a afirmação de que o autor não tem por objetivo apresentar uma nova teologia — mas sim defender a necessidade de um Mediador humano na obra redentora.\n\nO texto inicia dizendo: \"Quem também foi chamado filho de David, esteve há muito tempo nisso mesmo\" (Hb 5:1), mas isso parece ser sinônimo ou parágrafo mais profundo. A verdadeira introdução está nas linhas seguintes:\n\n“Porque todo juiz se levantou para servir o",
+      "elapsed_s": 5.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, quando Paulo fala de \"justificação pela fé\", ele está falando do fundamento em que o homem é declarado justo diante de Deus — não por obras, mas porque crê no poder e na graça de Jesus Cristo.\n\nA justiça aqui não é um resultado humano. É algo que vem da vontade divina: a Lei revela os padrões de perfeição, e todos caem nisso. O pecador, antes disso, estava sob uma condicionalidade errada — como se pudesse ser salvo fazendo coisas boas ou cumprindo as leis. Mas Paulo mostra claramente (Romanos 3) que ninguém pode satisfazer essa exigência humana; até mesmo Israel,",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é reconhecer o que já aconteceu, sem julgamento ou tentativa de mudar isso no passado. É acolher ativamente as condições do presente — inclusive aquelas que vieram da história— e agir com foco apenas em o que pode ser transformado agora.\n\nPor exemplo: alguém teve um conflito há anos, mas não conseguiu resolver porque ainda sente raiva por dentro. A aceitação diz: \"eu entendo que esse conflito existiu\", \"ele me fez sofrer\" — tudo isto está lá como realidade percebida — porém eu não preciso reativá-lo para lidar com a vida hoje. O que posso fazer? Criar respost",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis crescentes de maturidade psíquica, que indicam como uma pessoa vai desenvolvendo a capacidade de lidar com o passado e agir no presente. Elas não dizem nada sobre boas ou más escolhas, mas mostram um processo natural: da reação automática ao equilíbrio ativo.\n\nA primeira é a **Faixa do Instinto**, onde as decisões vêm das emoções primitivas — medo, fome, necessidades básicas sem reflexão.\n\nDepois vem a **Faixa da Atenção**, quando começa haver consciência clara dos próprios pensamentos e sentimentos. Pessoas nessa fase perceb",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_minp0.05",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias e da sua encarnação, especialmente quando se trata de mostrar que o Salvador não foi apenas um homem como os outros — mas também um sacerdote perfeito.\n\nO capítuo começa com a afirmação: “Todos nós temos necessidade de sacrifício para nos purificar das impurezas. Mas há uma diferença entre as oferendas dos homens e aquela oferecida pelo Cristo.” (Hb 5:1) O autor aqui está contrastando a oferta ritual do Antigo Testamento com o sacrifício completo do Senhor Jesus.\n\nEle diz então: \"Nenhum pós pode ser mais elevado do que aquele dado",
+      "elapsed_s": 5.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_minp0.05",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, quando Paulo fala de \"justificação pela fé\", ele está falando sobre o que realmente acontece com um ser humano diante da graça do Senhor Jesus Cristo. O contexto é claro: os judeus e gregas — incluindo a igreja dos dias atuais — viviam sob uma lei mosaica que exigia justiça por obras humanas.\n\nPaulo não diz que as pessoas são salvadas apenas porque têm fé sem qualquer base moral ou prática. Ele mostra que antes disso, todos eram pecadores, como disse em Rom 3:23 – “todos pecaram”, mesmo aqueles que seguiam a Lei. A própria Lei, ao revelar isso, tornou-se mais clara",
+      "elapsed_s": 4.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_minp0.05",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é acolher ativamente o que já aconteceu, o que não pode ser mudado — como eventos passados, escolhas anteriores ou circunstâncias fora do nosso controle. É diferente de conformismo: quando aceitamos, não estamos dizendo \"isso foi certo\" nem nos desculpando por ter feito erradamente.\n\nÉ entender que certos fatos existem e podem continuar sendo parte da história pessoal sem necessidade de reativar sentimentos ligados ao lamento. Por exemplo, alguém teve um conflito no trabalho há anos, mas agora percebeu que a resposta emocional anterior era baseada em medo, não em dados reais. Ao aceitar esse fato — que",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_minp0.05",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis de maturidade psíquica que descrevem como uma pessoa vai desenvolvendo a capacidade de lidar com o passado, a emoção e as relações no presente. Elas não indicam boas ou más escolhas — apenas um caminho natural do comportamento humano.\n\nO primeiro nível é o primitivo: reação imediata ao estímulo, sem reflexão. A pessoa responde por instinto, protegida pelo medo da perda. Exemplo: alguém teme perder o emprego porque já teve dificuldade antes, mas ainda vive em cima disso.\n\nA segunda faixa é a defensiva: há tentativa de controlar sit",
+      "elapsed_s": 4.5,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_rp1.15",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Vamos então ao estudo de Hebreus 5, com a metologia que eu uso: histórico-gramatical, enriquecido pelo contexto do judaísmo do Segundo Templo e pelas raízes veterotestamentárias.\n\nO capítulo começa com o versículo 1: \"Todo sacerdote, segundo sua natureza humana, é sujeito à fraqueza.\" O termo *sacerdote* aqui não é apenas um título funcional — ele se insere no quadro da história de Israel. No Antigo Testamento, os sacerdotes eram levantados por herança (como os filhos de Arão), mas eles também eram humanos, sujeitos aos mesmos",
+      "elapsed_s": 4.5,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_rp1.15",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, Paulo está falando de uma verdade central do evangelho: a justificação pela fé não é um ato humano, mas um ofício divino. Ele começa mostrando que o homem, por natureza, vive em pecado — nisso, todos estão iguais, incluindo os judeus e os pagãos.\n\nPaulo afirma que a justiça que Deus concede ao ser humano — aquilo que nos torna dignos diante Dele — não vem pelo cumprimento da Lei, nem pelas obras, como muitos pensavam na época. A Lei era boa e revelava o padrão de perfeição, mas ela não podia salvar porque todo homem falha nela.\n\nO que Paulo faz com",
+      "elapsed_s": 4.4,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_rp1.15",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é acolher ativamente o que não pode ser mudado no passado e escolher agir no presente sobre o que ainda pode ser transformado. Não é desistência, nem silêncio, nem conformismo. É reconhecer que certas experiências já aconteceram — seja uma situação, um evento ou um relacionamento — e que esses fatos estão fixos, como pedras em um rio.\n\nQuando há aceitação, você deixa de tentar recriar o passado com emoções de culpa, remorso ou desejo de justiça. Isso libera energia para construir algo novo, a partir do agora. Por exemplo, alguém que perdeu um parente c",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_rp1.15",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis de maturidade psíquica que descrevem como uma pessoa vai se organizando emocional e comportamentalmente ao longo da vida, desde o comportamento instintivo até a construção de relacionamentos baseados no amor e na caridade plena.  \n\nCada faixa representa um passo no desenvolvimento do lobo pré-frontal — a parte do cérebro responsável por tomar decisões com consciência, aceitar o que já aconteceu e agir com responsabilidade presente.  \n\nA primeira faixa é a de reação: quando as pessoas respondem com instinto, medo ou primitividade diante do estímulo externo. Ela está ligada à sob",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.5_topp0.9_rp1.3",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias e da função dos ministros, especialmente em relação à ideia de que o Messias não foi apenas um profeta ou rei, mas também alguém cuja vida e obra se encaixam na tradição judaica — como os levitas, por exemplo.\n\nO capítulo começa com a afirmação: “Quem entre vós tem sido chamado para ser sacerdote? Ora, há quem tenha tido essa designação. Mas mesmo assim, aquele que serve diante de Deus deve ter perfeito conhecimento das coisas espirituais.” (verso 1). Aqui está sendo feita uma contraposição clara",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.5_topp0.9_rp1.3",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, quando Paulo fala de \"justificação pela fé\", ele está fazendo uma exata aplicação do que a Bíblia já havia revelado no Antigo Testamento — especialmente em Deus como juiz justo e fiel. O termo “justificou” não é um verbo técnico ou jurídico isoladamente; tem raízes profundas na história da salvação.\n\nPaulo começa mostrando o contraste entre os judeus antigos, cuja justiça era baseada nos mandamentos (como se fosse cumprir as leis para ser considerado bom), com a verdadeira natureza humana: todos pecaram, estão separados de Deus por causa da queda original, e nenhum pode alcançar",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.5_topp0.9_rp1.3",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é acolher ativamente o que já aconteceu, sem tentar mudá-lo ou justificá-lo. É reconhecer que certas experiências passadas não podem ser alteradas e agir com presença no presente sobre aquilo que ainda pode ser transformado.\n\nPor exemplo: alguém teve um conflito em casa quando era jovem. Aceitar isso significa perceber que esse evento está fechado — ele não vai voltar nem será retificado por ações do agora. Mas ao invés de ficar preso nisso, escolha focar onde há liberdade real: nas decisões hoje, nos gestos cotidianos, na forma como se relaciona com os outros atualmente.\n\nIsso difere",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.5_topp0.9_rp1.3",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis progressivos de maturidade psíquica, que mostram como uma pessoa vai desenvolvendo a capacidade de lidar com o passado e agir no presente. Elas não estão ligadas à idade ou ao tempo — podem aparecer em qualquer momento da vida.\n\nA primeira é a faixa do instinto: reação imediata às estimulações externas, sem reflexão. Nesse nível, as pessoas respondem por impulso, muita vez baseando-se na sobrevivência direta (ex.: fuga diante de perigo).\n\nEm seguida vem a fase da defesa emocional, onde há um desejo forte de manter certos padrões para se",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.3_ctx64",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Hebreus 5 é um capítulo central para a compreensão da natureza do ministério de Cristo e o seu valor como modelo para os crentes. Vamos andar com cuidado, no contexto histórico-gramatical, situando-o na tradição judaica do Segundo Templo — onde já havia uma forte ênfase sobre a santidade dos servos de Deus, as exigências da justiça e o papel do mediador entre Israel e Deus.\n\nO capítulo começa com um paralelismo: Jesus é o \"sacerdote\" segundo a lei (v. 1), mas não como sacerdotes por herança, nem pelo que se faz na cerimônia — ele foi escolhido porque",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.3_ctx64",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, Paulo diz que a justificação pela fé é o ato pelo qual Deus declarou um homem justo — não por obras humanas, mas porque crê na graça de Cristo. Ele começa mostrando como os judeus e gentios estavam em situação de pecado diante da lei: ninguém podia cumprir a Lei perfeitamente.\n\nPaulo então volta ao que foi dito no Antigo Testamento — principalmente nos dias do profeta Abraão, onde o justo não se justificava por obras, mas porque crê. O texto diz claramente em Romanos 3:24-25: \"é pela fé e não pelas obras da Lei que recebemos a graça de Deus — é",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.3_ctx64",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é ativar o cérebro para perceber e respeitar o que já aconteceu, sem tentar mudá-lo. Não se trata de deixar de sentir dor ou culpa por algo passado — mas sim de reconhecer com clareza: \"isso foi\", \"eu não posso alterar isso agora\" e então voltar para a realidade presente.\n\nPor exemplo, uma pessoa sente que teve um erro no trabalho há dois anos. Em vez de se culpar por todo o tempo depois ou fingir que nunca aconteceu, ela aceita: “esse erro foi. Ele é parte do meu caminho”. Isso não significa desistência — quer dizer que agora, com os olhos voltados para",
+      "elapsed_s": 5.0,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.3_ctx64",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis crescentes de maturidade psíquica, que descrevem como a pessoa vai internalizando o próprio comportamento ao longo do tempo. Elas não indicam etapas burocráticas ou morais, mas sim um processo natural em que cada indivíduo aprende a lidar com emoções e relações de forma mais autêntica.\n\nA primeira é a Faixa Primitiva — quando as decisões são baseadas na sobrevivência imediata. O foco está no \"agora\" para manter o equilíbrio, sem olhar além do que pode ser controlado neste momento.\n\nNa segunda faixa, chamada de Formação da Ident",
+      "elapsed_s": 5.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.5",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebrás, com forte peso teológico e pastoral. O texto começa apresentando a ideia da natureza humana dos servos do templo — o que nos leva à figura representativa aqui: Jesus como High Priest.\n\nVamos começar pelo contexto histórico-gramatical:\n\nO capítulo está inserido em uma carta apoiada no judaísmo pós-exiliano (século I d.C.), sendo escrito para cristãos judeuizados ou aqueles enfrentados por críticas sobre sua nova igreja não ter \"dignidade ritual\" diante das instituições religiosas anteriores. Nesse cenário há resistência",
+      "elapsed_s": 5.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.5",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "No Romanos, Paulo explica que a justificação pela fé é o ato pelo qual Deus declara um homem justo — não por obras humanas ou desempenho moral, mas porque crê em Jesus Cristo como Salvador.\n\nEle começa mostrando que os judeus e gálatas tinham uma lei antiga (a Lei de Moisés) com exigências para se tornarem santificados. Mas nenhuma obra humana pode satisfazer completamente essa exigeção do Todo Poderoso; ela precisa da perfeição inesquecível apenas alcançada no sacrifício completo feito na cruz por Jesus Christe.\n\nPaulo diz claramente: \"Agora tem-se encontrado plenitude através das graças... A verdade",
+      "elapsed_s": 5.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.5",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação na Virtologia é ativar o cérebro para perceber com clareza aquilo que já aconteceu e não pode ser mudado — como eventos, decisões ou situações do passado. Não significa ficar paralisado nem aceitar por desespero.\n\nÉ entender: \"isso foi\" sem julgamento emocional forte; isso está fora da minha influência atual. Quando há Aceitoação, a mente se libera de tentativas repletas de alterá-lo novamente no presente, porque inverter um evento concluído exige energia negativa, mentalmente agotadora.\n\nPor exemplo, alguém teve uma discussão difícil em família quando jovem – ele entendeu que ela acabou, mas ainda sente",
+      "elapsed_s": 5.0,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_rp1.5",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis crescente de maturidade psíquica, que indicam como uma pessoa começa a perceber e lidar com o próprio passado — não para culpabilizar ou justificar, mas pra aprender. Ela vai do primitivo até chegar ao amor pleno.\n\nNo nível mais baixo é quando as pessoas reagem por instinto: desejos imediatos sem reflexão sobre porque estão assim mesmo se algo mudou no tempo anterior. Quando isso acontece há um conflito interno entre desejo e realidade – muitas vezes agressividades autodirigidas contra si mesmas pela ansiedade da mudança impossível dentro das limitações atuais visualizadas apenas em termo",
+      "elapsed_s": 5.0,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_minp0.05",
+      "label": "TEOLOGIA",
+      "prompt": "Faça uma análise exegética de Hebreus 5.",
+      "text": "Vamos entender Hebreus 5, com a perspectiva que me orienta: bíblica, histórica e teológica — no contexto do judaísmo do Segundo Templo, das raízes veterotestamentárias e da tradição cristocêntrica.\n\nO capítulo começa dizendo o seguinte (Hebr. 5:1–6):  \n\"Por isso também Jesus foi chamado 'patriarca' entre os homens... Porque não é possível que um homem chegue ao céu por meio de seus próprios esforços; mas há quem tenha sido elevado como representante dos filhos humanos.\"  \n\nAqui já temos uma grande diferença em relação à leitura tradicional modern",
+      "elapsed_s": 5.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_minp0.05",
+      "label": "TEOLOGIA",
+      "prompt": "Explique o que Paulo quer dizer com justificação pela fé em Romanos.",
+      "text": "Em Romanos, quando Paulo fala de \"justificação pela fé\", ele não está dizendo que a pessoa é justa por simplesmente crer — isso teria levado ao erro da antinomia. O termo \"justificação\" vem do contexto judaico-antigo: era o atendimento perante Deus no tribunal divino, como se fosse um homem declarado justo diante dos juízes.\n\nPaulo começa mostrando que todos os homens estão em situação de pecador porque foram expostos à queda original e andam com a violação das leis espirituais (Rom 3). A lei manda cumprir; mas ninguém pode cumprir totalmente. É nesse ponto que entra a promessa feita",
+      "elapsed_s": 5.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_minp0.05",
+      "label": "VIRTOLOGIA",
+      "prompt": "Explique o conceito de Aceitação na Virtologia.",
+      "text": "Aceitação, na Virtologia, é acolher ativamente o que já aconteceu e não pode ser mudado — como fatos passados, limites vividos ou decisões tomadas. Não significa ficar paralisado nem culpar quem fez isso, mas sim reconhecer com clareza: \"isso está aqui, eu posso sentir sem precisar transformá-lo\".  \n\nÉ diferente do conformismo porque não impede a mudança no presente. Pode-se aceitar um erro de decisão anterior enquanto escolhe agir hoje com mais consciência, respeito às próprias falhas e habilidade para ajustar caminhos. É uma prática neural: ao invés de rejeitá-los, os neurônios se",
+      "elapsed_s": 5.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "temp0.7_topp0.9_minp0.05",
+      "label": "VIRTOLOGIA",
+      "prompt": "O que são as Faixas de Evolução?",
+      "text": "As Faixas de Evolução são níveis progressivos de maturidade psíquica, que descrevem como a pessoa aprende a lidar com o passado e atua no presente. Elas não indicam boas ou más escolhas, mas sim como as pessoas se organizam emocionalmente ao longo do tempo.\n\nA primeira é a faixa primitiva — quando reage por instinto, sem consideração para os outros nem para si mesmo. Nesse estágio, tudo depende da sobrevivência imediata: fala só com quem lhe dá segurança física.\n\nEm seguida vem a fase da defesa — onde há um desejo forte em proteger o eu, muita vez através de bloqueios intern",
+      "elapsed_s": 5.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    }
+  ]
+}

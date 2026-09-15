@@ -1,0 +1,141 @@
+# Relatório de Auditoria Adversarial Independente — Fase 2 v1 (Rodrigo AI)
+
+**Documento Auditado:** `docs/phase-2-v1.md`  
+**Data da Auditoria:** 2026-09-11  
+**Ambiente de Execução:** MacBook Air Apple M5, 16 GB de memória unificada, macOS Sequoia (Darwin aarch64)  
+**Papel:** Auditor Adversarial Independente  
+
+---
+
+## 1. Avaliação Específica das Decisões Prévias do Implementador
+
+### 1.1 Viabilidade de Hardware e Latência (16 GB M5, Qwen3-4B-4bit, Whisper-small, Worker Python)
+- **Consumo de Memória:** O modelo `mlx-community/Qwen3-4B-Instruct-2507-4bit` (pesos de ~2,26 GB + KV cache para 4096 tokens de ~0,4 GB) somado ao `mlx-community/whisper-small-mlx` (pesos de ~481 MB + ativações de ~0,3 GB) e ao runtime Python/MLX totaliza entre 3,5 GB e 4,0 GB de memória residente (RSS) no worker. Em um M5 de 16 GB onde o sistema operacional, daemons e navegadores (Chrome com múltiplas abas) já mantêm cerca de 6,3 GB de páginas comprimidas (verificado via `memory_pressure` com 44% de memória livre no sistema), a alocação cabe na RAM unificada sem provocar OOM fatal imediato, **desde que o cache Metal do MLX seja rigidamente controlado** (ver Achado 5).
+- **Metas de Latência (B6: mediana ≤4s, p95 ≤8s; parada de áudio ≤300ms):** 
+  - O limiar de silêncio do VAD estipulado no plano consome **700ms** antes de qualquer transmissão de áudio.
+  - Com áudio de ~3s, Whisper-small leva ~400–600ms no M5.
+  - Prefill e geração dos primeiros tokens do Qwen3-4B levam ~250–350ms.
+  - Síntese da primeira frase via `/usr/bin/say` leva ~460ms e remux via `ffmpeg` ~34ms (~500ms total).
+  - Transporte e decodificação no navegador levam ~100ms.
+  - **Conclusão:** A mediana ≤4s é fisicamente viável (~2,2s a 2,6s), **mas APENAS SE o streaming por sentenças for estritamente obrigatório**. Se a síntese esperar a conclusão integral do turno do LLM, a mediana fatalmente superará 4,5s. A parada de áudio no cliente em ≤300ms após VAD é plenamente atingível via Web Audio API.
+
+### 1.2 Escolha de TTS: `/usr/bin/say` (Luciana) + `ffmpeg` vs. Kokoro TTS (`~/.venvs/tts-say`)
+- **Desempenho e Recursos:** Medição direta realizada nesta máquina demonstrou que `say` + `ffmpeg` gera áudio em ~0,49s com 0 MB de memória persistente no worker, enquanto Kokoro-82M fp16 (`pf_dora`) via ONNX no CPU demorou 1,18s de síntese e exige carregamento de `onnxruntime`, `espeak-ng` e bibliotecas adicionais no ambiente virtual. Para bater a meta de latência de 4s (onde 0,7s já se perdem no silêncio do VAD), `say` oferece vantagem de ~700ms.
+- **Avaliação Crítica:** A escolha de `say` é **tecnicamente defensável como baseline de latência e consumo mínimo de dependências**, mas constitui uma **lacuna de design e de aceitação**:
+  1. A voz "Luciana" do macOS possui prosódia mecânica antiga dos anos 2000, criando alto risco de rejeição pelo usuário no critério B6 ("usuário aprova naturalidade/inteligibilidade da voz").
+  2. O plano ignora o ponto de extensão já desenhado na Fase 1 (`src/shared/extensions/voice.ts` — `IVoiceProvider`), em vez de encapsular o TTS de modo que o usuário possa alternar entre `say` e Kokoro via configuração para comparar latência versus naturalidade real.
+
+### 1.3 Eco Acústico e Recomendação de Fones
+- O reconhecimento do eco como limitação e a recomendação de fones é **aceitável para um protótipo experimental v0.1.0**, mas a ausência de mitigação por histerese ou atenuação no cliente expõe o sistema a loops de autointerrupção (ver Achado 9).
+
+---
+
+## 2. Achados da Auditoria
+
+### Achado 1: Reinício do Worker em interrupção bloqueante (Barge-in) inviabiliza o diálogo e quebra orçamentos de tempo
+- **Descrição**: O plano estabelece que, diante de interrupção em tarefa bloqueante do MLX, o sistema poderá adotar "cancelamento cooperativo quando possível ou encerra worker e reinicia" com aquecimento previsto de até 120 segundos. Se o worker for terminado para interromper uma geração em andamento, o usuário terá que aguardar até 2 minutos a cada interrupção de fala antes de poder interagir novamente, destruindo a usabilidade da conversa por voz.
+- **Evidência**: `docs/phase-2-v1.md:14` ("Para interrupção do MLX em tarefa bloqueante, cancelamento cooperativo quando possível ou encerra worker e reinicia; informar aquecimento real... Timeout máximo de turno 60s e aquecimento 120s").
+- **Gravidade**: **Alta**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Proibir explicitamente a reinicialização do worker como estratégia de cancelamento em tempo de execução de diálogo normal. O cancelamento cooperativo deve ser mandatório no loop de geração do LLM (`stream_generate` com verificação de evento de cancelamento a cada token emitido) e via I/O não-bloqueante no worker Python. O reinício do processo deve ser restrito exclusivamente a falhas catastróficas (ex.: travamento irrecuperável que atinja o timeout de 60s).
+
+---
+
+### Achado 2: Política de "1 sessão ativa por vez" sem preempção gera bloqueio do usuário após reload de página (F5)
+- **Descrição**: O plano estipula estritamente "1 sessão ativa por vez; estado/áudio apagados ao encerrar/expirar em 10min ociosos", mas não define nenhuma regra de preempção ou substituição para desconexões não graciosas. Quando o usuário recarrega a página no navegador (`F5`), fecha a aba ou perde o contexto, a requisição de encerramento pode não ser entregue. Uma nova tentativa de iniciar sessão colidirá com a sessão anterior ainda "ativa", resultando no bloqueio da aplicação pelo usuário por até 10 minutos.
+- **Evidência**: `docs/phase-2-v1.md:14` ("1 sessão ativa por vez; estado/áudio apagados ao encerrar/expirar em 10min ociosos") e `docs/phase-2-v1.md:17`.
+- **Gravidade**: **Alta**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Estabelecer formalmente no plano que uma nova requisição de sessão legítima originada em loopback com autorização substitui imediatamente qualquer sessão ativa anterior (preempção com descarte de tarefas órfãs e liberação de memória/áudio da sessão obsoleta), em vez de rejeitar ou exigir a expiração do timeout ocioso de 10 minutos.
+
+---
+
+### Achado 3: Injeção de argumentos e travamento indefinido no `/usr/bin/say` por ausência do delimitador `--`
+- **Descrição**: O plano orienta executar subprocessos com argumentos separados sem shell, mas não protege o comando `/usr/bin/say` contra saídas do LLM iniciadas por hífen (ex.: marcadores de tópicos `- item`, ou strings como `-o output`, `-v voice`, `-r rate`). Em testes no macOS, ao executar `say -v Luciana "-o teste"`, o binário interpreta o texto como argumento de opção e trava indefinidamente aguardando entrada via `stdin`.
+- **Evidência**: `docs/phase-2-v1.md:17` ("subprocessos com args separados, sem shell e timeouts"). Comportamento verificado via terminal: `say` sem delimitador de opções trava o processo em espera de `stdin`.
+- **Gravidade**: **Alta**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Exigir no plano que a chamada ao binário `say` utilize obrigatoriamente o delimitador de fim de opções `--` antes do texto (`['/usr/bin/say', '-v', 'Luciana', '-o', tempFile, '--', text]`) ou forneça o texto via `stdin` piping, neutralizando qualquer colisão com opções de linha de comando.
+
+---
+
+### Achado 4: Ambiguidade no protocolo de transporte entre navegador e backend ("HTTP/SSE ou NDJSON streaming")
+- **Descrição**: O plano deixa em aberto o protocolo de transporte cliente-servidor ao escrever "(HTTP/SSE ou NDJSON streaming com IDs)". SSE (`text/event-stream`) é unidirecional e simplifica o envio de eventos de transcrição e controle do servidor, mas requer um canal `POST` dedicado para chunks de áudio. NDJSON streaming sobre `fetch` contínuo exige parsing complexo de streams no navegador. Deixar essa decisão como alternativa em um plano executivo cria indefinição técnica nos contratos em `src/shared/types.ts`.
+- **Evidência**: `docs/phase-2-v1.md:17` ("Endpoints same-origin para disponibilidade, criar/encerrar/cancelar sessão, enviar áudio, receber resultados/áudio (HTTP/SSE ou NDJSON streaming com IDs)").
+- **Gravidade**: **Média**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Definir explicitamente o desenho do protocolo: endpoints REST com `POST` para comandos e envio de áudio (`/api/session`, `/api/session/audio`, `/api/session/cancel`), acompanhados de uma conexão SSE (`/api/session/events`) para emissão de transcrições, status e URLs/chunks de áudio de resposta.
+
+---
+
+### Achado 5: Ausência de controle de limite de cache Metal (`set_cache_limit`) no Worker Python gera risco de vazamento de memória e swap
+- **Descrição**: O framework MLX mantém um cache agressivo de alocações na GPU (Metal Memory Pool) para reaproveitamento de tensores. Sem configuração explícita de `mx.metal.set_cache_limit()` ou limpeza periódica via `mx.metal.clear_cache()`, a memória unificada ocupada pelo worker cresce a cada turno conversacional. Em uma máquina de 16 GB com outros processos ativos, isso forçará compressão contínua de memória e paginação em swap pelo macOS, degradando diretamente o tempo de inferência.
+- **Evidência**: `docs/phase-2-v1.md:13-14`. Telemetria de `memory_pressure` no ambiente registra 6,3 GB de memória comprimida sob uso convencional.
+- **Gravidade**: **Média**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Incluir no design do worker Python a chamada mandatória a `mlx.core.metal.set_cache_limit(...)` na inicialização e `mlx.core.metal.clear_cache()` após o processamento de cada turno ou no evento de cancelamento.
+
+---
+
+### Achado 6: Streaming de áudio por frase condicionado a "quando viável" inviabiliza a meta B6 de latência (mediana ≤4s)
+- **Descrição**: O plano qualifica o streaming de áudio por sentença como opcional ao afirmar: "Saída textual incremental e áudio por frase quando viável". Como o limiar de silêncio do VAD já consome 700ms e a inferência completa de uma resposta de 100 tokens levará ~1,6s, a síntese do bloco total de texto via `say` + `ffmpeg` adicionará mais ~1,5s a 2,0s. A latência do fim da fala ao primeiro áudio ultrapassará 4,3s, inviabilizando a meta de mediana ≤4s.
+- **Evidência**: `docs/phase-2-v1.md:17` ("áudio por frase quando viável") em contraste direto com `docs/phase-2-v1.md:28` ("Meta inicial mediana do fim da fala ao primeiro áudio <=4s").
+- **Gravidade**: **Média**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Substituir a condicional "quando viável" por uma exigência arquitetural obrigatória: o sistema DEVE particionar a geração do LLM na primeira pontuação terminativa (`.`, `?`, `!`) e disparar imediatamente a síntese da primeira frase em paralelo à geração dos tokens seguintes.
+
+---
+
+### Achado 7: Escolha de `say` + `ffmpeg` ignora o Kokoro existente e desconsidera o ponto de extensão `IVoiceProvider`
+- **Descrição**: O plano elege `say` (Luciana) + `ffmpeg` sem registrar a existência do Kokoro-82M já operacional na máquina (`~/.venvs/tts-say`). Embora a decisão seja razoável para otimizar latência (~0,49s vs 1,18s) e simplificar dependências, o plano não aproveita a interface modular `IVoiceProvider` já estabelecida em `src/shared/extensions/voice.ts` (Fase 1), acoplando a implementação a subprocessos rígidos do macOS e impedindo testes comparativos de inteligibilidade exigidos no critério B6.
+- **Evidência**: `docs/phase-2-v1.md:9` vs `src/shared/extensions/voice.ts:1-24` e `~/.venvs/tts-say/server/tts_say_server.py`.
+- **Gravidade**: **Baixa**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Estruturar o adaptador de TTS em TypeScript em conformidade com `IVoiceProvider`, permitindo que a engine padrão (`say`) possa ser substituída ou comparada com Kokoro por meio de uma variável de ambiente (ex.: `TTS_ENGINE=say|kokoro`), documentando a escolha de `say` como foco exclusivo em latência mínima no baseline.
+
+---
+
+### Achado 8: Ausência de piso mínimo de duração de energia vocal no VAD para evitar alucinações do Whisper
+- **Descrição**: O plano prevê pre-roll (~200ms) e silêncio (~700ms), com a diretiva "Não registrar silêncio como pergunta", mas não estabelece uma duração mínima de fala real. Ruídos curtos (tosse, pigarro, estalo de teclado ou clique de mouse) de 100–200ms dispararão o envio do chunk para o backend. O Whisper-small é propenso a alucinações severas quando alimentado com ruídos curtos não vocais (emitindo frases aleatórias em português como "Obrigado por assistir").
+- **Evidência**: `docs/phase-2-v1.md:20` ("Não registrar silêncio como pergunta... debounce para ruído").
+- **Gravidade**: **Baixa**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Definir no VAD do frontend que, se a duração contínua de atividade de voz acumulada for inferior a 400ms, o áudio capturado deve ser descartado no próprio cliente sem envio de requisição HTTP ao backend.
+
+---
+
+### Achado 9: Risco de autointerrupção (Self-Interruption Loop) do assistente em alto-falantes integrados
+- **Descrição**: Ao reproduzir o áudio de resposta no navegador através do alto-falante integrado do Mac com VAD contínuo ativado, o vazamento acústico no microfone pode disparar o detector de fala no cliente, ativando a lógica de barge-in e cancelando o próprio áudio da IA no meio da frase.
+- **Evidência**: `docs/phase-2-v1.md:20` ("Eco de alto-falante deve ser avaliado; recomendar fone no teste inicial e registrar limite se mãos livres não funcionar").
+- **Gravidade**: **Baixa** (mitigado para protótipo pela recomendação explícita de fones).
+- **Confiança**: **Alta**
+- **Ação recomendada**: Introduzir histerese no VAD: durante o estado de reprodução (`falando`), o limiar de energia exigido para acionar o barge-in deve ser temporariamente aumentado, exigindo fala sustentada por pelo menos 250ms antes de interromper a reprodução.
+
+---
+
+### Achado 10: Limpeza do Worker Python persistente não integrada ao shutdown de `src/backend/index.ts`
+- **Descrição**: O código atual de encerramento gracioso da Fase 1 em `src/backend/index.ts` fecha apenas a instância HTTP via `server.close()`. O plano da Fase 2 não prescreve a criação de um gerenciador de processos com registro explícito em `process.on('SIGINT')`, `process.on('SIGTERM')` e `process.on('exit')` para derrubar o worker Python persistente (`SIGTERM` com escalonamento para `SIGKILL`) e purgar os arquivos temporários de áudio, criando brecha para processos órfãos ocupando ~4 GB de RAM.
+- **Evidência**: `src/backend/index.ts:8-21` versus `docs/phase-2-v1.md:13-14` e `docs/phase-2-v1.md:26` (Critério B4).
+- **Gravidade**: **Baixa**
+- **Confiança**: **Alta**
+- **Ação recomendada**: Especificar no plano a extensão dos manipuladores de sinal em `src/backend/index.ts` para coordenar o desligamento obrigatório do worker Python persistente e a remoção recursiva do diretório de arquivos temporários de áudio.
+
+---
+
+## 3. Avaliação de Escopo e Honestidade
+
+- **Escopo**: O plano está rigorosamente focado na Fase 2 v0.1.0. Não há extravasamento para Fase 3 (roteamento de especialistas, persistência de banco de dados ou orquestração multiagente estão expressamente vedados).
+- **Honestidade**: O plano mantém postura sóbria ao registrar explicitamente que os modelos MLX são "candidatos a benchmark" e que "naturalidade e precisão ainda não estão comprovadas", sem antecipar garantias ou promessas irreais antes da validação prática.
+
+---
+
+## 4. Veredito Objetivo
+
+# **REJEITADO**
+
+**Motivo:** Presença de **3 achados de gravidade ALTA pendentes** que comprometem diretamente a estabilidade operacional, a usabilidade conversacional e a segurança da aplicação:
+1. **Achado 1 (Gravidade Alta):** Mecanismo de cancelamento por reinício do worker Python com aquecimento de até 120s inviabiliza o barge-in no diálogo em tempo real.
+2. **Achado 2 (Gravidade Alta):** Falta de política de preempção para "1 sessão ativa por vez", provocando travamento de até 10 minutos após um simples recarregamento de página (`F5`).
+3. **Achado 3 (Gravidade Alta):** Vulnerabilidade de injeção de argumentos no `/usr/bin/say` capaz de induzir travamento indefinido do subprocesso em espera de `stdin`.
+
+Para que o plano seja aprovado e o código possa ser implementado com segurança, as ações recomendadas para os Achados 1, 2 e 3 devem ser formalmente incorporadas a uma revisão `docs/phase-2-v2.md`.

@@ -5,6 +5,7 @@ dist
 !.env.example
 .DS_Store
 *.log
+!docs/audits/*.log
 .runtime
 __pycache__
 *.pyc

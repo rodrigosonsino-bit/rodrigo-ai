@@ -21,6 +21,7 @@ Offline por padrão: HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1 são setados ante
 qualquer biblioteca de rede, exceto durante o setup explícito (scripts/setup-voice.mjs), que
 roda este mesmo worker com HF_HUB_OFFLINE=0 apenas para baixar/materializar os modelos.
 """
+import difflib
 import json
 import os
 import queue
@@ -133,6 +134,43 @@ def find_sentence_boundary(buffer: str) -> Optional[int]:
         return end
 
     return None
+
+
+# --- Detector de loop de repetição (achado fora do escopo da Fase 4, ver
+# docs/implementation-phase-4.md e docs/fix-generation-repetition-loop-v2.md) ---
+
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _normalize_for_dedup(text: str) -> str:
+    """Normaliza uma frase para comparação de repetição: minúsculas, só palavras, espaços únicos."""
+    words = _WORD_RE.findall(text.lower())
+    return " ".join(words)
+
+
+def _is_near_duplicate_sentence(
+    candidate: str, previously_emitted: list[str], threshold: float = 0.75
+) -> bool:
+    """
+    True se `candidate` repete quase-verbatim (difflib.SequenceMatcher.ratio() >= threshold)
+    alguma frase já emitida neste turno (`previously_emitted`, já normalizada). Frases com
+    menos de 3 palavras nunca disparam — curtas demais para julgar com confiança sem risco de
+    falso positivo em respostas curtas legítimas (a maioria do uso normal). SequenceMatcher (não
+    Jaccard de trigramas, que falhava em variações no meio de frases longas — ver auditoria em
+    docs/audits/fix-repetition-loop-audit-result-v1-agy.log) porque uma única palavra
+    alterada/removida no meio de uma frase não deve derrubar artificialmente a pontuação.
+    """
+    candidate_norm = _normalize_for_dedup(candidate)
+    if len(candidate_norm.split()) < 3:
+        return False
+
+    for prev_norm in previously_emitted:
+        if len(prev_norm.split()) < 3:
+            continue
+        ratio = difflib.SequenceMatcher(None, candidate_norm, prev_norm).ratio()
+        if ratio >= threshold:
+            return True
+    return False
 
 
 # --- Estado de geração cancelável ---
@@ -307,6 +345,8 @@ class Worker:
             buffer = ""
             sentence_index = 0
             token_count = 0
+            emitted_normalized: list[str] = []  # histórico de frases deste turno p/ detecção
+            loop_detected = False
 
             for response in stream_generate(
                 self._llm,
@@ -328,6 +368,16 @@ class Worker:
                     sentence = buffer[:boundary].strip()
                     buffer = buffer[boundary:]
                     if sentence:
+                        # Correção do loop de repetição (achado fora do escopo da Fase 4, ver
+                        # docs/implementation-phase-4.md e docs/fix-generation-repetition-loop-v2.md):
+                        # trata uma frase quase-duplicada como fim natural da resposta, não como erro.
+                        if _is_near_duplicate_sentence(sentence, emitted_normalized):
+                            log_diag(
+                                f"Loop de repetição detectado (turnId={turn_id}, "
+                                f"frase {sentence_index}) — encerrando geração aqui."
+                            )
+                            loop_detected = True
+                            break
                         emit({
                             "event": "sentence",
                             "reqId": req_id,
@@ -335,22 +385,30 @@ class Worker:
                             "index": sentence_index,
                             "text": sentence,
                         })
+                        emitted_normalized.append(_normalize_for_dedup(sentence))
                         sentence_index += 1
                     boundary = find_sentence_boundary(buffer)
+
+                if loop_detected:
+                    break
 
                 if token_count >= MAX_TURN_TOKENS:
                     break
 
             if not handle.cancel_event.is_set():
-                leftover = buffer.strip()
-                if leftover:
-                    emit({
-                        "event": "sentence",
-                        "reqId": req_id,
-                        "turnId": turn_id,
-                        "index": sentence_index,
-                        "text": leftover,
-                    })
+                # O residual também passa pela detecção — sem isso, um corte por
+                # MAX_TURN_TOKENS no meio de uma repetição vazaria a frase duplicada pela
+                # porta dos fundos, contornando a checagem acima.
+                if not loop_detected:
+                    leftover = buffer.strip()
+                    if leftover and not _is_near_duplicate_sentence(leftover, emitted_normalized):
+                        emit({
+                            "event": "sentence",
+                            "reqId": req_id,
+                            "turnId": turn_id,
+                            "index": sentence_index,
+                            "text": leftover,
+                        })
                 emit({"event": "done", "reqId": req_id, "turnId": turn_id})
         except Exception as exc:  # noqa: BLE001
             log_diag(f"Erro na geração: {exc}\n{traceback.format_exc()}")

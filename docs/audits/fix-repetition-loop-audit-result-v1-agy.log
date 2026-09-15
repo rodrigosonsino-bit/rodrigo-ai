@@ -1,0 +1,79 @@
+### Achado 1: Falso negativo crítico na métrica de trigramas (Jaccard $\ge 0.75$) no teste de variação leve do próprio plano
+- **Achado**: A métrica de detecção proposta no plano falha no caso de teste sintético de variação leve previsto em [`docs/fix-generation-repetition-loop-v1.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L147): `"Para calcular 17% de 850, você multiplica 850 por 0,17."` vs `"Para calcular 17% de 850, multiplica 850 por 0,17."`. Como a omissão de `"você"` ocorre no meio da frase (11 palavras após normalização), 3 trigramas contendo `"você"` são eliminados e 1 novo trigrama de ponte é criado. A interseção resulta em 6 trigramas e a união em 11 trigramas: $\text{Jaccard} = 6 / 11 \approx 0.5455$, bem abaixo do limiar de `0.75`. Se implementado conforme o plano, a função retornará `False` e o teste unitário planejado falhará na validação do Critério de Aceite C1.
+  
+  *Generalização matemática*: Em qualquer frase de $W$ palavras com uma única alteração/omissão interna, o Jaccard de trigramas é de $(W - 5) / (W - 1)$. Para atingir $\ge 0.75$, a frase precisa ter no mínimo $W \ge 17$ palavras. Em frases curtas e médias comuns de voz (6 a 15 palavras), qualquer variação de uma única palavra interna produzirá falso negativo com o limiar de 0.75.
+- **Evidência**:
+  - [`docs/fix-generation-repetition-loop-v1.md:15`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L15)
+  - [`docs/fix-generation-repetition-loop-v1.md:44`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L44)
+  - [`docs/fix-generation-repetition-loop-v1.md:61-63`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L61-L63)
+  - [`docs/fix-generation-repetition-loop-v1.md:147`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L147)
+  - [`docs/fix-generation-repetition-loop-v1.md:157`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L157)
+- **Gravidade**: Alta (Bloqueante para o plano como redigido).
+- **Confiança**: 100% (verificado matematicamente e via execução no runtime Python do projeto).
+- **Ação mínima**: Escolher uma de duas abordagens no plano:
+  1. *Se o objetivo real é apenas repetição literal e variações de borda (como os casos reais observados na Fase 4, ex. Hebreus 5 com Jaccard 0.926)*: remover ou redefinir o caso de teste da linha 147 para uma variação de borda válida, ajustando a justificativa da linha 15.
+  2. *Se o objetivo for realmente cobrir variações leves no meio de frases curtas*: substituir o Jaccard de trigramas por similaridade de sequência de palavras da biblioteca padrão (`difflib.SequenceMatcher(None, w1, w2).ratio() >= 0.75`), que pontua 0.952 no exemplo citado sem gerar falsos positivos nos testes negativos.
+
+---
+
+### Achado 2: Vazamento de repetição via `leftover` não inspecionado
+- **Achado**: Quando a geração é interrompida pelo limite de tokens (`MAX_TURN_TOKENS = 160`) ou término do stream antes de emitir um caractere de pontuação terminativa (`.!?`), [`find_sentence_boundary`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L89-L136) retorna `None` e o loop encerra com `loop_detected = False`. O bloco residual `leftover = buffer.strip()` emite o texto acumulado diretamente sem submetê-lo a `_is_near_duplicate_sentence(leftover, emitted_normalized)`. Caso o modelo esteja no meio de uma repetição no momento do corte de tokens, essa frase duplicada vazará para o cliente/TTS.
+- **Evidência**:
+  - [`docs/fix-generation-repetition-loop-v1.md:127-136`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L127-L136)
+  - [`scripts/worker/worker.py:345-353`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L345-L353)
+- **Gravidade**: Média.
+- **Confiança**: 95%.
+- **Ação mínima**: Adicionar a checagem no residual:
+  ```python
+  if not loop_detected:
+      leftover = buffer.strip()
+      if leftover and not _is_near_duplicate_sentence(leftover, emitted_normalized):
+          emit({ ... })
+  ```
+
+---
+
+### Achado 3: Imprecisão factual na contagem de palavras do caso limite
+- **Achado**: A linha 146 de [`docs/fix-generation-repetition-loop-v1.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L146) afirma que `"Isso é senso comum."` "por ter só 3 palavras, é o caso limite mínimo que a regra ainda pega". No entanto, sob a regex de normalização [`_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L27), a frase possui **4 palavras** (`["isso", "é", "senso", "comum"]`) e produz 2 trigramas.
+- **Evidência**:
+  - [`docs/fix-generation-repetition-loop-v1.md:146`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L146)
+- **Gravidade**: Baixa.
+- **Confiança**: 100%.
+- **Ação mínima**: Corrigir a nota explicativa no plano e utilizar no teste unitário um exemplo com exatamente 3 palavras (ex.: `"Deus é amor."`) para exercitar o limiar estrito de 1 trigrama.
+
+---
+
+### Achado 4: Segurança da emissão de `done` sem sinalizar corte para o Node
+- **Achado**: Emitir `done` normalmente após o corte por loop é **100% seguro** para o lado Node.
+  1. Em [`src/backend/voice/mlxWorkerEngine.ts:197-202`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L197-L202), o evento `done` apenas cancela o timeout de turno e resolve a Promise de [`generate()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L285-L315).
+  2. Em [`src/backend/voice/sessionManager.ts:274-293`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L274-L293), o encerramento do turno aguarda as sínteses já disparadas (`Promise.allSettled(turn.pendingSynthesis)`), emite `turn_done` e volta para o estado `'ouvindo'`. Não existe expectativa ou validação de quantidade mínima/total de frases.
+  3. O histórico da conversa ([`sessionManager.ts:327-339`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L327-L339)) só é alimentado sob demanda pelo cliente via [`markPlayed()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L327-L339). Como a frase duplicada cortada jamais é emitida ao Node, ela nunca é sintetizada, nunca é reproduzida pelo cliente e nunca entra no histórico.
+- **Evidência**:
+  - [`src/backend/voice/mlxWorkerEngine.ts:197-202`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L197-L202)
+  - [`src/backend/voice/sessionManager.ts:274-293`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L274-L293)
+  - [`src/backend/voice/sessionManager.ts:327-339`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L327-L339)
+  - [`src/frontend/voice.ts:131-132`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L131-L132)
+- **Gravidade**: Informativo / Conforme.
+- **Confiança**: 100%.
+- **Ação mínima**: Nenhuma intervenção no Node é necessária. A premissa do plano neste ponto é sólida.
+
+---
+
+### Achado 5: Consistência do pseudocódigo com o arquivo real `scripts/worker/worker.py`
+- **Achado**: O pseudocódigo proposto em [`docs/fix-generation-repetition-loop-v1.md:68-138`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L68-L138) é consistente com [`scripts/worker/worker.py`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L307-L366).
+  - As variáveis de estado (`buffer`, `sentence_index`, `token_count`), o mecanismo de fragmentação com [`find_sentence_boundary`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L89) e o formato do payload NDJSON coincidem exatamente.
+  - O cancelamento via `handle.cancel_event.is_set()` e a limpeza de tensores no bloco `finally` (`self._mx.clear_cache()`) são preservados.
+  - As funções utilitárias propostas podem ser importadas por testes unitários sem dependência de carregamento de pesos do MLX no topo do módulo.
+- **Evidência**:
+  - [`docs/fix-generation-repetition-loop-v1.md:68-138`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v1.md#L68-L138)
+  - [`scripts/worker/worker.py:307-366`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L307-L366)
+- **Gravidade**: Informativo / Conforme.
+- **Confiança**: 100%.
+- **Ação mínima**: Nenhuma mudança estrutural necessária, ressalvada a adição da guarda no `leftover` (Achado 2).
+
+---
+
+### Veredito
+**BLOQUEADO**
+
+*Motivo*: O Critério de Aceite C1 falha obrigatoriamente sob o plano atual: o teste unitário proposto na linha 147 avalia como `False` sob a função e limiar especificados (Jaccard $0.5455 < 0.75$). O plano precisa ser corrigido antes da implementação (ajustando a métrica para `difflib.SequenceMatcher` ou redefinindo o escopo/teste de variação para refletir o comportamento real de trigramas), além de adicionar a salvaguarda no `leftover` (Achado 2).

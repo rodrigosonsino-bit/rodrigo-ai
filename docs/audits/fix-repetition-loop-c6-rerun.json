@@ -1,0 +1,13 @@
+{
+  "date": "2026-09-15",
+  "note": "Reexecução da matriz de 6 casos (docs/fix-generation-repetition-loop-v2.md, C3/C4), 3 vezes seguidas (18 gerações reais, MLX real). ACHADO IMPORTANTE durante esta reexecução: o script de teste matrix-c6.mjs usado desde a Fase 4 tinha um bug de polling (reprocessava o mesmo intervalo de eventos SSE a cada 50ms sem avançar um cursor, duplicando cada frase já vista a cada tick até o turno terminar). Corrigido (cursor avança em vez de startLen fixo). Após a correção do script: 18/18 gerações reais, ZERO repetição genuína detectada em qualquer caso — nenhuma delas precisou do detector de loop (nenhum 'Loop de repetição detectado' registrado no log do worker). Isso indica que boa parte (possivelmente toda) da severidade do 'loop de repetição' relatada na Fase 4 (docs/implementation-phase-4.md §3.5, docs/audits/phase-4-c6-matrix-result.json) foi inflada por esse bug de script, não pelo modelo/worker em si — consistente com a investigação de amostragem separada, que rodou 72 gerações reais sem reproduzir nenhum loop.",
+  "runs": 3,
+  "total_generations": 18,
+  "genuine_loops_detected": 0,
+  "conclusion": "O detector de loop (repetition_penalty + SequenceMatcher) implementado nesta correção continua válido como rede de segurança de baixo risco, já testada e auditada — mas o problema original relatado era, na prática observada aqui, muito menor (possivelmente inexistente nas condições normais de uso) do que o documentado na Fase 4. Ver docs/implementation-phase-4.md (adendo) e docs/fix-generation-repetition-loop-v2.md para o registro completo da correção de rota.",
+  "raw_logs": [
+    "docs/audits/fix-repetition-loop-c6-rerun-run1.log",
+    "docs/audits/fix-repetition-loop-c6-rerun-run2.log",
+    "docs/audits/fix-repetition-loop-c6-rerun-run3.log"
+  ]
+}

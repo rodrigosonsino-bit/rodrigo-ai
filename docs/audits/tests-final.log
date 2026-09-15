@@ -1,0 +1,49 @@
+
+> rodrigo-ai@0.0.1 test
+> tsc -p tsconfig.server.json && node --test dist/server/backend/__tests__/*.test.js
+
+[Rodrigo AI] Servidor ouvindo exclusivamente em http://127.0.0.1:3998
+▶ Rotas 404 da API
+  ✔ deve retornar JSON 404 e NUNCA retornar HTML para endpoints /api/* (25.946667ms)
+✔ Rotas 404 da API (36.931ms)
+▶ Validação Estrita de Configuração e Portas
+  ✔ deve usar portas padrão quando não informadas (1.138709ms)
+  ✔ deve aceitar valores inteiros válidos de porta (0.190917ms)
+  ✔ deve rejeitar texto e caracteres alfanuméricos em portas (ex: 3000abc) (0.351834ms)
+  ✔ deve rejeitar números decimais em portas (ex: 3.5) (0.115792ms)
+  ✔ deve rejeitar porta zero (0) e números negativos (0.108125ms)
+  ✔ deve rejeitar portas maiores que 65535 (0.09825ms)
+  ✔ deve rejeitar quando PORT e CLIENT_PORT forem idênticos (0.118041ms)
+  ✔ deve aceitar apenas 127.0.0.1 ou localhost para HOST (0.130792ms)
+  ✔ deve carregar variáveis do arquivo .env quando presente (0.667042ms)
+✔ Validação Estrita de Configuração e Portas (4.150791ms)
+▶ Comportamento do Script de Desenvolvimento scripts/dev.mjs
+  ✔ deve falhar imediatamente com código de erro ao receber porta com texto ou decimal (203.919375ms)
+  ✔ deve falhar imediatamente se a porta já estiver ocupada (73.366875ms)
+  ✔ deve liberar todas as portas sem deixar órfãos ao receber SIGTERM (1410.514209ms)
+✔ Comportamento do Script de Desenvolvimento scripts/dev.mjs (1689.360917ms)
+▶ Pontos de Extensão e Registro Modular (Fase 1)
+  ✔ deve manter registros de provedores, agentes e ferramentas vazios na Fase 1 (1.251333ms)
+  ✔ deve informar honestamente a indisponibilidade de módulos futuros (0.276208ms)
+✔ Pontos de Extensão e Registro Modular (Fase 1) (2.680375ms)
+[Rodrigo AI] Servidor ouvindo exclusivamente em http://127.0.0.1:3999
+▶ Endpoint de Saúde /api/health
+  ✔ deve retornar 200 OK com campos estritos e sem segredos (26.200583ms)
+  ✔ deve responder adequadamente a requisições HEAD (6.786917ms)
+  ✔ deve rejeitar métodos não suportados (ex.: POST) com 405 (2.604417ms)
+  ✔ deve rejeitar requisições com Host não autorizado (localhost.evil, evil.localhost, 192.0.2.1) com 403 (9.404209ms)
+✔ Endpoint de Saúde /api/health (56.949458ms)
+▶ Validação Estrita de Host Header
+  ✔ deve aceitar localhost e 127.0.0.1 com portas permitidas (0.690917ms)
+  ✔ deve rejeitar categoricamente localhost.evil, evil.localhost, 192.0.2.1 e similares (0.678167ms)
+  ✔ deve rejeitar requisições com portas não autorizadas (0.183416ms)
+  ✔ deve rejeitar cabeçalhos inválidos ou vazios (0.147958ms)
+✔ Validação Estrita de Host Header (2.766208ms)
+ℹ tests 23
+ℹ suites 6
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3368.076167

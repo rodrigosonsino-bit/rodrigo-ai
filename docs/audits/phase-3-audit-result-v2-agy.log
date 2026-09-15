@@ -1,0 +1,89 @@
+O plano revisado da **Fase 3 v2** ([`docs/phase-3-v2.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md)) foi confrontado linha a linha contra o código real de produção da Fase 1+2. O relatório completo foi registrado no log de auditoria do repositório em [`docs/audits/phase-3-audit-result-v2-agy.log`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-3-audit-result-v2-agy.log) e no artefato [`audit_fase_3_v2.md`](file:///Users/rodrigosonsino/.gemini/antigravity-cli/brain/2aa4bd7b-4656-4f6f-9a00-d2e59b4f5890/audit_fase_3_v2.md).
+
+---
+
+### 1. Verificação Específica Achado por Achado da v1
+
+1. **Achados 1 e 2 (Cancelamento órfão / Fila que descarta sem resposta):**
+   - **Análise da condição de corrida:** Em [`MlxWorkerEngine.classify()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L159-L162), a chamada `this.pending.set(reqId, ...)` ocorre de forma estritamente síncrona **antes** de `this.writeCommand(...)`. Ambas as instruções rodam no mesmo tick dentro do executor de `new Promise`. Dado que o runtime do Node.js executa JavaScript de forma single-threaded sem intercalação assíncrona, **não existe janela de corrida** onde `cancel()` possa rodar no meio e encontrar o mapa vazio.
+   - **Preempção anterior ao classify:** Se o cancelamento for chamado enquanto `transcribe()` ainda está rodando, [`SessionManager`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L221) anula `session.activeTurn`. Ao concluir a transcrição, a guarda `if (session.activeTurn !== turn) return;` impede a invocação de `classify()`.
+   - **Descarte silencioso na fila do worker:** Ao resolver/rejeitar e limpar localmente o `pending` e seu timer logo no `cancel()`, o envio de `{cmd: "cancel", turnId}` ao worker torna-se uma otimização *best-effort*. Se o worker descartar o item por `work_queue.get_nowait()` ou responder tardiamente, o Node executa `if (!pending) return;` em [`handleLine`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L198-L200) e ignora a resposta sem travar nem gerar timeout.
+
+2. **`spawnGeneration`:**
+   - **Análise:** No código real de [`src/backend/voice/mlxWorkerEngine.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L57-L108), `this.spawnWorker()` é invocado em exatamente dois momentos: no construtor (linha 57) e recursivamente no evento `'exit'` do processo filho (linha 105).
+   - O incremento `this.spawnGeneration += 1` no início de `spawnWorker()` ([`docs/phase-3-v2.md:143`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L143)) cobre deterministicamente tanto o início quanto qualquer respawn pós-crash. O timeout só executa `SIGKILL` se a geração ainda for a mesma.
+   - *(Ajuste menor:* [`failAllPending()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L110-L118) precisa ser atualizado para limpar timeouts também quando `pending.kind === 'classify'`).
+
+3. **Achado 3 (`handled` sempre true):**
+   - **Análise:** A expressão `handled: label === 'GERAL'` ([`docs/phase-3-v2.md:292`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L292)) é correta. Como os especialistas da Fase 4 não existem, apenas `GERAL` é atendido pelo modelo geral.
+   - Não há mascaramento de erros técnicos em `AMBIGUO`: qualquer falha técnica no worker emite `event: "error"`, que rejeita a Promise e cai no bloco `catch` de [`SessionManager.runTurn()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L286-L289), emitindo erro sem jamais gerar evento `routing`.
+   - *(Ajuste menor de UI:* para `AMBIGUO`, exibir `(especialista ainda não implementado — Fase 4)` na UI é semanticamente inadequado. Recomenda-se: `Classificado como: Ambiguidade (respondendo com Geral)`).
+
+4. **Achado 4 (Ordem de estados):**
+   - **Análise:** No código real de [`sessionManager.ts:227`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L227), o estado `falando` era emitido logo após a transcrição. A v2 fixa a ordem como:
+     `submitAudio (processando) → transcribe → transcript → classify() → routing → falando → generate()`.
+   - O estado permanece honestamente como `processando` durante toda a classificação. Isso não quebra o front-end ([`voice.ts:174-189`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L174-L189)), que só ativa histerese de barge-in e libera o botão de interrupção quando o estado passa a ser `falando`.
+
+5. **Achado 5 (Fake não prova cancelamento):**
+   - **Análise:** O `FakeVoiceEngine.classify()` com `classifyGate` viabiliza o teste assíncrono controlado, mas o pseudocódigo possui falhas pontuais:
+     - O método `releaseClassifyGate()` é citado no comentário ([`docs/phase-3-v2.md:233`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L233)), mas não foi declarado na classe.
+     - Na linha 237 (`else setTimeout(resolve, this.classifySettleDelayMs)`), o identificador do timer não é armazenado. Quando `cancel()` resolve o portão, o timer continua armado no Node, gerando vazamento de timers no runner de testes.
+     - *(Ajuste menor:* Declarar `releaseClassifyGate()`, chamar `clearTimeout` em `cancel()`, e nos testes de C5 checar rejeição síncrona/no próximo tick).
+
+6. **Achado 6 (Normalização):**
+   - **Análise:** A validação estrita `normalized not in CLASSIFICATION_LABELS` ([`docs/phase-3-v2.md:83`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L83)) após strip/upper elimina integralmente o não-determinismo de `next(iter(Set))`. Saídas com ruído, markdown ou truncamento geram erro técnico explícito (`event: "error"`), sem mascarar falhas como `AMBIGUO`.
+
+7. **Achado 7 (Matriz de teste):**
+   - **Análise:** Os casos 5 ("Me explica o conceito de Aceitação nesse método que você usa") e 6 ("Preciso de mais aceitação da minha família ultimamente") são bons testes semânticos adversariais contra busca ingênua por palavras-chave.
+   - **Vulnerabilidade identificada no Caso 9:** O Caso 9 exige que `""` (transcrição vazia) resulte em `erro técnico (não AMBIGUO)`. Contudo, em [`worker.py:50-67`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L50-L67), `text` vazio é passado diretamente ao prompt do LLM sem validação prévia. Se o Qwen3-4B responder `"GERAL"` ou `"AMBIGUO"`, o Caso 9 falhará. É obrigatório validar:
+     ```python
+     if not text or not text.strip():
+         emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Texto vazio para classificação."})
+         return
+     ```
+   - *Sugestões de casos adicionais:*
+     - Caso 10 (Negativo adjacente teológico vs. filosófico/cultural): *"Quem foi Martin Luther King?"* ou *"Qual a diferença entre ética e moral?"* → `GERAL`.
+     - Caso 11 (Transcrição STT realista sem pontuação): *"como funciona a aceitacao nesse metodo que voce usa"* → `VIRTOLOGIA`.
+
+8. **Achado 8 (Latência):**
+   - **Análise:** A v2 abandonou a afirmação dogmática de "≤300-500ms" e condicionou o aceite à medição empírica de C3.
+   - **Inconsistência identificada:** C3 estipula "mesmo corpus de 10 perguntas do `bench-voice.mjs`, ≥10 turnos medidos após aquecimento". No script real ([`scripts/bench-voice.mjs:9-20, 128-132`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/bench-voice.mjs#L9-L20)), o array possui 10 perguntas, sendo a pergunta 0 o aquecimento, restando apenas **9 turnos medidos** (confirmado pelo log histórico [`voice-benchmark-latest.json`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/voice-benchmark-latest.json#L3): `"turns": 9`).
+   - Para cumprir "≥10 turnos", deve-se adicionar a 11ª pergunta em `bench-voice.mjs` e instrumentar o benchmark para registrar a métrica isolada `tRouting - tTranscript`.
+
+9. **Achado 9 (UI / turnId):**
+   - **Análise:** O protocolo preserva `turnId` e reseta o estado em novos turnos, falhas ou encerramento de sessão.
+   - **Omissões no front-end real:**
+     - O construtor de [`VoiceController`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L53-L58) suporta apenas 4 callbacks e precisa receber `onRouting`.
+     - O arquivo [`src/frontend/index.html`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/index.html) não contém a tag `#voice-agent-indicator`, que precisa ser incluída no DOM.
+
+10. **Achado 10 (Campos prematuros):**
+    - **Análise:** `requiresConfirmation` e `secondaryLabels` foram removidos do contrato [`RoutingEvent`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L334-L340).
+
+---
+
+### 2. Quadro Consolidado de Novos Achados da v2
+
+| ID | Descrição | Localização | Gravidade | Confiança | Ação Mínima Recomendada |
+|---|---|---|---|---|---|
+| **v2-1** | Ausência de validação antecipada para transcrição vazia em `handle_classify` pode quebrar Caso 9 da Matriz | [`docs/phase-3-v2.md:50-67`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L50-L67) | **Média** | Alta | Incluir `if not text or not text.strip(): emit error; return` antes da inferência no worker Python. |
+| **v2-2** | `failAllPending` não limpa timeout de classificações pendentes em caso de crash do worker | [`mlxWorkerEngine.ts:110-118`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L110-L118) | **Baixa** | Alta | Adicionar `pending.kind === 'classify'` na limpeza de timers do `failAllPending()`. |
+| **v2-3** | `FakeVoiceEngine`: método `releaseClassifyGate` ausente e timer de fallback vazando no Node | [`docs/phase-3-v2.md:231-257`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L231-L257) | **Baixa** | Alta | Declarar `releaseClassifyGate()` e chamar `clearTimeout` em `cancel()`. |
+| **v2-4** | Inconsistência de turnos em C3 vs. `bench-voice.mjs` (9 turnos reais vs. ≥10 exigidos) | [`scripts/bench-voice.mjs:9-20`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/bench-voice.mjs#L9-L20), [`docs/phase-3-v2.md:363`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md#L363) | **Baixa** | Alta | Adicionar 11ª pergunta em `QUESTIONS` e registrar `tRouting - tTranscript`. |
+| **v2-5** | Omissão da alteração de assinatura de `VoiceController` e inclusão da tag em `index.html` | [`src/frontend/voice.ts:53`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L53), [`src/frontend/index.html`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/index.html) | **Baixa** | Alta | Atualizar parâmetros do construtor e adicionar `#voice-agent-indicator` no HTML. |
+
+---
+
+### 3. Veredito Final
+
+**APROVADO COM AJUSTES MENORES**
+
+**Justificativa:**  
+A v2 corrigiu os problemas de concorrência, perda de mensagens e inconsistência de estados que motivaram a rejeição da v1. O escopo permanece fiel e sem desvios para a Fase 4. Os 5 novos apontamentos acima são pontuais e de implementação direta, sem necessidade de reformulação da arquitetura do plano.
+. Veredito
+
+**APROVADO COM AJUSTES MENORES**
+
+### Justificativa:
+O plano `docs/phase-3-v2.md` realizou uma reformulação técnica exemplar e robusta dos problemas críticos da v1: o modelo de cancelamento síncrono local no Node eliminou os cancelamentos órfãos e travamentos por descarte de fila; o controle de concorrência por geração (`spawnGeneration`) protege contra mortes cruzadas de workers; e a ordem de estados `processando → transcript → classify → routing → falando` restabelece a verdade operacional do sistema. O escopo permanece estritamente contido sem antecipar a Fase 4.
+
+Os ajustes apontados acima são pontuais, objetivos e não exigem reestruturação arquitetural do plano, podendo ser aplicados diretamente no plano ou incorporados durante a etapa de implementação.

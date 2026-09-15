@@ -1,0 +1,74 @@
+### Reauditoria Adversarial de `docs/fix-generation-repetition-loop-v2.md`
+
+Auditoria realizada confrontando [`docs/fix-generation-repetition-loop-v2.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v2.md), [`scripts/worker/worker.py`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py) e o log da v1 em [`docs/audits/fix-repetition-loop-audit-result-v1-agy.log`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/fix-repetition-loop-audit-result-v1-agy.log), com validação matemática e execução em Python 3 real (`difflib`, `re`).
+
+---
+
+### 1. Verificação dos Números e Casos Matemáticos via Python Real
+
+Todos os números citados na v2 foram recalculados e conferidos executando o interpretador Python 3 do sistema sobre as funções propostas:
+
+| Caso no Plano | Strings Comparadas | Valor no Plano | Valor Medido no Python Real | Avaliação vs Limiar (0.75) |
+|---|---|---|---|---|
+| **Variação leve** (L11, L146) | `"Para calcular 17% de 850, você multiplica 850 por 0,17."`<br>vs `"...multiplica 850 por 0,17."` | `0,949` | `0.949494...` (94/99 chars) | **True** (passa com folga $\ge 0.75$) |
+| **Repetição exata** (L147) | `"Isso é senso comum."`<br>vs `"Isso é senso comum."` | `1,0` | `1.0` | **True** ($\ge 0.75$) |
+| **Hebreus 5 (turnos dif.)** (L11, L148) | Duas variações de execuções distintas da Fase 4 | `0,690` | $\approx 0.690$ | **False** (corretamente não corta) |
+| **Conteúdo diferente** (L150) | `"Na Virtologia, a aceitação é a prática..."`<br>vs `"É diferente do conformismo."` | `≈ 0,28` | `0.278688...` | **False** ($< 0.75$) |
+| **Performance** | Comparação em string normalizada com `difflib` | — | `~0.058 ms` por chamada | Desprezível no streaming TTS |
+
+---
+
+### 2. Análise dos 3 Achados Originais da v1
+
+#### Achado 1: Falso negativo na métrica de detecção (Jaccard trigramas $\ge 0.75$)
+- **Status:** **RESOLVIDO**
+- **Evidência:**
+  - A v2 abandonou o particionamento em trigramas e o índice de Jaccard, adotando `difflib.SequenceMatcher(None, candidate_norm, prev_norm).ratio() >= 0.75` (linhas 33 e 55–65).
+  - No caso de teste crítico que reprovou a v1 (`"...você multiplica..."` vs `"...multiplica..."`), a métrica anterior pontuava $0.5455$ (falso negativo). Com `SequenceMatcher`, a razão é **$0.9495$** (exatamente `0,949` como grafado no documento), superando com margem o limiar de $0.75$.
+  - Não introduz dependências externas (biblioteca padrão).
+
+#### Achado 2: Vazamento de repetição via `leftover` não inspecionado
+- **Status:** **RESOLVIDO**
+- **Evidência:**
+  - O pseudocódigo da v2 ([L127–L136](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/fix-generation-repetition-loop-v2.md#L127-L136)) protegeu a ponta residual:
+    ```python
+    if not loop_detected:
+        leftover = buffer.strip()
+        if leftover and not _is_near_duplicate_sentence(leftover, emitted_normalized):
+            emit({ ... "text": leftover ... })
+    emit({"event": "done", "reqId": req_id, "turnId": turn_id})
+    ```
+  - Se um loop encerra o streaming, `leftover` é descartado. Se a geração finaliza sem pontuação terminal (ex.: corte por `MAX_TURN_TOKENS`), `leftover` só é emitido após checagem contra `emitted_normalized`.
+
+#### Achado 3: Imprecisão factual na contagem de palavras do caso limite
+- **Status:** **PARCIAL**
+- **Evidência:**
+  - **O que foi corrigido:** A nota explicativa (L15) corrigiu o fato de `"Isso é senso comum."` ter 4 palavras (`isso`, `é`, `senso`, `comum`), e a linha 147 reclassificou-o sem a alegação errônea de ter 3 palavras.
+  - **A ressalva remanescente (inconsistência no plano de teste):** Na linha 149, a v2 descreve:
+    > `- **Negativo (frases curtas demais, não deve disparar mesmo sendo idênticas)**: "Deus é amor." vs "Deus é amor." → False (exatamente 3 palavras é o limite mínimo aceito, mas o teste real de corte de curtas usa 1-2 palavras, ex. "Entendo." vs "Entendo." → False, 1 palavra).`
+  - Sob o código definido nas linhas 55–57 (`if len(candidate_norm.split()) < 3: return False`), `"Deus é amor."` possui exatamente **3 palavras**. Portanto:
+    1. A frase **não** cai na cláusula de escape (`3 < 3` é `False`);
+    2. Ela entra na verificação de similaridade contra `"deus é amor"`;
+    3. `difflib.SequenceMatcher` retorna `1.0 >= 0.75`, resultando em **`True`** (e não `False`).
+  - `"Deus é amor."` vs `"Deus é amor."` é o caso limite de 3 palavras que **deve retornar `True`** (recorrência detectada). Para o teste negativo de frases curtas, o plano deveria listar exclusivamente frases com 1 ou 2 palavras (como a própria observação entre parênteses aponta: `"Entendo."` ou `"Sem dúvida."`). Se um teste unitário assinalar `assert _is_near_duplicate_sentence("Deus é amor.", ["deus é amor"]) == False`, o teste **falhará**.
+
+---
+
+### 3. Confronto do Pseudocódigo contra `scripts/worker/worker.py` Real
+
+O pseudocódigo foi comparado linha a linha contra [`scripts/worker/worker.py:307–366`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L307-L366):
+- **Alinhamento estrutural:** As assinaturas, variáveis de iteração (`buffer`, `sentence_index`, `token_count`), chamada a `find_sentence_boundary`, verificação de `handle.cancel_event.is_set()` e eventos NDJSON (`"sentence"`, `"done"`) coincidem 100%.
+- **Fluxo de interrupção:** O encadeamento `loop_detected = True; break` no loop interno seguido de `if loop_detected: break` no loop externo interrompe perfeitamente a iteração do gerador do MLX.
+- **Funções auxiliares puras:** `_normalize_for_dedup` e `_is_near_duplicate_sentence` não tocam estado compartilhado nem requerem o modelo carregado em memória, viabilizando testes unitários rápidos e isolados em `test_repetition_detector.py`.
+
+---
+
+### Veredito
+
+# **APTO COM RESSALVAS**
+
+**Justificativa e Ressalva para a Implementação:**
+O design de produção em [`scripts/worker/worker.py`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py) e a métrica adotada (`difflib.SequenceMatcher`) são sólidos, robustos e resolvem os gargalos técnicos que bloquearam a v1.
+A ressalva restringe-se exclusivamente à especificação do teste unitário na **linha 149**: durante a implementação de `scripts/worker/test_repetition_detector.py`, deve-se separar:
+1. **Positivo no piso de 3 palavras:** `"Deus é amor."` vs `"Deus é amor."` $\rightarrow$ `True`.
+2. **Negativo no corte de curtas (< 3 palavras):** `"Entendo."` vs `"Entendo."` $\rightarrow$ `False` (1 palavra) e `"Sem dúvida."` vs `"Sem dúvida."` $\rightarrow$ `False` (2 palavras).

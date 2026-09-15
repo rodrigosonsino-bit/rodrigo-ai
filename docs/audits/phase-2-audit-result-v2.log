@@ -1,0 +1,285 @@
+# Relatório de Reauditoria Adversarial Independente — Fase 2 v2 (Rodrigo AI)
+
+**Documento Auditado:** [`docs/phase-2-v2.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md)  
+**Hash SHA-256:** `a3fb4cbc22d6123e463c58b69fa5818a457f8eb9fa2f759bb35bc1d8f68c7e5c`  
+**Data:** 2026-09-11  
+**Ambiente de Execução:** MacBook Air Apple M5, 16 GB de memória unificada, macOS Sequoia (Darwin aarch64)  
+**Auditoria Anterior de Referência:** [`docs/audits/phase-2-audit-result-v1.log`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-2-audit-result-v1.log) (Veredito: **REJEITADO** por 3 Altas, 3 Médias e 4 Baixas)  
+**Registro Completo desta Reauditoria:** [`docs/audits/phase-2-audit-result-v2.log`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-2-audit-result-v2.log) e [Artifact](file:///Users/rodrigosonsino/.gemini/antigravity-cli/brain/0250a594-b4b3-42cb-8a79-fb9afa8e0541/phase_2_v2_audit_report.md)
+
+---
+
+## 1. Verificação Específica das 10 Correções da v1
+
+### 1. Achado 1 (Alto na v1) — Cancelamento em `stream_generate` no worker sem reinício
+- **Avaliação da API do `mlx-lm`:** A função [`stream_generate`](https://github.com/ml-explore/mlx-lm) do pacote `mlx_lm.generate` retorna um gerador Python nativo (`Generator[GenerationResponse, None, None]`). Embora a função em si não receba um argumento de cancelamento, quem itera sobre o gerador (`for response in stream_generate(...)`) tem controle total sobre a interrupção: basta checar `if cancel_event.is_set(): break`. Ao disparar o `break`, o gerador encerra via `GeneratorExit`, limpando o context manager `wired_limit(model, [stream])` sem corromper o runtime.
+- **Implementabilidade:** O worker Python deve ler o `stdin` em thread secundário ou utilizar I/O não bloqueante no pipe de controle para acionar `cancel_event.set()`, conforme já previsto textualmente em [`docs/phase-2-v2.md:20`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L19-L23). No Whisper (STT), descartar o resultado sem emitir ao cliente ao final do segmento de <1s é adequado.
+- **Conclusão:** **Achado 1 da v1 plenamente resolvido.** Não há promessa fictícia da biblioteca: o cancelamento opera cooperativamente no loop consumidor.
+
+---
+
+### 2. Achado 2 (Alto na v1) — Preempção síncrona de sessão vs. Riscos de concorrência e subprocessos
+- **Resolução do travamento:** A eliminação do bloqueio de 10 minutos após `F5` foi efetivamente resolvida pelo cancelamento e substituição imediata da sessão anterior.
+- **Novos riscos introduzidos:**
+  1. *Subprocessos ativos do TTS:* O TTS (`say` e `ffmpeg`) é gerenciado pelo Node.js. Se a preempção apagar a pasta temporária de áudio enquanto um subprocesso `say` ou `ffmpeg` ainda estiver escrevendo, haverá erros de I/O (`ENOENT`/`EBUSY`) e processos órfãos. A preempção no Node.js precisa abortar/matar subprocessos ativos da sessão anterior antes de remover os diretórios.
+  2. *Concorrência entre requisições:* Requisições simultâneas de `POST /api/voice/session` (duplo clique ou duas abas quase síncronas) exigem serialização por mutex assíncrono no Node.js.
+  3. *Encerramento do SSE anterior:* O servidor deve emitir um evento explícito (ex.: `event: session_preempted`) antes de fechar a conexão SSE da sessão antiga, evitando que o `EventSource` nativo do navegador tente reconexões automáticas indefinidas.
+- **Conclusão:** O bloqueio original de 10min sumiu, mas surgiram ajustes de concorrência e processo (ver **Achado v2-1 — Gravidade Média**).
+
+---
+
+### 3. Achado 3 (Alto na v1) — Delimitador `--` no `say` e cobertura de outros subprocessos
+- **Validação no `say`:** Validado diretamente no macOS (`say -v Luciana -o ... -- "-v texto"`, `-- "--"`, `-- ""`). O delimitador `--` impede categoricamente a colisão com flags e elimina o travamento de espera por `stdin`.
+- **Lacuna no `ffmpeg` ([`docs/phase-2-v2.md:52`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L52)):** O plano prescreve `ffmpeg -i <tmp>.aiff <tmp>.wav`. Se o arquivo de destino já existir, o `ffmpeg` solicita confirmação interativa no stdin (`File already exists. Overwrite? [y/N]`) e falha imediatamente com código 183 ou trava em espera de input. Deve incluir obrigatoriamente `['-y', '-nostdin']`.
+- **Conclusão:** O Achado 3 está resolvido para o `say`, necessitando de flags defensivas no `ffmpeg` (ver **Achado v2-7 — Gravidade Baixa**).
+
+---
+
+### 4. Achado 4 (Médio na v1) — Protocolo REST + SSE e rota faltante de áudio
+- **Omissão Arquitetural Crítica:** O plano lista os endpoints REST (`POST /api/voice/session`, `POST /api/voice/session/audio`, `POST /api/voice/session/cancel`, `POST /api/voice/session/end`) e a conexão SSE (`GET /api/voice/session/events`), estabelecendo que o evento SSE `audio_ready` emitirá o ID/URL de cada chunk. No entanto, **não há nenhum endpoint REST definido para servir/baixar o arquivo de áudio** (ex.: `GET /api/voice/session/audio/:audioId`)! No roteador atual ([`src/backend/server.ts:59-73`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/server.ts#L59-L73)), qualquer rota não tratada responde 404 JSON, e arquivos estáticos são servidos apenas de `clientDistDir`. Sem esse endpoint, o navegador recebe a notificação SSE mas não consegue tocar nada.
+- **Autenticação no SSE:** A API `EventSource` padrão não aceita headers customizados; o token deve ser aceito via query string (`?token=...`).
+- **Conclusão:** **Achado v2-2 — Gravidade Média.** A rota de entrega de áudio deve ser adicionada à especificação.
+
+---
+
+### 5. Achado 5 (Médio na v1) — Cache Metal do MLX e limite de 1 GiB
+- **API do MLX:** As funções `mx.metal.set_cache_limit` e `mx.metal.clear_cache` estão **oficialmente depreciadas** nas versões recentes do MLX (geram alertas em `stderr`). A API moderna localiza-se na raiz: `mx.set_cache_limit(limit_bytes: int)` e `mx.clear_cache()`.
+- **Dimensionamento (1 GiB):** O cache do MLX governa apenas o pool de buffers ociosos para reuso pelo alocador Metal. Não restringe os pesos nem o KV cache ativo. 1 GiB (`1024**3` bytes) é ideal para evitar realocações durante o turno sem acumular memória ociosa, e `mx.clear_cache()` limpa esses buffers ao final de cada turno.
+- **Conclusão:** 1 GiB é adequado; deve-se apenas atualizar para a API moderna não-depreciada (ver **Achado v2-8 — Gravidade Baixa**).
+
+---
+
+### 6. Achado 6 (Médio na v1) — Streaming de áudio por frase e particionamento ingênuo de pontuação
+- **Quebra em casos reais:** A regra literal da v2 ([`docs/phase-2-v2.md:57`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L57)) de particionar no primeiro `.`, `?` ou `!` **quebra severamente em PT-BR**:
+  - Decimais/Versões: `"3.5"` quebra em `"3."` (fala "três ponto") e `"5"` (fala "cinco").
+  - Abreviações: `"Sr."`, `"Dr."`, `"ex."`, `"etc."` quebram no meio da oração (`"Olá Sr."` -> `" Rodrigo"`).
+  - Reticências: `"..."` quebra no primeiro ponto e gera chunks vazios subsequentes.
+  - Marcadores numéricos: `"1. Item"` quebra em `"1."` e sintetiza `"Um ponto"`.
+- **Conclusão:** **Achado v2-3 — Gravidade Média.** Exige regex de lookahead (pontuação seguida de espaço/EOF, sem precedência de dígitos ou abreviações conhecidas, e tamanho mínimo de chunk ≥15 chars).
+
+---
+
+### 7. Achado 7 (Baixo na v1) — TTS via `IVoiceProvider` e anomalia no Kokoro
+- **Interface [`IVoiceProvider`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/extensions/voice.ts#L5-L9):** A interface real declara apenas `id`, `name` e `isAvailable()`. Não há método `synthesize(...)`. A interface precisa ser estendida com o contrato de síntese.
+- **Anomalia no Kokoro ([`docs/phase-2-v2.md:53`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L53)):** O arquivo existente `~/.venvs/tts-say/server/tts_say_server.py` é um servidor MCP stdio cuja função `speak_natural` executa diretamente `afplay` e apaga o arquivo temporário. Ou seja: **ele toca o som nos alto-falantes do Mac e destrói o áudio**, violando frontalmente a regra de ouro ([`docs/phase-2-v2.md:48`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L48): *"Nenhum áudio toca nos alto-falantes do Mac pelo backend: TTS grava arquivo, navegador reproduz"*).
+- **Conclusão:** **Achado v2-4 — Gravidade Média.** `KokoroVoiceProvider` não pode chamar `tts_say_server.py`; deve invocar um script Python dedicado gerando apenas o arquivo WAV sem `afplay`.
+
+---
+
+### 8. Achado 8 (Baixo na v1) — Piso de energia do VAD de 400ms vs. Perda de palavras curtas
+- **Impacto fonético:** No português brasileiro, palavras curtas afirmativas ou saudações faladas com naturalidade ("Sim", "Não", "Oi", "Bem") duram habitualmente entre **200ms e 350ms**.
+- **Problema:** Com um piso rígido de 400ms contínuos de voz detectada ([`docs/phase-2-v2.md:43`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L43)), respostas monossilábicas afirmativas ou negativas serão descartadas localmente como ruído espúrio.
+- **Conclusão:** **Achado v2-5 — Gravidade Média.** O piso de energia deve ser calibrado para **200ms a 250ms**.
+
+---
+
+### 9. Achado 9 (Baixo na v1) — Histerese de 250ms + parada de áudio em até 300ms
+- **Impacto temporal:** 250ms de histerese para validar fala sustentada somados a até 300ms concedidos para parar a reprodução ([`docs/phase-2-v2.md:47`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L47)) resultam em até **550ms** de atraso total até o silenciamento.
+- **Ajuste:** Na Web Audio API, a pausa/mutação de ganho no navegador é quase instantânea (<10ms). A especificação deve exigir parada imediata da reprodução (≤50ms após a confirmação do VAD), mantendo a latência ponta a ponta total do barge-in em ≤300ms a partir do início da fala do usuário.
+- **Conclusão:** **Achado v2-9 — Gravidade Baixa.** Ajuste de calibração para parada imediata (≤50ms pós-confirmação).
+
+---
+
+### 10. Achado 10 (Baixo na v1) — Shutdown integrado e conflito de timeout em `scripts/dev.mjs`
+- **Conflito no script de desenvolvimento:** Em [`src/backend/index.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/index.ts), o plano estipula aguardar até 3s para o encerramento limpo do worker Python antes de emitir `SIGKILL`. No entanto, em [`scripts/dev.mjs:117-124`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/dev.mjs#L117-L124), o processo coordenador aguarda apenas **400ms** antes de enviar `SIGKILL` forçado para os subprocessos. Em `npm run dev`, o backend será terminado abruptamente aos 400ms, deixando workers Python órfãos e arquivos temporários presos.
+- **Conclusão:** **Achado v2-6 — Gravidade Média.** O timeout do `scripts/dev.mjs` deve ser ampliado para 3500ms–4000ms.
+
+---
+
+## 2. Novos Achados da Auditoria da v2
+
+### Achado v2-1: Concorrência na preempção de sessão e vazamento de subprocessos TTS
+- **Descrição:** A preempção de sessão não finaliza os subprocessos filhos (`say`/`ffmpeg`) da sessão anterior antes de remover pastas de arquivos temporários. Se o usuário recarregar a página durante a síntese de uma frase, a exclusão da pasta provocará erro de I/O nos processos em andamento, mantendo-os órfãos. Além disso, requisições concorrentes de abertura de sessão podem correr no Node.js.
+- **Evidência:** [`docs/phase-2-v2.md:32`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L32).
+- **Gravidade:** **Média**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Serializar as requisições de criação de sessão por meio de trava assíncrona (mutex) e matar (`kill('SIGTERM')`) subprocessos ativos de TTS antes de invocar a remoção recursiva do diretório temporário.
+
+---
+
+### Achado v2-2: Ausência de endpoint REST para download dos chunks de áudio gerados
+- **Descrição:** O evento SSE `audio_ready` informa a URL/ID do chunk de áudio gerado, mas o contrato REST não inclui o endpoint `GET` correspondente para servir os arquivos WAV sintetizados ao navegador.
+- **Evidência:** [`docs/phase-2-v2.md:30`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L30) vs [`src/backend/server.ts:59-73`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/server.ts#L59-L73).
+- **Gravidade:** **Média**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Incluir explicitamente na especificação o endpoint `GET /api/voice/session/audio/:audioId` (com checagem do token de sessão e entrega de `Content-Type: audio/wav`), e suportar o token via query parameter na conexão SSE.
+
+---
+
+### Achado v2-3: Heurística ingênua de particionamento de sentenças fragmenta números e abreviações
+- **Descrição:** O particionamento incondicional no primeiro `.`, `?` ou `!` mutila expressões como `"3.5"`, `"Sr."`, `"..."` e `"1."`, disparando áudio fragmentado e prosódia incorreta.
+- **Evidência:** [`docs/phase-2-v2.md:57`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L57).
+- **Gravidade:** **Média**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Adicionar regras de tokenização de sentença com lookahead: pontuação terminativa seguida de espaço/quebra de linha, sem precedência de dígitos (`\d\.\d`) ou abreviações em PT-BR, com piso mínimo de caracteres (ex.: ≥15).
+
+---
+
+### Achado v2-4: Incompatibilidade do `KokoroVoiceProvider` com reprodução via navegador
+- **Descrição:** O arquivo `~/.venvs/tts-say/server/tts_say_server.py` é um servidor MCP stdio que executa `afplay` e apaga o arquivo temporário, tocando áudio nos alto-falantes do Mac e violando a diretriz de áudio apenas no navegador.
+- **Evidência:** [`docs/phase-2-v2.md:53`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L53) vs [`docs/phase-2-v2.md:48`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L48).
+- **Gravidade:** **Média**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Especificar que `KokoroVoiceProvider` invocará um script Python dedicado que apenas salve o WAV no diretório temporário sem acionar `afplay`.
+
+---
+
+### Achado v2-5: Piso mínimo de 400ms no VAD descarta respostas monossilábicas em PT-BR
+- **Descrição:** Palavras comuns como "Sim", "Não" e "Oi" duram habitualmente entre 200ms e 350ms. Um piso contínuo de 400ms descartará respostas válidas.
+- **Evidência:** [`docs/phase-2-v2.md:43`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L43).
+- **Gravidade:** **Média**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Calibrar o piso contínuo do VAD para 200ms–250ms.
+
+---
+
+### Achado v2-6: Timeout de encerramento em `scripts/dev.mjs` aborta o shutdown do backend
+- **Descrição:** O timer de 400ms em `scripts/dev.mjs` envia `SIGKILL` antes que o backend possa concluir a janela de 3s para saída limpa do worker Python.
+- **Evidência:** [`scripts/dev.mjs:117-124`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/dev.mjs#L117-L124) vs [`docs/phase-2-v2.md:26`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L26).
+- **Gravidade:** **Média**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Aumentar o `forceKillTimer` de `scripts/dev.mjs` para 3500ms.
+
+---
+
+### Achado v2-7: Ausência das flags `-y` e `-nostdin` no comando `ffmpeg`
+- **Descrição:** O comando `ffmpeg -i <tmp>.aiff <tmp>.wav` trava ou falha caso o arquivo de destino já exista.
+- **Evidência:** [`docs/phase-2-v2.md:52`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L52).
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Utilizar array de argumentos com `['-y', '-nostdin']`.
+
+---
+
+### Achado v2-8: Utilização de métodos depreciados da API Metal do MLX
+- **Descrição:** `mx.metal.set_cache_limit` e `mx.metal.clear_cache` emitem avisos de depreciação na `stderr`.
+- **Evidência:** [`docs/phase-2-v2.md:15`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L15).
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Usar `mx.set_cache_limit(1024 * 1024 * 1024)` e `mx.clear_cache()`.
+
+---
+
+### Achado v2-9: Janela excessiva de reação no barge-in pós-detecção
+- **Descrição:** 250ms de histerese somados a até 300ms de parada do áudio geram até 550ms de atraso.
+- **Evidência:** [`docs/phase-2-v2.md:47`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L47).
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Cessar a reprodução na Web Audio API em ≤50ms após a confirmação da histerese.
+
+---
+
+### Achado v2-10: `IVoiceProvider` não declara formalmente a assinatura do método de síntese
+- **Descrição:** [`src/shared/extensions/voice.ts:5-9`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/extensions/voice.ts#L5-L9) não possui método `synthesize(...)`.
+- **Evidência:** [`src/shared/extensions/voice.ts:5-9`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/extensions/voice.ts#L5-L9) vs [`docs/phase-2-v2.md:51`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-2-v2.md#L51).
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Estender a interface para incluir `synthesize(text: string, outputPath: string): Promise<void>`.
+
+---
+
+## 3. Avaliação de Escopo, Regressões e Honestidade
+
+- **Regressões e remoções silenciosas:** Comparado texto a texto contra a v1, nenhuma garantia de aceite B1–B8 foi reduzida ou descartada.
+- **Escopo:** O plano mantém-se rigidamente na Fase 2 v0.1.0 (sem invasão da Fase 3).
+- **Honestidade:** Permanece explícito que os modelos são candidatos e a aceitação final de inteligibilidade dependerá da validação humana.
+
+---
+
+## 4. Veredito Objetivo
+
+# **APROVADO COM AJUSTES MENORES**
+
+### Justificativa do Veredito:
+Os **3 achados de gravidade ALTA da rodada anterior foram plenamente superados nos seus princípios arquiteturais**:
+1. O cancelamento cooperativo no `stream_generate` resolve o barge-in sem reiniciar o worker nem impor o aquecimento de 120s.
+2. A preempção síncrona de sessão encerra o risco do bloqueio de 10 minutos após `F5`.
+3. O delimitador `--` blinda o `/usr/bin/say` contra injeção de opções e travamento.
+
+**Não há nenhum achado de Gravidade Alta pendente**. Os 10 achados identificados nesta reauditoria (6 Médios e 4 Baixos) representam ajustes operacionais, correções de rotas e calibrações de parâmetros que devem ser incorporados diretamente durante a fase de implementação, sem a necessidade de um novo ciclo de reprovação formal do plano:
+
+- [ ] **Ajuste 1 (Endpoint de Áudio):** Expor a rota `GET /api/voice/session/audio/:audioId` com validação de token e header `audio/wav`.
+- [ ] **Ajuste 2 (Preempção Segura):** Serializar requisições de sessão com mutex assíncrono e enviar `kill` aos subprocessos `say`/`ffmpeg` em andamento antes de apagar arquivos temporários.
+- [ ] **Ajuste 3 (Particionador de Sentenças):** Refinar regex para ignorar decimais (`3.5`), reticências (`...`) e abreviações (`Sr.`), com tamanho mínimo por chunk.
+- [ ] **Ajuste 4 (Kokoro sem `afplay`):** Fazer o `KokoroVoiceProvider` gerar o arquivo WAV em disco via script Python dedicado sem disparar `afplay`.
+- [ ] **Ajuste 5 (Piso VAD):** Ajustar o piso de energia contínua para 200ms–250ms para preservar palavras curtas ("Sim", "Não", "Oi").
+- [ ] **Ajuste 6 (Timeout Dev):** Aumentar o `forceKillTimer` de [`scripts/dev.mjs`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/dev.mjs) para 3500ms.
+- [ ] **Ajuste 7 (Flags ffmpeg):** Incluir `['-y', '-nostdin']` nas conversões de áudio.
+- [ ] **Ajuste 8 (API MLX):** Chamar `mx.set_cache_limit(1024 * 1024 * 1024)` e `mx.clear_cache()` no módulo raiz.
+- [ ] **Ajuste 9 (Latência de Parada):** Garantir corte de reprodução em ≤50ms após confirmação do VAD.
+- [ ] **Ajuste 10 (Interface `IVoiceProvider`):** Declarar formalmente o método `synthesize(...)` em [`src/shared/extensions/voice.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/extensions/voice.ts).
+�ão forçada.
+
+---
+
+### Achado v2-7: Ausência das flags `-y` e `-nostdin` no comando `ffmpeg`
+- **Descrição:** O comando `ffmpeg -i <tmp>.aiff <tmp>.wav` sem a flag `-y` falha com código de erro ou trava em espera de `stdin` se o arquivo de destino já existir.
+- **Evidência:** `docs/phase-2-v2.md:52` (*"ffmpeg -i <tmp>.aiff <tmp>.wav"*).
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Especificar explicitamente o array de argumentos seguro: `['ffmpeg', '-y', '-nostdin', '-i', aiffPath, wavPath]`.
+
+---
+
+### Achado v2-8: Utilização de métodos depreciados da API Metal do MLX
+- **Descrição:** `mx.metal.set_cache_limit` e `mx.metal.clear_cache` foram depreciados nas versões recentes do MLX e emitem warnings no `stderr`. A API moderna expõe essas funções no módulo raiz (`mlx.core`).
+- **Evidência:** `docs/phase-2-v2.md:15` (*"mx.metal.set_cache_limit(...) ... mx.metal.clear_cache()"*) versus `python/src/metal.cpp:59-75`.
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Utilizar `mx.set_cache_limit(limit_bytes: int)` e `mx.clear_cache()` passando o valor em bytes (`1024 * 1024 * 1024`).
+
+---
+
+### Achado v2-9: Janela excessiva de reação no barge-in pós-detecção
+- **Descrição:** Exigir 250ms de histerese e tolerar até 300ms adicionais para cessar o áudio gera um atraso total de até 550ms. Na Web Audio API, o corte do áudio após confirmação deve ser imediato (≤50ms).
+- **Evidência:** `docs/phase-2-v2.md:47` (*"cessar áudio até 300ms após detecção confirmada de barge-in real"*).
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Definir que o corte de áudio na Web Audio API ocorra em ≤50ms após a confirmação dos 250ms de fala sustentada, mantendo o tempo total de barge-in em ≤300ms do início da voz.
+
+---
+
+### Achado v2-10: `IVoiceProvider` não declara formalmente a assinatura do método de síntese
+- **Descrição:** `src/shared/extensions/voice.ts` declara apenas `id`, `name` e `isAvailable()`. O plano deve prescrever a extensão formal da interface com o contrato de síntese.
+- **Evidência:** `src/shared/extensions/voice.ts:5-9` versus `docs/phase-2-v2.md:51`.
+- **Gravidade:** **Baixa**
+- **Confiança:** **Alta**
+- **Ação recomendada:** Estender a interface `IVoiceProvider` em `src/shared/extensions/voice.ts` para incluir `synthesize(text: string, outputPath: string): Promise<void>`.
+
+---
+
+## 3. Avaliação de Escopo, Regressões e Honestidade
+
+1. **Regressões e Alterações Ocultas:**
+   - Comparamos `docs/phase-2-v2.md` contra `docs/phase-2-v1.md` linha por linha.
+   - Não houve remoção silenciosa de garantias da v1. Todos os critérios B1–B8 foram preservados e fortalecidos.
+2. **Escopo da Fase 2:**
+   - Permanece rigorosamente mantido. Não há antecipação de Fase 3 (sem orquestração de múltiplos agentes, sem ferramentas de sistema externas, sem banco de dados persistente e sem chamadas a APIs pagas).
+3. **Honestidade Técnica:**
+   - A v2 mantém o compromisso de avaliação empírica real (benchmarks e escuta pelo usuário), sem antecipar garantias de naturalidade de voz antes de medições práticas.
+
+---
+
+## 4. Veredito Objetivo
+
+# **APROVADO COM AJUSTES MENORES**
+
+### Justificativa:
+Todos os **3 achados de gravidade ALTA da v1 foram satisfatoriamente solucionados no desenho arquitetural fundamental**:
+1. O cancelamento cooperativo no `stream_generate` viabiliza o barge-in sem reiniciar o worker Python nem impor aquecimento de 120s a cada interrupção.
+2. A política de preempção de sessão elimina o bloqueio de 10 minutos após recarregamento da página (`F5`).
+3. O uso do delimitador `--` no `/usr/bin/say` neutraliza o risco de injeção de opções e travamento em `stdin`.
+
+Não restou nenhum achado de gravidade Alta pendente. Os 10 novos apontamentos levantados nesta rodada (6 Médios e 4 Baixos) constituem **ajustes pontuais e parâmetros de implementação**, não justificando uma nova rejeição integral do plano.
+
+A implementação pode prosseguir imediatamente, desde que incorpore as seguintes correções mandatórias durante o desenvolvimento:
+- [ ] **Ajuste 1 (Endpoint de Áudio):** Expor `GET /api/voice/session/audio/:audioId` com validação de token para envio dos chunks WAV ao frontend.
+- [ ] **Ajuste 2 (Preempção Segura):** Serializar requisições de sessão com mutex assíncrono e encerrar subprocessos `say`/`ffmpeg` em andamento antes de excluir a pasta temporária.
+- [ ] **Ajuste 3 (Particionador de Sentenças):** Refinar regex de divisão para ignorar pontos em decimais (`3.5`), reticências (`...`) e abreviações (`Sr.`), com comprimento mínimo por frase.
+- [ ] **Ajuste 4 (Kokoro sem afplay):** Adaptar o script do Kokoro para gerar o WAV em disco sem executar `afplay` nos alto-falantes locais.
+- [ ] **Ajuste 5 (Piso VAD):** Calibrar o piso contínuo do VAD para 200ms–250ms a fim de não descartar palavras curtas ("Sim", "Não", "Oi").
+- [ ] **Ajuste 6 (Timeout Dev):** Ajustar o timer de force-kill em `scripts/dev.mjs` para 3500ms para permitir o encerramento gracioso do backend.
+- [ ] **Ajuste 7 (ffmpeg flags):** Utilizar `['-y', '-nostdin']` na conversão AIFF -> WAV.
+- [ ] **Ajuste 8 (API MLX):** Usar `mx.set_cache_limit(bytes)` e `mx.clear_cache()`.
+- [ ] **Ajuste 9 (Latência de Parada):** Cortar o áudio no Web Audio em ≤50ms após validação da histerese.
+- [ ] **Ajuste 10 (Interface IVoiceProvider):** Adicionar método de síntese com tipagem estrita em `src/shared/extensions/voice.ts`.

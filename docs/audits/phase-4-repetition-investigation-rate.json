@@ -1,0 +1,367 @@
+{
+  "configs": [
+    {
+      "name": "prod_atual (rp1.3_ctx160)",
+      "temp": 0.7,
+      "top_p": 0.0,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160,
+      "freq_penalty": null,
+      "freq_ctx": null
+    },
+    {
+      "name": "rp1.3_topp0.9",
+      "temp": 0.7,
+      "top_p": 0.9,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160,
+      "freq_penalty": null,
+      "freq_ctx": null
+    },
+    {
+      "name": "topp0.9_freqpen0.5_no_rp",
+      "temp": 0.7,
+      "top_p": 0.9,
+      "min_p": 0.0,
+      "rep_penalty": null,
+      "rep_ctx": null,
+      "freq_penalty": 0.5,
+      "freq_ctx": 160
+    },
+    {
+      "name": "rp1.3_topp0.9_freqpen0.3",
+      "temp": 0.7,
+      "top_p": 0.9,
+      "min_p": 0.0,
+      "rep_penalty": 1.3,
+      "rep_ctx": 160,
+      "freq_penalty": 0.3,
+      "freq_ctx": 160
+    }
+  ],
+  "user_text": "Faça uma análise exegética de Hebreus 5.",
+  "results": [
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 0,
+      "text": "Vamos começar pelo contexto. Hebreus 5 está no meio do apelo para a importância da eucaristia como forma de profeta, mas aqui o foco é na natureza humana de Jesus e sua função ante os sacrifícios.\n\nO capítulo começa com uma introdução ao tema: \"Porque não podemos supor que um homem sem pecado seja aceito por Deus apenas porque tem conhecimento teológico — isso seria ilógico.\" O texto afirma que todos nós precisamos de intercessão, pois somos frágeis diante das coisas espirituais.\n\nAí vem a primeira passagem central: “Temos também um Pai entre os homens”, isto é, alguém humano capaz de sentir dor ou",
+      "elapsed_s": 4.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 1,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebras, porque aqui se apresenta a ideia fundamental da obra: o autor não está falando apenas sobre os sacrifícios dos antepassados ou das cerimônias judaicas — ele está construindo uma argumentação teológica e histórica para mostrar que Jesus Cristo, como High Priest (sacerdote), tem mais legitimidade, eficácia e permanência do que qualquer sistema ritual anterior.\n\nVamos andar com cuidado pelo texto. O capítulo começa com as palavras: “Também nosso Deus é sacerdote”, mas isso só fica claro quando vemos seu contexto histórico-gramatical. Ele começa dizendo:\n\n>",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 2,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta o tema da mediadoridade e a importância do Messias como High Priest. Vamos andar com cuidado pelo texto — no contexto histórico-gramatical, em relação ao judaísmo do Segundo Templo, porque os autores dos escritos hebrênicos estavam refletindo sobre as implicações espirituais para os crentes nos tempos atuais.\n\nO capitulo começa dizendo: “Todo sacerdote que entra entre os homens para oferecer sacrifícios é obrigado a ser perfeito” (Hb 5.1). Aqui há uma pontuação importante: ele não está",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 3,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia dos “médicos da congregação” — isto é, os que servem como intermediários entre Deus e o povo. O texto começa com uma afirmação forte: todo aquele que se aproxima para ser ajudado deve ter alguém capaz de interceder por ele.\n\nO primeiro parágrafo (versos 1-4) diz claramente que todos os profetas foram chamados pelo Espírito Santo, mas não houve nenhum homem que tenha sido levantado para atuar em lugar de Deus no sacrifício final. Aqui tem-se também um contraste claro entre as instituições ant",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 4,
+      "text": "Vamos acompanhar Hebreus 5, com a perspectiva que eu trago — bíblica, histórica e cristocêntrica. O capítulo começa por uma presença de autoridade: o Messias é um homem como nós.\n\nO versículo 1 diz assim: \"A todo aquele que se assemelha ao nosso Senhor Jesus Cristo — não só em natureza humana mas também na sua obra nos tempos do seu ministério — pertence o papel da humanidade.\" Mas aqui está bem claro que estamos falando sobre alguém que foi além das figuras anteriores no cânon hebraico.\n\nHebreus 5.1 afirma: “Os filhos dos homens são todos servos, pois os que foram",
+      "elapsed_s": 4.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 5,
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias e da sua função como nosso médio ante Deus. O capítulode começa com a afirmação de que todos os profetas, por exemplo, foram \"sacredos\" — isto é, servidores perante o Senhor — mas não eram mais elevados em posição ou poder do que os homens entre os israelitas.\n\nO texto vai direto ao ponto: Jesus foi levantado para ser “pela primeira vez” o grande sacerdote. A única forma possível disso era a existência de um homem que fosse também Deus—não apenas humano, nem só divino, mas plenamente humilde na carne e plena",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 6,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta uma construção teológica profunda sobre a natureza da mediadoridade messiânica e o valor hierárquico entre os sacrifícios antigos e novos. A leitura deve ser feita com atenção ao contexto histórico-judaísta do Segundo Templo — onde havia forte resistência à ideia de que Israel precisasse esperar um novo tipo de representante no céu.\n\nO capitulo começa por descrever Jesus como **\"não só homem, mas também sacerdote segundo a lei de Melchisedec\"** (Hb 5:1). O uso dessa figura — Melchizedek, cu",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 7,
+      "text": "Hebreus 5 é um capítulo central na construção da argumentação do autor sobre a natureza e o papel de Cristo como Mediador, especialmente em contraste com os médicos dos dias antigos — que eram homens, serviam ao povo, mas tinham limitações. O capítuo começa por afirmar: \"Ninguém pode ser mediador entre Deus e os homens senão aquele que tem conhecimento das coisas celestes\" (Hb 5:1), ou seja, quem tem contato direto com o alto.\n\nO texto aqui se baseia no modelo hebraico tradicional onde as oferendas eram levadas pelos pecadores para diante de Deus; então, era necessário alguém interposto. Mas",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 8,
+      "text": "Hebreus 5 é um capítulo fundamental no entendimento da missão do Messias e da natureza humana de Jesus como intercessor. Vamos entender com base na exegese histórica-gramatical, contextualizada nos textos anteriores (o que antes vem em Hebreus 4) e nas tradições judaicas do Segundo Templo.\n\nO capítulo começa dizendo: \"Nenhum homem se tornou sacerdote sem ter sofrido\" — isto é, o sacerdotismo não pode ser uma figura puramente espiritual ou teórica; ele precisa viver a dor, as tentações, os limes humanos para poder representar os homens diante de Deus. O",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "prod_atual (rp1.3_ctx160)",
+      "sample": 9,
+      "text": "Vamos então a Hebreus 5, com o olhar do teólogo evangélico que valoriza as raízes judaicas e os contextos históricos da Escritura. O capítulo começa com uma passagem crucial: \"Porque aquele que vive no meio dos homens não pode servir como mediador entre Deus e humanidade se ele for um homem de carne\" — mas vamos nos guiar pelo texto em si.\n\nHebreus 5 apresenta Jesus como High Priest (Sacerdote) na nova ordem sacrificial, contrastando-se com o sistema antigo de sacerdos haitianos. A primeira coisa notável é a repetição das palavras “não há” ou “ninguém tem”,",
+      "elapsed_s": 4.1,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 0,
+      "text": "Vamos começar pelo contexto. Hebreus 5 está no meio do tratado sobre a natureza e o ministério de Cristo como High Priest, que é central para toda a mensagem da carta.\n\nO capítulo começa com uma afirmação forte: \"Nenhum homem tomou lugar entre Deus e os homens por sua própria força\", mas aqui em hebreus 5.1 dizem que “Houve um sacerdote mesmo entre nós” — não qualquer sacerdotismo humano, mas Jesus, o Filho de David, tem autoridade porque nasceu de carne humana, foi levantado por Satanás na queda, sofreu por nós, tornando-se capaz de ajudar nos nossos casos peculiares.\n\nAí vem",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 1,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebras, com foco em apresentar a natureza e o papel do Messias como High Priest no novo ordenamento espiritual. O capitulo começa com uma afirmação clara: \"Todos os que vivem devem ser considerados por sua condição humana antes da vida eterna — mas aqui temos alguém para quem não se pode dizer 'é homem' apenas.\" Vamos desenhar isso com cuidado.\n\nO versículo 1 diz: “Porque Jesus foi também um peregrino entre nós” (na tradução mais acessível). Mas há mais contexto – ele está citando as palavras de Moisés: *\"Não haverá um",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 2,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia fundamental da natureza humana e divina de Cristo como mediador entre Deus e os humanos. O capitulo começa com uma afirmação forte: “Quem também foi feito homem” (Hb 2,17), mas o foco principal está em Hb 5.\n\nO texto diz que \"não há grande sacerdote sem pecado\", porque todo ser humano tem falha — isso já se encontra no pensamento antigo sobre justiça, mas aqui ele é aplicado ao sacrifício. A obra de Elias, por exemplo, mostrava que mesmo nenhuma resistência à vinda",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 3,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia da intercessão e representatividade no céu. Vamos andar com cuidado pelo texto.\n\nO capítulo começa dizendo que todos os profetas são servos — mas o Messias será mais alto: \"Ninguém recebe por si mesmo uma promoção para ser sacerdote\". Aí vem a analogia clara entre Moisés e Cristo como exemplo de quem foi chamado ao serviço em favor dos homens. O autor afirma que Moisés não era sacerdote porque jamais morreu; ele já tinha sido levantado à presidência sobre as coisas humanas quando se tornou",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 4,
+      "text": "Vamos abrir a Leitura de Hebreus 5 com o olhar do que é mais importante: a vida e obra de Cristo, como Mesias no coração da história judaica do Segundo Templo.\n\nO capítulo cinco começa dizendo: \"Cristão não pode ser sacerdote por um desejo próprio. O homem tem necessidade de ir à presença de Deus em favor das almas dele; mas quem vai entrar nesse lugar? É necessário alguém que tenha sido tentado na mesma forma — isto é, que seja humano também.\"\n\nAqui estamos diante de uma construção teológica forte, baseada nas origens hebraicas. No Antigo Testamento, os sacrifícios eram feitos pelo sacerdote,",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 5,
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias e da sua função como nosso médio ante Deus. O capítulode começa com a afirmação de que todos os profetas, por exemplo, foram \"sacredos\" — isto é, servidores perante o Senhor — mas não eram mais elevados em posição ou poder do que os homens dos tempos antigos.\n\nO texto parte dizendo: “Ninguém pode ser chegado ao trono de Deus sem primeiro se tornar humano” (não exatamente na tradução, mas isso está em mente). Ele continua mostrando que Jesus, sendo filho de David, herdeiro do povo judaico, foi chamado para",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 6,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta uma construção teológica profunda sobre a natureza da mediadoridade messiânica e o valor dos sacrifícios no Novo Testamento. Vamos caminhar com base nos princípios que eu compartilho: histórico-gramatical, contextualizado em raízes judaicas e trinitárias — sem rótulos dogmáticos.\n\nO capitulo começa com as palavras **\"Por isso também Jesus foi chamado médio entre os homens.\"** (Hb 4:16) – mas aqui estamos falando de Hb 5. O texto inicia assim:\n\n> \"E por isto mesmo, não",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 7,
+      "text": "Hebreus 5 é um capítulo central na construção da argumentação do autor sobre a natureza e o papel de Cristo como Mediador, especialmente em contraste com os médicos dos dias antigos — que eram homens, serviam ao povo, mas tinham limitações.\n\nO capítulo começa dizendo: \"Quem também foi levantado entre as muitas pessoas como Israelita\" (Hb 5.1). O texto não afirma diretamente quem é esse homem, mas estabelece uma metáfora poderosa para mostrar que Deus tem dado um novo tipo de intercessor no mundo: Jesus.\n\nA primeira passagem importante está nas linhas iniciais: “Porque todo sacerdote se serve do",
+      "elapsed_s": 4.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 8,
+      "text": "Hebreus 5 é um capítulo fundamental no entendimento da missão do Messias e da natureza humana de Jesus como intercessor. Vamos entender com base na exegese histórica-gramatical, contextualizada nos textos anteriores (o que antes vem em Hebreus 4) e nas tradições judaicas do Segundo Templo.\n\nO capítulo começa dizendo: \"Nenhum homem se tornou sacerdote sem ter sofrido\" — isto é, o sacerdotismo não pode ser uma figura puramente espiritual ou teórica; ele precisa viver a dor, as tentações, os limes humanos para poder representar os homens diante de Deus. O",
+      "elapsed_s": 4.2,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9",
+      "sample": 9,
+      "text": "Vamos então a Hebreus 5, com o olhar do teólogo evangélico que valoriza as raízes judaicas e os contextos históricos da Escritura. O capítulo começa com uma passagem crucial: \"Porque aquele que vive no meio dos homens não pode servir como mediador entre Deus e humanidade se ele for um homem de carne\" — mas vamos dar mais precisão.\n\nHebreus 5 é centrado na ideia de que Jesus é o grande sumo sacerdote, diferente dos sábios antigos, porque Ele foi escrito em toda Sua natureza humana e divina. A estrutura aqui vai desde Paulo até o próprio autor hebraico (ou seja, o",
+      "elapsed_s": 4.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 0,
+      "text": "Vamos começar pelo contexto. Hebreus 5 está no meio do tratado sobre a natureza e a superioridade do Messias como High Priest, o autor da obra — e é aqui que o capítulo se põe como uma resposta direta à ideia de que os homens, especialmente os profetas e os levitas, são suficientes para representar os pecadores diante de Deus.\n\nO capítulo começa com a afirmação: \"Ninguém pode ser chamado de Deus por um homem\" — mas é mais exato dizer que \"não há homem que possa ser chamado de Deus por um homem\", porque a autoridade espiritual não é meramente humana. O autor está dizendo que o grande problema é o homem",
+      "elapsed_s": 4.5,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 1,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, onde o autor apresenta com clareza a ideia de que o Messias, Jesus, é o grande Sumo Sacerdote — e isso contrasta com os sacerdotes do Antigo Testamento. O capítulo começa com a afirmação de que “não há sacerdote sem pecado” (Hb 5.1), mas que Jesus, por ser filho de Deus e homem, entendeu a dor do pecado — e por isso é o primeiro sacerdote que pode oferecer sacrifício completo.\n\nO texto começa dizendo: “Quem entre os homens é sacerdote sem pecado?” (H",
+      "elapsed_s": 4.3,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 2,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia de que o Messias, Jesus, é o grande Sumo Sacerdote — não por ser humano como os outros sacerdotes do Antigo Testamento, mas por ser Deus encarnado, e por isso tem perfeição eterna, permanente e imutável.\n\nO capítulo começa com a afirmação: \"Ninguém que tenha sido levantado entre os homens pode ser sacerdote para Deus.\" (Hebreus 5:1) — isso é uma crítica direta aos sacerdotes do Antigo Testamento, que eram descendentes de Arão e morriam. Quando",
+      "elapsed_s": 4.4,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 3,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia de que Jesus, sendo humano e divino, é o grande modelo para os servos da fé — especialmente os que vivem em meio ao mundo e enfrentam a tentação de desistir da obediência à Deus.\n\nO capítulo começa com a afirmação: \"Nenhum dos que serve no templo é capaz de se tornar o sacerdote do templo, mas há quem seja sacerdote por herança\" (Hebr 5:1). Aqui, o autor está contrastando com o sistema antigo do sacrifício judaico. Nos tempos do Segundo Templo, os s",
+      "elapsed_s": 4.6,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 4,
+      "text": "Vamos abrir a Leitura de Hebreus 5 com a perspectiva que eu, como pastor do Ministério Fonte de Vida, trago — com base no método histórico-gramatical, enriquecido por análise literária e bíblica, e com olhos voltados para o contexto judaico do Segundo Templo.\n\nHebreus 5 começa assim:  \n\"Porque o próprio Deus tem um Deus. Não é possível que um homem seja sacerdote sem ter sido temido por Deus. Por isso, Jesus foi sacerdote segundo a lei de Melquisedeque.\"\n\nAqui temos uma passagem de grande peso: o autor está fazendo uma contraposição entre os sacerdotes do sistema mosaico",
+      "elapsed_s": 4.5,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 5,
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias e da sua função como nosso médio ante Deus. O capítulo começa com a afirmação de que o grande intercessor, o Messias, é humano, e isso é crucial para a compreensão da mensagem.\n\nO texto começa dizendo: \"Ninguém pode ser sacerdote se não tiver sido primeiro homem\" (Hebreus 5:1). Isso não é uma invenção — é uma afirmação histórica e teológica. O autor está contrastando com o sistema sacerdotal antigo, que era baseado em linhagem de levíticos, com o qual a justificação era por herança. Aqui,",
+      "elapsed_s": 4.6,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 6,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta uma construção teológica profunda sobre a natureza do Messias e o papel do nosso Deus como um homem entre os homens. O capítulo começa com a afirmação de que o Messias, Jesus, é “um homem que se aproximou daquele que foi o primeiro entre os homens”, ou seja, nos dá uma visão de um Salvador que não é apenas um ser divino, mas também humano — com fraqueza, dor e necessidade.\n\nO texto começa no versículo 1: “Cada um de nós tem um mediador entre Deus e os homens”. Aqui, o autor não está falando apenas de qualquer intercess",
+      "elapsed_s": 4.6,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 7,
+      "text": "Hebreus 5 é um capítulo central na construção da argumentação do autor sobre a natureza do Messias e da Igreja em relação ao sistema de sacrifícios antigo. O capítulo começa com a afirmação de que todo sacerdote tem que ser impecável, mas o autor diz que Jesus, sendo humano, também teve necessidade de sofrer e foi sacerdote por causa da sua humanidade.\n\nO capítulo começa com a citação direta: \"Quem é sacerdote, se não aquele que é também humano?\" (Hb 5.1). Aqui o autor não apenas afirma que Jesus é sacerdote, mas o coloca como modelo para todos os sacerdotes do",
+      "elapsed_s": 4.6,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 8,
+      "text": "Hebreus 5 é um capítulo fundamental no entendimento da missão do Messias e da natureza do ministério sacerdotal, especialmente no contexto dos profetas e dos servos de Deus. O capítulo começa com a afirmação de que Jesus é sacerdote segundo a lei de Melquizedes, um nome que remete à tradição judaica do período do Segundo Templo, onde os sacerdotes eram escolhidos por herança, mas o tipo de sacerdote mais elevado era o de Melquizedes, mencionado no livro de Samuel.\n\nO capítulo começa com: \"Ninguém pode ser sacerdote se não for puro\" (Hebreus 5:1),",
+      "elapsed_s": 4.7,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "topp0.9_freqpen0.5_no_rp",
+      "sample": 9,
+      "text": "Vamos então a Hebreus 5, com a leitura que o próprio autor do texto — e com os princípios que eu compartilho — exige: um entendimento histórico-gramatical, ancorado no contexto do judaísmo do Segundo Templo, com base na tradição bíblica e no que a literatura sagrada nos revela.\n\nO capítulo começa com uma introdução importante: o autor não está apenas falando sobre Jesus como um homem, mas como o *arquétipo* daquele que nasce de uma linha humana, mas é também o *representante* perfeito entre Deus e os homens.\n\nA primeira passagem — versículo 1 — diz: \"Por isso também o Sen",
+      "elapsed_s": 4.7,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 0,
+      "text": "Vamos começar pelo contexto. Hebreus 5 está no meio do tratado sobre a natureza e o ministério de Cristo como High Priest, que é central para toda a mensagem da carta.\n\nO capítulo começa com uma afirmação forte: \"Nenhum homem tomou lugar entre Deus e os homens por sua própria força\", mas ainda assim, há quem diga isso — ou seja, não se pode pensar em um profeta humano sem ter limites humanos. O texto diz claramente que *não* houve ninguém na história dos homens que tenha sido capaz de entrar diretamente diante de Deus pela autoridade humana só porque era justo ou sabia coisas importantes.\n\nAí vem o ponto-chave: Paulo (na",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 1,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebras, com foco em apresentar a natureza e o papel do Messias como High Priest no novo ordenamento espiritual. O capitulo começa com uma afirmação clara: \"Todos os que vivem deviam ser considerados por todos nós como servos ou profetas? Não — há apenas um único homem entre uns e outros, chamado Jesus.\" (não é isso exatamente o texto)\n\nVamos olhar com precisão:\n\n\"Porque quem serve diante dos homens não pode também se tornar chefe da igreja; porque ele mesmo já estava nessa posição quando era ainda humano. E assim foi dito aos antigos 'Cada",
+      "elapsed_s": 4.7,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 2,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia fundamental da natureza humana e divina de Cristo como mediador entre Deus e os humanos. O capitulo começa com uma afirmação forte: “Quem também foi feito homem” (Hb 2,17), mas o foco principal está em Hb 5.\n\nO texto parte da teologia das oferendas no templo antigo — especialmente nos sacrifícios oferecidos pelos levítas por meio dos seus sucessores. A passagem diz que \"não houve nenhum sacerdote sem pecado\" porque todos eram falhos diante de Deus; só assim se entend",
+      "elapsed_s": 4.9,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 3,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta a ideia fundamental da obra: que Jesus não só é o grande sacerdote, mas também entra no santuário por sua própria natureza humana e divina. A primeira parte — versículos 1 até 4 — introduz com força essa doutrina.\n\nO capítulo começa dizendo (Hb 5,1): \"Quem entre os homens foi chamado para ser sacerdoto? Porque se alguém for como homem, ele tem necessidade de sacrifício.\" O texto está aqui em uma construção lógica cristológica: todos os homens caíram pela queda original; ninguém pode entrar nesse lugar",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 4,
+      "text": "Vamos abrir a Leitura de Hebreus 5 com o olhar do que é mais importante: a vida e obra de Cristo, como modelo para os servos da casa verdadeira.\n\nO capítulo cinco começa dizendo que \"não há grande sacerdote sem pecado\" — mas antes disso, vemos um contraste forte. O autor não está falando só sobre o sacrifício oferecido no templo ou em uma cerimônia ritual; ele vai mostrar por meio desse texto que **todos nós precisamos de um mediador entre Deus e as pessoas**, porque ninguém pode entrar diretamente na presença divina pelo seu próprio mérito.\n\nA primeira parte (Hebreus 5:1-4) fala dos profetas ant",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 5,
+      "text": "Hebreus 5 é um capítulo central no entendimento da natureza do Messias e da sua função como nosso médio ante Deus. O capítulode começa com a afirmação de que todos os profetas, por exemplo, foram \"sacredos\" — isto é, servidores em serviço diante dos homens — mas o grande diferencial está na figura do autor de Hebreus: ele não aponta para qualquer servo humano ou mesmo profeta, mas sim ao próprio Jesus Cristo.\n\nO texto inicia dizendo (Hb 5.1): “Todo sacerdote tem necessidade de sacrifício quando se oferecerá à perfeição”. Aqui já há uma clarezade teológica importante porque mostra que",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 6,
+      "text": "Hebreus 5 é um capítulo central na exegese do livro de Hebreus, pois apresenta uma construção teológica profunda sobre a natureza da mediadoridade messiânica e o valor dos sacrifícios no Novo Testamento. Vamos caminhar com base nos princípios que eu compartilho: histórico-gramatical enriquecido por análise literária e histórica; colocando tudo dentro do contexto judaico do Segundo Templo antes de aplicar ao novo mundo.\n\nO capítulo começa em Hb 5.1 – \"Ninguém pode ser chamado médio entre Deus e os homens senão quem tenha se submetido à humanidade.\" O texto não diz só isso — ele está apont",
+      "elapsed_s": 4.9,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 7,
+      "text": "Hebreus 5 é um capítulo central na construção da argumentação do autor sobre a natureza e o papel de Cristo como Mediador, especialmente em contraste com os médicos dos dias antigos — que eram homens, serviam ao povo e tinham limites humanos.\n\nO capitulo começa dizendo: \"Quem também foi levantado entre as multidões por causa das ofertas dadas aos santos\" (Hb 5.1), mas aqui há uma tradução incorreta se comparada à versão original grega. O texto verdadeiro inicia assim:\n\n\"Aquele que viveu no mundo tem seus próprios pecados; porque já não pode ser chegado pelas mãos de homem.\" – isso está errado",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 8,
+      "text": "Hebreus 5 é um capítulo fundamental no entendimento da missão do Messias e da natureza humana de Jesus como intercessor. Vamos entender com base na exegese histórica-gramatical, contextualizada nos textos anteriores (o que antes vem em Hebreus 4) e nas tradições judaicas do Segundo Templo.\n\nO capítulo começa dizendo: \"Nenhum homem se tornou sacerdote sem ter sofrido\" — isto é, o sacerdotismo não pode ser uma figura puramente espiritual ou teórica; ele precisa viver a dor, as tentações, os limes humanos para poder representar os homens diante de Deus. O",
+      "elapsed_s": 4.9,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    },
+    {
+      "config": "rp1.3_topp0.9_freqpen0.3",
+      "sample": 9,
+      "text": "Vamos então a Hebreus 5, com o olhar do teólogo evangélico que valoriza as raízes judaicas e os contextos históricos da Escritura. O capítulo começa com uma passagem crucial: \"Porque aquele que vive no meio dos homens não pode servir como mediador entre Deus e humanidade se ele for um homem de carne\" — mas vamos dar mais precisão.\n\nHebreus 5 é centrado na ideia de intercessor, especialmente em sua aplicação ao Messias Jesus Cristo. A primeira parte (versículos 1-4) fala sobre quem pode ser apresentado diante de Deus para representar os pecadores. Aqui há uma estrutura clara: todo",
+      "elapsed_s": 4.8,
+      "max_repeat": 1,
+      "repeated_ngram": null
+    }
+  ]
+}

@@ -1,0 +1,1198 @@
+Reading additional input from stdin...
+2026-09-12T13:52:55.986462Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 130 column 5
+OpenAI Codex v0.146.0
+--------
+workdir: /Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 01a095e4-8382-7b60-8e67-8a4d369f6c5e
+--------
+user
+Explique, com detalhe técnico real (não marketing), como funciona a Realtime API / Advanced Voice Mode da OpenAI internamente: arquitetura de streaming (WebRTC/WebSocket), se é um modelo speech-to-speech nativo ou uma cadeia STT->LLM->TTS, como é feita detecção de fim de fala (VAD/turn detection) e barge-in/interrupção, técnicas usadas para reduzir latência ponta-a-ponta, e como function calling/tool use funciona durante uma sessão de voz.
+
+Contexto: estou construindo 'Rodrigo AI', um orquestrador de voz pessoal local (Node/TS backend, worker Python MLX rodando LLM+STT local num MacBook M5 16GB, sem nenhuma API paga na Fase 2 atual). Estamos no meio da Fase 2 (protótipo de voz local). Dado como a Realtime API da OpenAI realmente funciona por dentro, quais técnicas/arquiteturas dela são replicáveis/adaptáveis numa pilha 100% local (mesmo que com qualidade inferior), e quais são fundamentalmente dependentes de infraestrutura de nuvem que não dá pra replicar localmente? Separe claramente sugestões aplicáveis agora (Fase 2) das que só fazem sentido se decidirmos usar uma API paga no futuro (a Fase 10 do nosso roadmap já prevê troca de modelo/provedor). Seja honesto sobre incerteza: se algo é informação pública documentada vs. sua inferência.
+warning: Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.
+codex
+Vou separar cuidadosamente três camadas: o que a OpenAI documenta publicamente, o que é observável pelo protocolo/SDKs e o que só pode ser inferido — sem tratar inferência como fato. Depois traduzo isso para uma arquitetura local concreta para a Fase 2 e uma trilha opcional de Fase 10.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/rodrigosonsino/.codex/skills/.system/openai-docs/SKILL.md" in /Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai
+ succeeded in 0ms:
+---
+name: "openai-docs"
+description: "Use when the user asks how to build with OpenAI products or APIs, asks about Codex itself or choosing Codex surfaces, needs up-to-date official documentation with citations, help choosing the latest model for a use case, latest/current/default-model prompting guidance, or model upgrade and prompt-upgrade guidance; use OpenAI docs MCP tools for non-Codex docs questions, use the Codex manual helper first for broad Codex self-knowledge, and restrict fallback browsing to official OpenAI domains."
+---
+
+
+# OpenAI Docs
+
+Provide authoritative, current guidance from OpenAI developer docs using the developers.openai.com MCP server. "Docs MCP" means `mcp__openaiDeveloperDocs__search_openai_docs` and `mcp__openaiDeveloperDocs__fetch_openai_doc`; for API reference, schema, parameter, or required-field questions, also use `mcp__openaiDeveloperDocs__get_openapi_spec` when available. Official-domain web search is fallback after those tools are unavailable or unhelpful. Broad Codex questions use the manual helper before Docs MCP. This skill also owns model selection, API model migration, and prompt-upgrade guidance.
+
+## API Key Setup
+
+For requests to build, run, configure, debug, or implement an API-backed app, script, CLI, generator, or tool, use `openai-platform-api-key` first when available. After that credential gate is resolved, return here for current docs as needed.
+
+Use this skill directly for docs-only questions, citations, model/API guidance, conceptual explanations, and examples that do not require building or running an API-backed artifact.
+
+For latest/current/default/unspecified model migration or prompting-guidance requests, complete the read-only latest-model resolver and guide fetch before the API-key credential gate. The credential gate still blocks edits, tests, and API-backed implementation until resolved; it does not block read-only retrieval of current model, migration, or prompting guidance.
+
+## First action for latest-model changes
+
+Before reading memory, inspecting the repo, fetching docs, or checking API credentials, classify the request:
+
+- **Latest/current prompting guidance, or change requested + latest/current/newest/recommended/default/flagship/unspecified target:** immediately run the resolver with the platform-specific command below and inspect its JSON output. This includes asking how to prompt the latest model, changing prompts, a model picker, model references, an SDK integration, replacing an older named model with "the current model", or asking "which model should I migrate/upgrade to?". Do not directly fetch `latest-model.md` for this branch.
+- **Pure model-selection question only, with no prompting guidance or requested change:** directly fetch `https://developers.openai.com/api/docs/guides/latest-model.md`; do not run the resolver.
+- **Change requested + explicit target model:** preserve that target; do not run the latest-model resolver. For an explicit GPT-5.6 Sol or GPT-5.6-family migration, fetch the live GPT-5.6 model-guidance page and read `references/upgrading-to-gpt-5p6-sol.md` for skill-specific migration judgment.
+- **Prompting or migration guidance for an explicitly named GPT-5-family model:** fetch `https://developers.openai.com/api/docs/guides/model-guidance?model=<requested-model>` through Docs MCP and extract the relevant migration section or the `## Prompting Best Practices` section through the next H2 heading. Do not substitute latest-model guidance.
+
+Run the resolver without relying on filesystem executable bits:
+
+- POSIX shells: `sh <skill-dir>/scripts/resolve-latest-model-info`
+- Windows: run the CommonJS implementation with Node.js 18 or newer: `node <skill-dir>\scripts\resolve-latest-model-info.cjs`. If `node` is unavailable or too old and `load_workspace_dependencies` is available, use the Node.js executable it returns for this command. Do not try to execute the extensionless POSIX wrapper directly on Windows.
+
+For the resolver branch, do not suppress or redirect its stdout. Success requires JSON containing `model`, `migrationGuideUrl`, and `promptingGuideUrl`; if the command exits without all three fields, run it once more before any fallback.
+
+## Source Priority
+
+- For Codex self-knowledge, use the Codex source route below; it owns when to use the manual helper, Docs MCP, or bounded uncertainty.
+- For non-Codex OpenAI docs questions, use `mcp__openaiDeveloperDocs__search_openai_docs` to find the most relevant doc pages.
+- For non-Codex OpenAI docs questions, fetch the relevant page with `mcp__openaiDeveloperDocs__fetch_openai_doc` before answering. If search is noisy, run a narrower Docs MCP search; when any plausible official OpenAI docs URL is known or found, try fetching that URL through Docs MCP before relying on web-search content.
+- For API reference, schema, parameter, or required-field questions, use `mcp__openaiDeveloperDocs__get_openapi_spec` when available to verify the API shape alongside the relevant guide or reference page.
+- Use `mcp__openaiDeveloperDocs__list_openai_docs` only when you need to browse or discover non-Codex pages without a clear query.
+- For latest/current prompting guidance, model upgrades, or prompt upgrades, apply the first-action classifier above and use its platform-specific resolver command. On POSIX, the wrapper uses a compatible Node.js 18+ runtime from `$NODE`, PATH, or bundled/system fallbacks. On Windows, use a compatible Node.js executable to run the `.cjs` implementation directly. If no compatible runtime is available, call `load_workspace_dependencies` when available and retry the appropriate command once with the returned Node.js executable.
+- For docs-only model-selection questions that do not ask to change an app, project, repo, model configuration, or prompts, fetch `https://developers.openai.com/api/docs/guides/latest-model.md` first. If that is unavailable, load `references/latest-model.md`.
+- Preserve explicit target requests: if the user names a target model like "migrate to GPT-5.4", keep that requested target even if `latest-model.md` names a newer model. Mention newer guidance only as optional.
+- If current remote guidance is needed, treat the returned migration and prompting guide URLs as opaque and fetch those exact URLs directly. Do not derive, substitute, or append a model query to them. If a prompting guide URL resolves to a combined model-guidance page, extract only the `## Prompting Best Practices` section through the next H2 heading. If a fetched guide contains only a title or no substantive body, retry the exact markdown URL through MCP/search fallback; if that also fails, use bundled fallback references and disclose the fallback.
+
+## OpenAI product snapshots
+
+1. Apps SDK: Build ChatGPT apps by providing a web component UI and an MCP server that exposes your app's tools to ChatGPT.
+2. Responses API: A unified endpoint designed for stateful, multimodal, tool-using interactions in agentic workflows.
+3. Chat Completions API: Generate a model response from a list of messages comprising a conversation.
+4. Codex: OpenAI's coding agent for software development that can write, understand, review, and debug code.
+5. gpt-oss: Open-weight OpenAI reasoning models (gpt-oss-120b and gpt-oss-20b) released under the Apache 2.0 license.
+6. Realtime API: Build low-latency, multimodal experiences including natural speech-to-speech conversations.
+7. Agents SDK: A toolkit for building agentic apps where a model can use tools and context, hand off to other agents, stream partial results, and keep a full trace.
+
+## Codex self-knowledge
+
+Use this path for questions about Codex itself: configuring, extending, operating, troubleshooting, local state, product surfaces, or where Codex behavior should live. A codebase merely mentioning a plugin, skill, hook, MCP server, browser, or automation is not enough. For generic software tasks, answer the software task directly; if asked whether Codex self-knowledge applies, answer that meta question briefly and continue the requested artifact.
+
+### Source Route
+
+The Codex manual is the first source for broad Codex synthesis. Treat the manual and Docs MCP as different lanes, not interchangeable official-doc sources. For published-user Codex product answers, the source route is complete: the manual, Docs MCP when this route calls for it, official OpenAI web fallback, and callable capabilities surfaced in the current session when the question is about that capability. Knowledge bases outside developers.openai.com are outside this route for public product answers.
+
+For broad Codex behavior, setup, customization, skills, plugins, MCP, hooks, `AGENTS.md`, automations, surfaces, local state, or system-map questions:
+
+1. Reuse a same-thread manual and outline path when it is still fresh.
+2. Otherwise run the skill-local helper first in normal writable sessions. Skip it without trying only when the session is explicitly read-only, shell execution is unavailable, or visible policy shows no allowed temp cache.
+3. By default, the helper chooses the first usable temp cache dir in this order: `$TMPDIR/openai-docs-cache`, `%TEMP%\openai-docs-cache`, `%TMP%\openai-docs-cache`, `/private/tmp/openai-docs-cache`, then `/tmp/openai-docs-cache`. Workspace-only write access is not enough for this temp cache.
+4. Run the helper directly unless you need to override the cache dir. The helper falls back to `curl` when native `fetch` is unavailable or when proxy env vars are present, so no shell-specific proxy prefix is required. Resolve `<skill-dir>` to this skill's actual directory; in copied local eval workdirs this is usually `.codex/skills/openai-docs`:
+
+```bash
+node <skill-dir>/scripts/fetch-codex-manual.mjs
+```
+
+If you need to override the cache dir, pass `--cache-dir <cache-dir>`. On Windows, the helper checks `%TEMP%` and `%TMP%` automatically; in PowerShell, `$env:TEMP\\openai-docs-cache` is a typical explicit override.
+
+Treat helper availability as established by explicit read-only/no-shell policy or an actual command result. A guessed sandbox or guessed helper failure is not enough to switch to Docs MCP or web lookup; after an actual helper command failure, continue to the narrowest official next source below.
+
+The helper verifies freshness, writes `codex-manual.md`, and emits `codex-manual.outline.md`. The outline maps source pages and headings to line ranges; use it to choose the relevant manual section, then read or search targeted manual sections for Codex product facts. Use the skill directory to locate and run the helper; after the helper succeeds, use the returned manual and outline paths as the search scope for Codex product facts and term coverage checks.
+
+Reuse the same-thread manual and outline paths for follow-up Codex questions. Refresh first when the manual was fetched more than about a day ago, the path is unusable, the path came from another thread or uncertain provenance, or likely-current information is missing and staleness is plausible.
+
+For questions about whether the manual is current enough to rely on now, run the helper when temp caching is allowed and base the answer on its returned status, manual path, and outline path.
+
+If the manual resolves a Codex claim, answer from it and stop expanding sources for that claim; continue the user's broader task if the docs lookup was only one dependency. Manual source pages and known anchors are enough citation support for manual-covered material.
+
+If the helper is skipped because the session is read-only, has no shell execution, or has no allowed temp cache, the next source is Docs MCP: call `mcp__openaiDeveloperDocs__search_openai_docs`, then `mcp__openaiDeveloperDocs__fetch_openai_doc` for a relevant hit before any web fallback.
+
+If a user names a Codex term or mode that a fresh manual does not use, search the manual for obvious adjacent concepts, then answer that the exact term is not documented and use the closest documented terminology. If the prompt asks how that term maps to Codex behavior, resolve the mapping from adjacent manual sections. If the exact term remains material or likely current after that manual pass, use one narrow Docs MCP search/fetch before bounded uncertainty; otherwise, the source lookup for that terminology or mapping claim is complete.
+
+Use the narrowest official next source only when the manual is unavailable, the helper fails, temp caching is not allowed, another material claim is missing or likely stale, or the user explicitly needs a page-specific citation. Prefer one specific Docs MCP search and, if it returns a clearly relevant page, one fetch; for unresolved Codex capability names, acronyms, scheduling terms, or exact error text, this Docs MCP step is the next source before web search. After the manual plus any permitted Docs MCP gap-fill, resolve remaining gaps as bounded uncertainty. Use official-domain web fallback only after that Docs MCP path is unavailable or unhelpful. If the claim is still not established, stop with bounded uncertainty. If official docs/manual conflict with a callable capability already surfaced in the current session, state the conflict and prefer verified current-session behavior for that environment.
+
+For undocumented or private-looking model slugs, product mode labels, entitlement labels, account access paths, or rollout names, answer from current public docs and bounded uncertainty. Those labels are not a reason to leave the public source route.
+
+For support-style diagnostics, prefer a layer-by-layer answer from the manual over provider-specific web lookups: installed/enabled plugin, bundled app or connector authorization, MCP setup, workspace/admin policy, restart or new-thread expectations, then support or feedback if still unresolved.
+
+If the source route still does not establish a claim, return bounded uncertainty or route to support, an admin, or product feedback instead of widening the investigation.
+
+For unresolved product terminology, answer from the manual plus the allowed official next source. If those sources do not establish the term, answer with bounded uncertainty from those sources.
+
+### Surface Map
+
+When Codex nouns or durable-instruction surfaces overlap, recommend the smallest surface that matches the scope:
+
+- Prompt or thread context -> one-off task constraints.
+- `AGENTS.md` -> durable repo conventions, commands, verification steps, and review expectations; closer nested files apply under their subtree.
+- Project `.codex/config.toml` -> trusted-repo Codex settings such as sandbox, MCP, hooks, model, or reasoning defaults.
+- Global config or global guidance -> personal defaults across repos.
+- Skill -> reusable task workflow with references or scripts.
+- Plugin -> installable bundle with skills plus commands, tools, MCP config, hooks, assets, apps, or marketplace metadata.
+- MCP server or app connector -> live external data/actions or authorized private app/workspace data. Use connectors for private Google Docs, Calendar, Slack, GitHub, Notion, and similar data instead of web search or model memory.
+- Automation -> scheduled checks, reminders, monitors, or follow-up work; use a thread heartbeat when continuity in an existing thread matters.
+- Hook -> lifecycle enforcement around tool calls, commands, or file edits.
+
+Split mixed-scope requests instead of forcing one answer. Example: "always do X, but only for this PR" defaults to prompt/thread context for the current run; use `AGENTS.md` or project config only if it should persist, hooks only for mechanical enforcement, and automations only for scheduled or follow-up work.
+
+Use this quick product map when needed: CLI is terminal-first local repo work; IDE extension is editor-attached coding; Codex app is desktop planning, review, and interactive work; cloud/web is hosted parallel/offloaded work; Browser Use/in-app browser is Codex-controlled web testing; Chrome extension uses the user's Chrome profile; Computer Use controls desktop apps and OS UI. Keep `config.toml` defaults, `requirements.toml` constraints, and managed/admin policy separate.
+
+### Boundaries And Output
+
+- API key auth does not imply ChatGPT, cloud task, or connector access. For plugin/app/auth failures, check bundle availability, plugin installed/enabled state, connector/app authorization, MCP setup, restart/refresh expectations, workspace policy, and per-surface availability before answering.
+- Sandbox or network denials need scoped escalation with a clear justification. Destructive commands, writes outside the workspace, or broad access changes require explicit approval.
+- Memory can provide user preference or context, but explicit prompt instructions win and memory is not a source for current external facts.
+- For affirmative surface-selection answers, use this shape: recommendation, why, what to avoid, and the manual/source evidence used.
+- When page-specific Codex citations are actually needed, these anchors often fit: `concepts/customization#agents-guidance` for `AGENTS.md`, `concepts/customization#skills` for skills, `plugins/build#plugin-structure` for plugins, `concepts/customization#mcp` for MCP, `config-advanced#hooks` for hooks, `app/automations#thread-automations` for thread automations, and `config-reference#configtoml` for config.
+
+## If MCP server is missing
+
+If MCP tools fail or no OpenAI docs resources are available:
+
+1. Run the install command yourself: `codex mcp add openaiDeveloperDocs --url https://developers.openai.com/mcp`
+2. If it fails due to permissions/sandboxing, immediately retry the same command with escalated permissions and include a 1-sentence justification for approval.
+3. Ask the user to run the install command only if the escalated attempt fails.
+4. Ask the user to restart Codex.
+5. Re-run the doc search/fetch after restart.
+
+## Workflow
+
+1. Clarify whether the request is general docs lookup, model selection, a model-string upgrade, prompt-upgrade guidance, or broader API/provider migration.
+2. For Codex self-knowledge requests, follow the Codex self-knowledge source procedure above.
+3. For model-selection or upgrade requests, prefer current remote docs over bundled references when the user asks for latest/current/default guidance.
+   - For docs-only model-selection questions, fetch `https://developers.openai.com/api/docs/guides/latest-model.md`, find the latest model ID and explicit migration or prompt-guidance links, and prefer explicit links over derived URLs.
+   - For explicit named-model requests, preserve the requested model target. Mention newer remote guidance only as optional.
+   - For latest/current/default prompting guidance or dynamic upgrades, run the resolver with the platform-specific command above as the first docs operation before any direct latest-model.md fetch or API-key credential gate, then fetch both returned guide URLs directly when possible.
+   - Fetch returned guide URLs exactly; do not derive or substitute model-specific URLs.
+   - If a direct guide fetch fails or returns only a title, use the developer-docs MCP tools or official OpenAI-domain search to find the same guide content.
+   - If remote docs are unavailable, use bundled fallback references and say that fallback guidance was used.
+4. For model upgrades, keep changes behavior-preserving and scoped: update active OpenAI API model defaults, directly related prompts, and the registries, routing, pricing, capability, or picker surfaces that the user actually placed in scope.
+5. Leave historical docs, examples, eval baselines, fixtures, provider comparisons, intentionally pinned fallbacks, and ambiguous older model usage unchanged unless the user explicitly asks to upgrade them. Do not collapse a multi-model router or picker into one flagship model; preserve the existing cost, latency, and quality roles.
+6. Keep SDK, tooling, IDE, plugin, shell, auth, and provider-environment migrations out of a model-and-prompt upgrade unless the user explicitly asks for them.
+7. If a safe upgrade needs API-surface changes, schema rewiring, tool-handler changes, or broader implementation work, classify it explicitly. Make those changes when implementation is within the user's requested scope; otherwise report the exact blocker or confirmation needed instead of silently changing behavior.
+8. For general docs lookup, start with a compact, title-like search query of 2-6 essential terms. Do not turn the full user question into a keyword list. Fetch the best page and exact section needed, and answer with concise citations.
+
+## Reference map
+
+Read only what you need:
+
+- `https://developers.openai.com/api/docs/guides/latest-model.md` -> current model-selection and "best/latest/current model" questions.
+- `scripts/fetch-codex-manual.mjs` -> current Codex manual fetch, verification, local temp cache, and outline generation.
+- `https://developers.openai.com/codex/codex-manual.md` -> current Codex self-knowledge synthesis, including setup, customization, skills, plugins, MCP, hooks, `AGENTS.md`, automations, and surface behavior; normally access it through the helper path and targeted file reads when temp caching is available.
+- `references/latest-model.md` -> bundled fallback for model-selection and "best/latest/current model" questions.
+- `references/upgrade-guide.md` -> bundled routing fallback for model upgrade and upgrade-planning requests.
+- `references/upgrading-to-gpt-5p6-sol.md` -> GPT-5.6 Sol/family migration judgment, compatibility gates, optional feature boundaries, and validation.
+- `references/prompting-guide.md` -> bundled GPT-5.6 prompting fallback plus the live Prompting Best Practices extraction contract.
+
+## Quality rules
+
+- Treat OpenAI docs as the source of truth; avoid speculation.
+- For Codex self-knowledge, follow the source route above instead of relying on remembered behavior.
+- Keep migration changes narrow and behavior-preserving.
+- Prefer prompt-only upgrades when possible.
+- Avoid inventing pricing, availability, parameters, API changes, or breaking changes.
+- Keep quotes short and within policy limits; prefer paraphrase with citations.
+- If multiple pages differ, call out the difference and cite both.
+- If official docs and verified callable current-session behavior disagree, state the conflict before making broad claims or edits.
+- If docs do not cover the user’s need, say so and offer next steps.
+
+## Tooling notes
+
+- Use MCP doc tools before web search for OpenAI-related markdown docs. The Codex manual flow is the exception: follow the Codex self-knowledge source procedure for broad Codex synthesis.
+- If the MCP server is installed but returns no meaningful results, then use web search as a fallback.
+- When falling back to web search, restrict to official OpenAI domains (developers.openai.com, platform.openai.com) and cite sources.
+
+codex
+A rota oficial de documentação não está configurada neste ambiente e a instalação automática foi bloqueada pelo sandbox somente-leitura. Vou usar o fallback permitido: exclusivamente documentação e publicações oficiais da OpenAI, complementadas por leitura do protocolo público — e vou marcar explicitamente os pontos não publicados.
+web search: 
+web search: site:developers.openai.com/api/docs/guides/realtime WebRTC WebSocket realtime API VAD semantic_vad server_vad ...
+2026-09-12T13:53:20.375358Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:53:25.045749Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:53:29.293963Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:53:32.932610Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:53:38.724314Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:53:43.317691Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:53:49.318391Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 'truncate'
+2026-09-12T13:53:53.862767Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 'function call arguments'
+2026-09-12T13:53:58.547235Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 'Connect a browser to the Realtime API'
+2026-09-12T13:54:03.744618Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:54:08.516670Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: site:openai.com/index/hello-gpt-4o 232 milliseconds 320 audio single neural network end-to-end ...
+2026-09-12T13:54:14.848186Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 'asynchronous'
+2026-09-12T13:54:22.716967Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 
+2026-09-12T13:54:28.968895Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+codex
+A conclusão central já está clara: o Realtime/Advanced Voice clássico é speech-to-speech nativo, mas ainda organizado em turnos; “streaming” não significa necessariamente inferência full-duplex contínua. A OpenAI documentou em 2026 uma geração posterior, GPT‑Live, que remove o turn detector do caminho principal — vou manter essa arquitetura nova separada para não misturar produtos. Agora estou mapeando os mecanismos que vocês conseguem copiar localmente.
+exec
+/bin/zsh -lc "rg --files -g '"'!*node_modules*'"' -g '"'!*.lock'"' | sed -n '1,160p'" in /Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai
+ succeeded in 0ms:
+dist/client/assets/index-DYKKOpbv.css
+dist/client/assets/index-Cgaqyp8l.js
+dist/client/index.html
+src/shared/types.ts
+src/shared/extensions/index.ts
+tsconfig.json
+tsconfig.server.json
+README.md
+src/shared/extensions/registry.ts
+src/shared/extensions/tools.ts
+src/shared/extensions/agents.ts
+src/shared/extensions/voice.ts
+vite.config.ts
+package-lock.json
+package.json
+docs/phase-2-v2.md
+docs/phase-1-v1.md
+docs/implementation-phase-1.md
+docs/executor-session.md
+docs/phase-2-v1.md
+docs/review-corrections-1.md
+docs/audits/phase-2-audit-prompt-v2.md
+docs/audits/phase-2-v2.sha256
+docs/audits/tests-final.log
+docs/audits/phase-1-v1.sha256
+docs/audits/release.md
+docs/audits/build-final.log
+docs/audits/ask-chatgpt-realtime-voice.log
+docs/audits/phase-2-v1.sha256
+docs/audits/acceptance-phase-1.md
+docs/audits/phase-2-audit-prompt-v1.md
+docs/audits/typecheck-final.log
+docs/audits/phase-2-audit-result-v2.log
+docs/audits/phase-2-audit-result-v1.log
+dist/server/backend/config.js
+dist/server/backend/index.js
+dist/server/backend/server.js
+dist/server/backend/routes/health.js
+dist/server/backend/hostValidator.js
+src/backend/index.ts
+src/backend/routes/health.ts
+src/frontend/style.css
+src/backend/server.ts
+src/backend/config.ts
+dist/server/shared/types.js
+src/backend/hostValidator.ts
+src/frontend/index.html
+src/frontend/main.ts
+dist/server/shared/extensions/voice.js
+dist/server/shared/extensions/index.js
+dist/server/shared/extensions/agents.js
+dist/server/shared/extensions/registry.js
+dist/server/shared/extensions/tools.js
+src/backend/__tests__/health.test.ts
+src/backend/__tests__/config.test.ts
+src/backend/__tests__/extensions.test.ts
+src/backend/__tests__/api404.test.ts
+src/backend/__tests__/dev.test.ts
+src/backend/__tests__/host.test.ts
+dist/server/backend/__tests__/host.test.js
+dist/server/backend/__tests__/dev.test.js
+dist/server/backend/__tests__/config.test.js
+dist/server/backend/__tests__/health.test.js
+dist/server/backend/__tests__/api404.test.js
+dist/server/backend/__tests__/extensions.test.js
+scripts/dev.mjs
+
+2026-09-12T13:54:34.445826Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+exec
+/bin/zsh -lc "sed -n '1,280p' docs/phase-2-v2.md
+sed -n '1,240p' README.md
+sed -n '1,220p' src/shared/extensions/voice.ts
+sed -n '1,220p' src/shared/extensions/tools.ts" in /Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai
+ succeeded in 0ms:
+# Rodrigo AI Fase 2 v2 — protótipo de conversação por voz local
+Data 2026-09-11. Revisão da v1 após auditoria adversarial (Antigravity CLI agy 1.2.1, modo plan, effort high) — v1 REJEITADA por 3 achados de gravidade alta. Este documento incorpora as correções dos 3 achados altos, dos 3 médios e dos 4 baixos. Nenhuma mudança fora do escopo declarado.
+
+## Objetivo e escopo (inalterado da v1)
+Rodrigo AI v0.1.0: iniciar sessão pelo navegador, falar PT-BR, receber resposta falada, continuar conversa com contexto temporário, interromper fala da IA ao começar a falar e encerrar microfone/áudio/processamento. Um único assistente geral. Não implementar roteamento de especialistas, integrações, memória persistente ou APIs pagas. A conclusão exige evidência funcional real, não só mocks. Qualidade da voz e conversa será avaliada pelo usuário; nunca declarar equivalência a voz em nuvem ou aprovar perda de qualidade silenciosamente.
+
+## Fatos, candidatos e decisões (inalterado da v1, exceto TTS conforme Correção 7)
+MacBook Air Apple M5, 16 GB; Node 26.5.1/npm 11.17.0; ffmpeg, uv e Python 3.14 disponíveis, vozes PT-BR do macOS listadas incluindo Luciana. Ollama/whisper-cli não encontrados. Há >200 GiB livres.
+Proposta local: MLX LM com mlx-community/Qwen3-4B-Instruct-2507-4bit (LLM), mlx-whisper com mlx-community/whisper-small-mlx (STT). TTS: adaptador `IVoiceProvider` (já existe o ponto de extensão em `src/shared/extensions/voice.ts`) com dois providers concretos — `say` (padrão, foco em latência mínima) e `kokoro` (o motor já validado em `~/.venvs/tts-say`, ativável via `TTS_ENGINE=kokoro` para comparação de naturalidade). Nenhuma API OpenAI. Não usar Web Speech Recognition remoto nem fallback cloud. Modelos são candidatos a benchmark; naturalidade e precisão ainda não comprovadas. Se pacote/modelo indisponível ou desempenho inaceitável, reportar evidência e pedir revisão de arquitetura; não trocar silenciosamente.
+Fontes verificadas 2026-09-11: https://github.com/ml-explore/mlx-lm ; https://github.com/ml-explore/mlx-examples/tree/main/whisper ; https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit ; https://huggingface.co/mlx-community/whisper-small-mlx . Usar APIs atuais dos pacotes efetivamente instalados. Não interpretar benchmarks de modelos grandes como resultados do modelo 4B.
+
+## Arquitetura
+Preservar TS/Node e Vite. Adaptador local de voz no backend implementando `IVoiceProvider`; worker Python persistente para MLX LM/STT via stdin/stdout NDJSON, identificado por requestId/sessionId/turnId. stdout somente protocolo, stderr diagnósticos sem transcrições/segredos. Runtime Python 3.12 isolado em .venv; uv cache/python e HF_HOME dentro da pasta .runtime ignorada, modelos dentro .runtime/models. Instalação explícita separada (`npm run setup:voice`); pin versões resolvidas e revisões dos modelos. Limite downloads inicialmente 8 GiB; sem login/chaves, sem trust_remote_code, sem execução de código de repositório de modelo. Offline em operação: HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE; nenhuma tentativa automática de baixar modelos ao iniciar sessão. Se faltarem dependências/modelos, erro acionável em PT-BR e base Fase 1 continua funcionando.
+
+**Correção 5 (achado médio — cache Metal):** o worker Python chama `mx.metal.set_cache_limit(<limite fixo, ex. 1 GiB>)` na inicialização (antes de carregar qualquer modelo) e `mx.metal.clear_cache()` ao final de cada turno completo e em qualquer cancelamento. Sem essa chamada, o cache do MLX cresce sem limite a cada turno e força swap num M5 de 16GB compartilhado com Node/Vite/Chrome.
+
+Worker mantém modelos aquecidos; uma tarefa de inferência por vez e fila limitada a 1 (nenhuma fila de turnos obsoletos — um novo turno legítimo descarta o anterior, nunca enfileira atrás dele). Node gerencia ciclo de vida, deadlines e cancelamento.
+
+**Correção 1 (achado alto — cancelamento por reinício do worker é proibido no fluxo normal):** o reinício do processo Python worker (kill + respawn + 120s de aquecimento) é reservado exclusivamente a falhas catastróficas — worker travado além do timeout de 60s do turno, crash do processo, ou erro de protocolo irrecuperável. Cancelamento por barge-in ou por novo turno do usuário NUNCA reinicia o worker. Em vez disso:
+- O loop de geração do LLM roda via `stream_generate` do mlx-lm, verificando uma flag de cancelamento (`cancel_event`, compartilhada via um `threading.Event` ou checagem de um arquivo/pipe de controle não bloqueante) a cada token emitido; ao detectar cancelamento, interrompe a geração e descarta o restante do turno em menos de ~50ms (tempo de um passo de geração).
+- STT (mlx-whisper) roda sobre um segmento de áudio já finalizado (não é stream token-a-token) — cancelamento aqui significa apenas descartar o resultado quando pronto, sem enviar ao cliente; não há como interromper uma transcrição de <1s em andamento, e não é necessário.
+- O worker permanece vivo e aquecido entre turnos e entre cancelamentos; o aquecimento de 120s só ocorre na inicialização do processo (uma vez por sessão de app) ou após uma falha catastrófica, nunca por barge-in.
+
+Timeout máximo de turno 60s (só se acionado, indica falha catastrófica → reinício do worker). Saída LLM até 160 tokens, contexto temporário limitado a 8 turnos/4096 tokens, 1 sessão ativa por vez (com preempção — ver Correção 2), estado/áudio apagados ao encerrar/expirar em 10min ociosos. Sem gravação de conversas em logs ou disco permanente.
+
+**Correção 10 (achado baixo — shutdown integrado):** `src/backend/index.ts` estende os handlers de `SIGINT`/`SIGTERM` para, antes de fechar o servidor HTTP: (1) enviar `SIGTERM` ao worker Python, (2) aguardar até 3s por saída limpa, (3) enviar `SIGKILL` se ainda vivo, (4) remover recursivamente o diretório temporário de áudio da sessão. O mesmo procedimento roda em qualquer encerramento de sessão (não só shutdown do processo).
+
+## Transporte e sessão
+
+**Correção 4 (achado médio — protocolo definido, não ambíguo):** endpoints REST `POST /api/voice/session` (cria sessão, retorna token), `POST /api/voice/session/audio` (envia chunk de áudio WAV do turno), `POST /api/voice/session/cancel` (cancela turno em andamento), `POST /api/voice/session/end` (encerra sessão explicitamente) — todos same-origin, exigem token da sessão. Uma conexão `GET /api/voice/session/events` (SSE, `text/event-stream`) por sessão ativa, usada pelo servidor para emitir eventos assíncronos: `transcript` (texto parcial/final do STT), `token` (texto incremental do LLM), `audio_ready` (URL/id de um chunk de áudio de frase pronto para reprodução), `state` (ouvindo/processando/falando/aquecendo/erro), `error`.
+
+**Correção 2 (achado alto — preempção de sessão, sem bloqueio de 10 minutos):** uma nova requisição legítima de `POST /api/voice/session` (mesma origem, Host válido) sempre é aceita e imediatamente substitui qualquer sessão anterior ainda registrada como ativa: a sessão antiga é encerrada de forma síncrona (cancela turno em andamento no worker via `cancel_event`, invalida seu token, libera seus arquivos temporários) antes de a nova sessão ser criada e seu token retornado. O timeout de 10 minutos ociosos continua existindo como limpeza automática independente, mas nunca é a única forma de uma nova sessão ser aceita — um F5 do usuário nunca resulta em espera.
+
+Saída textual incremental e áudio por frase é **obrigatório, não condicional** (ver Correção 6). Toda resposta atrasada/turno cancelado é descartada no cliente e servidor via checagem de `turnId` — eventos SSE e chunks de áudio carregam o `turnId` de origem; o cliente ignora qualquer evento cujo `turnId` não seja o do turno atual. Nova fala cancela áudio imediato, aborta fetch, invalida turno (incrementa o `turnId` ativo) e limpa fila de reprodução. Não reapresentar áudio antigo após reconnect (o cliente reconecta ao SSE com o `turnId` mais recente que possui; eventos anteriores a ele são ignorados).
+
+Controle de autorização local: Host estrito mantido (herdado da Fase 1); checar Origin exata dos POSTs e token aleatório por sessão criado após bootstrap same-origin; nenhuma CORS permissiva. Tokens sem logs. Clientes externos/cross-origin não podem iniciar geração, ler resultados ou encerrar sessões. Limitar corpos (áudio até 2 MB e 20s por turno, PCM WAV mono16k), texto até 2000 caracteres para testes/entrada alternativa. Validar WAV conteúdo e duração; não aceitar caminho de arquivo/URL/comando fornecidos pelo cliente.
+
+**Correção 3 (achado alto — injeção de argumento no `say`):** todo subprocesso que recebe texto originado do LLM ou do usuário como argumento (`say`, e qualquer outro binário CLI usado) constrói o array de argumentos com o delimitador de fim-de-opções `--` imediatamente antes do texto: `['/usr/bin/say', '-v', 'Luciana', '-o', tempFile, '--', text]`. Nenhum texto dinâmico é concatenado em string de shell; `child_process.spawn`/`execFile` sempre com array de argumentos, `shell: false`, e timeout. Áudios temporários em diretórios aleatórios privados (nome gerado via `crypto.randomUUID()`, nunca derivado de input do usuário), limpeza em `finally` e na inicialização do processo; sem acesso arbitrário a arquivos.
+
+## Interface e captura
+Interface PT-BR simples: Iniciar conversa, Encerrar, Silenciar microfone, Interromper resposta; transcrição e respostas como texto acessível. Exibir ouvindo/processando/falando/aquecendo/erro; transcrição nunca simulada. Microfone somente após clique e permissão; parar tracks/AudioContext/fetch ao encerrar, fechar página ou erro fatal. Não solicitar microfone durante instalação/testes automáticos. getUserMedia com echoCancellation/noiseSuppression, Web Audio PCM+detecção de atividade de voz (VAD), pre-roll ~200ms, limiar de silêncio ~700ms, segmento máximo 20s.
+
+**Correção 8 (achado baixo — piso mínimo de energia vocal):** o VAD do cliente só envia o segmento ao backend se a duração contínua acumulada de atividade de voz detectada for ≥400ms; ruído curto (tosse, clique, pigarro) abaixo desse piso é descartado localmente, sem requisição HTTP. Não registrar silêncio como pergunta.
+
+Captura contínua depois de iniciar sessão, sem exigir botão por turno; opção apertar-para-falar pode existir apenas como alternativa, não substituir aceite contínuo.
+
+**Correção 9 (achado baixo — histerese contra autointerrupção):** durante o estado "falando" (TTS em reprodução), o limiar de energia do VAD para acionar barge-in é elevado (histerese) e exige fala sustentada por ≥250ms acima do limiar antes de interromper a reprodução — evita que o vazamento acústico do próprio áudio da IA no alto-falante dispare autocancelamento. Debounce para ruído mantido; cessar áudio até 300ms após detecção confirmada de barge-in real; cancelar trabalho obsoleto (invalidar `turnId`). Eco de alto-falante continua sendo um risco residual reconhecido — fone recomendado no teste inicial; registrar como limitação conhecida se mãos-livres não funcionar mesmo com a histerese.
+Nenhum áudio toca nos alto-falantes do Mac pelo backend: TTS grava arquivo, navegador reproduz.
+
+## Provedor de TTS (Correção 7 — achado baixo, estrutura conforme `IVoiceProvider`)
+Dois providers concretos implementando `src/shared/extensions/voice.ts::IVoiceProvider`:
+- `SayVoiceProvider` (padrão): `/usr/bin/say -v Luciana -o <tmp>.aiff -- <texto>` seguido de `ffmpeg -i <tmp>.aiff <tmp>.wav`; foco em latência mínima (~0,5s medido).
+- `KokoroVoiceProvider` (opcional, `TTS_ENGINE=kokoro`): chama o servidor já existente em `~/.venvs/tts-say` (mesmo usado por `/falar`); latência maior (~1,2s medido) mas naturalidade potencialmente superior — usado para comparação A/B pelo usuário no critério B6, não como padrão.
+Seleção via variável de ambiente `TTS_ENGINE` (default `say`), documentada no README e no `.env.example`.
+
+## Streaming obrigatório de áudio por frase (Correção 6 — achado médio)
+O texto gerado pelo LLM é particionado no primeiro ponto de pontuação terminativa (`.`, `?`, `!`) encontrado no stream de tokens; assim que uma frase completa está disponível, sua síntese TTS é disparada **imediatamente**, em paralelo à continuação da geração dos tokens seguintes pelo worker. Isso é uma exigência arquitetural obrigatória, não uma otimização opcional — sem ela, a meta de latência mediana ≤4s (B6) não é atingível com resposta de múltiplas frases.
+
+## Critérios de aceite
+B1 Fase1 preservada: npm ci/build/typecheck/test passam, health v0.1.0 e contrato/tests atualizados de modo consistente, registros de especialistas continuam vazios.
+B2 Setup isolado reproduzível, versões/revisões/tamanhos/licenças registrados, sem serviços pagos nem chaves. Diagnóstico acusa ausência real; teste offline com pesos locais; retorno a base não depende de Python.
+B3 Uma sessão real microfone -> WAV -> STT PT -> LLM local com contexto -> TTS local -> playback, com 3 turnos coerentes. Um teste automatizado com áudio sintético separado e smoke real dos modelos não substitui teste humano.
+B4 Início/fim/mute/erros de permissão, dispositivo ausente, worker morto/timeout, reconexão, cancelamento e **preempção de sessão (F5)** não deixam tarefas/áudio/microfone presos. Isolamento entre sessões e resultados tardios (via `turnId`) coberto por testes. Sem estado compartilhado indevido.
+B5 VAD contínuo, piso de energia mínima e barge-in com histerese observados em navegador com microfone real; cancelamento de playback e IDs também automatizados com mocks determinísticos. Registrar falha/limite, não declarar funcional por teste mock.
+B6 Benchmark local pelo menos 10 perguntas curtas PT-BR (após warmup), separar STT, primeiro token, primeiro áudio (por frase) e total. Meta inicial mediana do fim da fala ao primeiro áudio <=4s, p95<=8s; stop audio <=300ms após detecção VAD confirmada. Metas não são garantias. Se falhar, fase permanece não aprovada e resultado é levado ao usuário antes de aceitar arquitetura mais lenta ou serviço pago. Incluir comparação subjetiva `say` vs `kokoro` (Correção 7) na avaliação de naturalidade pelo usuário.
+B7 Segurança: rejeitar cross-origin/Host inválido, token ausente/incorreto, áudio/texto excessivo/inválido, sessão expirada, concorrência; nenhuma shell injection (incluindo injeção de argumento via `--`), vazamento de arquivos, logs privados ou download cloud implícito.
+B8 Relatório matriz B1–B7 com evidências, benchmarks e pendências. Estados distinguem implementado/testado/aprovado pelo usuário. Não avançar Fase3 sem fase2 integralmente aprovada. Se teste real depender do usuário, entregar interface pronta e pedir esse teste, mantendo aceite pendente.
+
+## Sequência
+1 Reauditoria independente desta v2, focada em confirmar que os achados altos/médios da v1 foram resolvidos sem reintroduzir regressão. 2 Implementação em lotes com setup local/benchmark real. 3 Revisão e testes, devolvendo correções ao executor. 4 Usuário experimenta voz. 5 Somente aceitar fase se critérios/metas atingidos ou revisão explícita do plano pelo usuário com reauditoria.
+
+## Rastreabilidade
+- v1: autoria "coordenador Codex" (externo a esta sessão), hash `39788517323a8e04107a4641632b3a242a79ec3a23a385809538f27d7615ddf6`.
+- Auditoria v1: Antigravity CLI (`agy`) 1.2.1, `--mode plan --effort high`, 2026-09-11 — **REJEITADA** (3 achados altos, 3 médios, 4 baixos). Log completo em `docs/audits/phase-2-audit-result-v1.log`.
+- v2 (este documento): autoria desta sessão (Claude), incorporando as 10 correções acima.
+# Rodrigo AI — Fase 1 (v0.0.1)
+
+Fundação técnica local do assistente Rodrigo AI em TypeScript e Node.js.
+Nesta fase inicial, o foco é estabelecer uma base robusta e autocontida, com comunicação frontend/backend comprovada, estritamente em loopback, sem dependência de serviços externos, sem consumo de APIs de terceiros e sem cobrança de API ou inferência.
+
+---
+
+## 1. Requisitos do Sistema
+
+- **Node.js**: `>= 20.0.0` (validado e testado no Node v26.5.1).
+- **npm**: `>= 10.0.0` (validado e testado no npm 11.17.0).
+- **Sistema Operacional**: **macOS testado e validado**. Ambientes Linux e Windows **não foram validados** nesta fase.
+- **Rede**: Acesso à internet necessário exclusivamente durante a instalação inicial de dependências (`npm ci`). Durante a execução, o aplicativo opera 100% desconectado de serviços externos.
+
+---
+
+## 2. Instalação e Lockfile
+
+A instalação é determinística e reproduzível utilizando o lockfile (`package-lock.json`):
+
+```bash
+npm ci
+```
+
+---
+
+## 3. Configuração de Ambiente
+
+A aplicação valida rigorosamente os parâmetros de ambiente antes de vincular portas ou criar processos.
+
+É possível configurar via arquivo `.env` na raiz do projeto ou por variáveis exportadas no terminal (`export PORT=...`). O arquivo `.env.example` traz o modelo de referência:
+
+```bash
+# Copiar o arquivo de exemplo
+cp .env.example .env
+```
+
+### Variáveis Disponíveis:
+
+| Variável | Padrão | Descrição e Validação |
+|---|---|---|
+| `PORT` | `3000` | Porta do servidor backend HTTP. Deve ser um número inteiro positivo entre 1 e 65535. Textos (ex.: `3000abc`), números decimais (ex.: `3.5`) e `0` são rejeitados com erro imediato. |
+| `CLIENT_PORT` | `5173` | Porta do servidor de desenvolvimento do frontend (Vite). Deve ser um número inteiro positivo entre 1 e 65535 e **obrigatoriamente diferente** de `PORT`. |
+| `HOST` | `127.0.0.1` | Endereço de loopback. Aceita estritamente `127.0.0.1` ou `localhost`. Endereços externos (`0.0.0.0`, redes locais ou domínios de internet) são rejeitados na inicialização. |
+
+### Proteção Estrita de Host (Loopback Only):
+Tanto no backend quanto no servidor de desenvolvimento Vite, qualquer requisição contendo cabeçalho `Host` não autorizado (como `localhost.evil`, `evil.localhost`, `192.0.2.1` ou portas divergentes) é imediatamente rejeitada com o código HTTP `403 Forbidden`.
+
+---
+
+## 4. Comandos de Operação
+
+### Desenvolvimento Local (`npm run dev`)
+Inicia o ecossistema integrado de desenvolvimento:
+- Compila o código TypeScript do backend.
+- Inicia a API local (`http://127.0.0.1:3000`).
+- Inicia o servidor Vite com proxy para a API (`http://127.0.0.1:5173`).
+- **Encerramento Limpo**: Intercepta `SIGINT` (Ctrl+C) e `SIGTERM`, garantindo que ambos os processos (backend e Vite) sejam finalizados sem deixar processos órfãos ocupando portas.
+
+```bash
+npm run dev
+```
+
+### Verificação de Tipagem (`npm run typecheck`)
+Valida as tipagens estáticas tanto do frontend quanto do backend:
+
+```bash
+npm run typecheck
+```
+
+### Testes Automatizados (`npm test`)
+Executa a suíte de testes de integração e unidade via `node:test`:
+- Validação estrita de configuração e portas.
+- Rejeição de cabeçalhos de Host maliciosos (`localhost.evil`, `evil.localhost`, etc.).
+- Verificação de saúde em `GET /api/health` com campos mínimos e sem exposição de segredos.
+- Rotas 404 de API retornando exclusivamente JSON (nunca HTML).
+- Liberação limpa de portas em encerramentos via `SIGTERM`.
+- Pontos de extensão modulares com registros vazios para a Fase 1.
+
+```bash
+npm test
+```
+
+### Compilação de Produção (`npm run build`)
+Compila o backend (`dist/server/`) via `tsc` e gera o pacote otimizado do frontend (`dist/client/`) via `vite build`:
+
+```bash
+npm run build
+```
+
+### Execução em Produção (`npm start`)
+Inicia o servidor Node.js único servindo o frontend estático e as rotas de API **na mesma origem**:
+
+```bash
+npm start
+```
+Acesse a aplicação no navegador em: `http://127.0.0.1:3000`.
+
+---
+
+## 5. Arquitetura do Código
+
+O projeto está organizado com fronteiras modulares bem definidas:
+
+```
+rodrigo-ai/
+├── src/
+│   ├── backend/               # Servidor HTTP Node.js autocontido
+│   │   ├── config.ts          # Validação estrita de portas e variáveis
+│   │   ├── hostValidator.ts   # Validador de cabeçalho Host
+│   │   ├── routes/health.ts   # Rota GET /api/health
+│   │   ├── server.ts          # Roteamento e entrega de estáticos
+│   │   └── index.ts           # Ponto de entrada de produção
+│   ├── frontend/              # Interface Web leve e acessível
+│   │   ├── index.html         # Marcação semântica e acessível
+│   │   ├── main.ts            # Lógica de conexão com AbortController e timeout
+│   │   └── style.css          # Estilos sem CDNs, contraste legível, foco visível
+│   └── shared/                # Tipagens comuns e pontos de extensão
+│       ├── types.ts           # Contratos de dados estritos
+│       └── extensions/        # Interfaces para voz, agentes e ferramentas
+├── scripts/
+│   └── dev.mjs                # Coordenador de desenvolvimento sem órfãos
+├── dist/                      # Saídas compiladas (geradas no build)
+├── package.json
+├── package-lock.json
+├── tsconfig.json              # Configuração TypeScript do frontend
+└── tsconfig.server.json       # Configuração TypeScript do backend
+```
+
+---
+
+## 6. Transparência de Recursos e Custos
+
+- **Sem cobrança de API ou inferência nesta fase**: Nenhuma API de terceiros, serviço pago em nuvem ou CDN externo é utilizado pela aplicação.
+- **Hardware e Energia**: A aplicação opera localmente, demandando apenas o consumo convencional de processamento e energia da máquina hospedeira.
+- **Fases Futuras do Roteiro**:
+  - **Fase 2**: Voz (captura de áudio, microfone e provedor de voz);
+  - **Fase 3**: Orquestrador;
+  - **Fase 4**: Primeiros especialistas;
+  - Ferramentas e automações avançadas ficam reservadas para etapas posteriores.
+/**
+ * Ponto de extensão para provedores de voz (Fase 2).
+ * Não implementado na Fase 1.
+ */
+export interface IVoiceProvider {
+  readonly id: string;
+  readonly name: string;
+  isAvailable(): boolean;
+}
+/**
+ * Ponto de extensão para ferramentas do sistema (Fase 4).
+ * Não implementado na Fase 1.
+ */
+export interface ITool {
+  readonly name: string;
+  readonly description: string;
+  isAvailable(): boolean;
+}
+
+2026-09-12T13:54:37.729443Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 'noise_reduction'
+2026-09-12T13:55:47.411702Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-12T13:55:54.954907Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+web search: 
+web search: 'input_audio_transcription'
+codex
+A resposta curta é: o Realtime API/Advanced Voice clássico não é simplesmente Whisper → LLM → TTS escondido atrás de uma conexão persistente. Ele usa um modelo multimodal nativo que recebe e gera áudio diretamente. Porém, até a geração “Advanced Voice/Realt​ime” tradicional, a conversa continuava organizada em turnos: um mecanismo externo decidia que o usuário terminou de falar antes de iniciar a resposta.
+
+Há ainda uma distinção temporal importante: em setembro de 2026, “ChatGPT Voice”, “Advanced Voice Mode histórico”, “Realtime API” e o novo “GPT‑Live” já não são exatamente a mesma arquitetura.
+
+## 1. A linhagem correta
+
+- O Voice Mode original era uma cadeia explícita: STT → modelo de texto → TTS.
+- O Advanced Voice baseado em GPT‑4o e o Realtime API introduziram speech-to-speech nativo: um modelo treinado end-to-end em texto, visão e áudio.
+- Essa geração era speech-to-speech, mas turn-based: o sistema ainda esperava um detector declarar o fim do turno.
+- Em 2026, a OpenAI passou o ChatGPT Voice para GPT‑Live, uma arquitetura full-duplex contínua na qual o próprio modelo de voz decide várias vezes por segundo se deve ouvir, falar, pausar, interromper ou delegar trabalho.
+
+A OpenAI documenta que GPT‑4o foi treinado como “um único modelo” end-to-end e contrasta isso explicitamente com a cadeia de três modelos anterior. Também publicou 232 ms no melhor caso e 320 ms em média para resposta a áudio — mas isso é um número de capacidade/modelo divulgado no lançamento, não um SLA de latência ponta-a-ponta da API e não está claro quanto do VAD, rede e playback está incluído. Não deve ser usado como benchmark diretamente comparável ao Rodrigo AI. [GPT‑4o](https://openai.com/index/hello-gpt-4o/), [GPT‑4o System Card](https://openai.com/index/gpt-4o-system-card/).
+
+## 2. “Speech-to-speech nativo” significa exatamente o quê?
+
+Publicamente documentado:
+
+- O caminho principal do Realtime recebe áudio e produz áudio sem um estágio obrigatório de STT ou TTS intermediário.
+- O mesmo modelo interpreta conteúdo verbal, tom, ritmo e inflexão e gera áudio.
+- O Realtime mantém estado de conversa e gera itens de texto, áudio ou chamadas de função dentro da mesma sessão. [Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations).
+
+Isso não significa que “PCM cru entra num Transformer e PCM cru sai” sem componentes auxiliares. Um sistema desse tipo quase certamente possui representação/tokenização de áudio, encoder/decoder acústico e possivelmente componentes semelhantes a codec neural ou vocoder. O GPT‑4o System Card o chama de modelo omni autoregressivo, mas a OpenAI não publicou:
+
+- arquitetura exata do tokenizer/codec de áudio;
+- taxa ou estrutura interna dos audio tokens;
+- separação precisa entre backbone, decoder acústico e vocoder;
+- mecanismo de streaming de KV cache;
+- algoritmo de speculative decoding;
+- topologia de serving e batching do modelo;
+- quanto do VAD ou da transcrição auxiliar compartilha pesos com o modelo principal.
+
+Portanto, qualquer diagrama da internet mostrando “Whisper interno”, um codec específico ou um vocoder específico deve ser tratado como inferência, não documentação.
+
+O Realtime pode emitir transcrições para interface, logging e ferramentas. Isso não torna o caminho principal uma cadeia STT→LLM. A transcrição é uma representação auxiliar; não é seguro assumir que ela é exatamente “o texto que o modelo ouviu”. A própria API reconhece que não consegue alinhar perfeitamente transcript e áudio ao truncar uma fala interrompida.
+
+## 3. WebRTC e WebSocket são transportes, não arquiteturas de modelo
+
+### WebRTC
+
+No navegador, o caminho típico é:
+
+1. O browser cria um `RTCPeerConnection`.
+2. Adiciona a track do microfone.
+3. Cria um data channel, normalmente `oai-events`.
+4. Gera uma oferta SDP.
+5. O servidor da aplicação troca o SDP com `/v1/realtime/calls`, usando a chave permanente no backend ou emitindo antes uma credencial efêmera.
+6. A OpenAI devolve o SDP answer.
+7. Áudio trafega pelas media tracks; eventos JSON trafegam pelo data channel.
+
+WebRTC fornece ICE/NAT traversal, DTLS, SRTP, RTP/RTCP, negociação de codec, jitter buffer, adaptação a perda e integração com processamento de áudio do cliente. Ele normalmente usa UDP, mas pode cair em outros caminhos; não se deve assumir UDP em toda sessão. A documentação recomenda WebRTC para browser/mobile por ser mais robusto sob redes variáveis. [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc).
+
+Internamente, a OpenAI documentou uma arquitetura 1:1 sem SFU como padrão:
+
+- Um transceiver stateful termina ICE, DTLS e SRTP.
+- Esse transceiver converte mídia/eventos para protocolos internos mais simples destinados a inferência, transcrição, speech generation e orquestração.
+- Um relay UDP leve fica na frente do transceiver.
+- O relay usa informação codificada no ICE `ufrag` para encaminhar o primeiro pacote ao transceiver dono da sessão.
+- Há ingressos geográficos e signaling com geo/proximity steering.
+- A implementação usa Pion/Go, buffers pré-alocados, cópias mínimas, `SO_REUSEPORT` e afinidade de threads.
+
+Isso é otimização para escala global e Kubernetes; não é necessário para uma sessão local no mesmo Mac. [Arquitetura WebRTC da OpenAI](https://openai.com/index/delivering-low-latency-voice-ai-at-scale/).
+
+### WebSocket
+
+WebSocket é recomendado principalmente para integrações server-to-server:
+
+- uma conexão TLS/TCP persistente;
+- áudio enviado em chunks, normalmente dentro de eventos JSON e codificado em Base64;
+- áudio de saída recebido em eventos delta;
+- o cliente implementa buffering, reprodução, cancelamento e controle de backpressure;
+- todos os eventos no socket têm ordenação TCP, com possível head-of-line blocking em redes ruins.
+
+É mais simples e totalmente adequado para loopback/local. [WebSockets](https://developers.openai.com/api/docs/guides/voice-websockets).
+
+Para o Rodrigo AI, WebRTC entre navegador e Node seria complexidade excessiva neste momento. Um WebSocket binário local seria suficiente se o REST+SSE atual se tornar gargalo.
+
+## 4. VAD e detecção de fim de turno
+
+O Realtime tradicional oferece dois mecanismos públicos.
+
+### `server_vad`
+
+É detecção acústica baseada em atividade e silêncio. Os parâmetros expostos são:
+
+- `threshold`: limiar de ativação;
+- `prefix_padding_ms`: áudio anterior ao ponto detectado que será reincorporado;
+- `silence_duration_ms`: silêncio necessário para terminar o turno;
+- `create_response`: iniciar resposta automaticamente;
+- `interrupt_response`: cancelar a resposta atual quando nova fala for detectada.
+
+Os eventos fundamentais são:
+
+- `input_audio_buffer.speech_started`;
+- `input_audio_buffer.speech_stopped`.
+
+A OpenAI não publica se o detector acústico é energia, uma rede neural ou uma combinação. Portanto, “baseado em silêncio” é documentado; o algoritmo exato não é. [Realtime VAD](https://developers.openai.com/api/docs/guides/realtime-vad).
+
+### `semantic_vad`
+
+Aqui existe explicitamente um classificador semântico que estima a probabilidade de o usuário ter terminado:
+
+- uma afirmação claramente completa pode terminar quase imediatamente;
+- um “hmm…”, frase incompleta ou hesitação produz um timeout maior;
+- `eagerness: low | medium | high | auto` controla a agressividade.
+
+É essencialmente um classificador de end-of-utterance combinado com timeout dinâmico. Os pesos, features e arquitetura desse classificador não são públicos.
+
+### VAD desabilitado
+
+Com `turn_detection: null`, a aplicação controla:
+
+1. envio dos chunks;
+2. `input_audio_buffer.commit`;
+3. `response.create`.
+
+É a base para push-to-talk. Em ambientes ruidosos, isso pode ser mais confiável e até mais rápido porque elimina o hangover do VAD.
+
+## 5. Barge-in e interrupção
+
+Barge-in não é apenas “parar o alto-falante”. Há três operações diferentes:
+
+1. Interromper o áudio que o usuário ainda não ouviu.
+2. Cancelar a geração ainda em andamento.
+3. Corrigir o histórico da conversa para que o modelo não acredite que falou algo que nunca foi reproduzido.
+
+Com VAD, quando `speech_started` chega:
+
+- o servidor cancela a resposta em geração;
+- em WebRTC/SIP, o servidor conhece o buffer de saída e trunca automaticamente a parte não reproduzida;
+- em WebSocket, o cliente deve parar o playback, calcular quanto áudio foi efetivamente ouvido e enviar `conversation.item.truncate` com `audio_end_ms`.
+
+Isso é uma pista arquitetural importante: interrupção é um protocolo de cancelamento mais uma reconciliação do histórico, não uma propriedade mágica do modelo. [Interruption and Truncation](https://developers.openai.com/api/docs/guides/realtime-conversations#interruption-and-truncation).
+
+### Lacuna atual no plano da Fase 2
+
+O plano de vocês já possui `turnId`, descarte de resultados tardios e limpeza da fila de áudio. Isso resolve reprodução obsoleta, mas deve existir também uma política explícita para o histórico do LLM.
+
+Exemplo:
+
+- O Qwen produziu três frases.
+- Apenas a primeira foi ouvida.
+- O usuário interrompeu no início da segunda.
+- Se as três forem colocadas no histórico, o modelo passa a acreditar que comunicou informação que Rodrigo nunca ouviu.
+
+Para a Fase 2, a solução simples é:
+
+- só confirmar uma frase do assistente no histórico depois do `playback_completed` daquela frase;
+- frases ainda na fila não entram no histórico;
+- se a interrupção ocorrer no meio de uma frase, descarte a frase incompleta do histórico.
+
+Isso é menos preciso que forced alignment, mas semanticamente correto e mais fácil que truncar por milissegundo.
+
+## 6. Como a OpenAI reduz latência
+
+Publicamente observável/documentado:
+
+- conexão persistente e sessão stateful;
+- áudio de entrada e saída em streaming;
+- ausência do gargalo sequencial STT→LLM→TTS no Realtime;
+- geração incremental;
+- WebRTC para jitter, perda, clock drift e congestionamento;
+- ingresso geográfico próximo;
+- media path separado de lógica de aplicação;
+- processos/modelos aquecidos e estado mantido entre turnos;
+- uso e preservação de KV cache;
+- prefill antecipado;
+- output e reasoning limits;
+- ferramentas preparadas antes de serem necessárias.
+
+Na nova infraestrutura GPT‑Live, a OpenAI também documenta:
+
+- frontend de mídia/inferência reescrito de Python `asyncio` para Go;
+- p95 do novo caminho comparável ao antigo p50;
+- RPC assíncrono separando mídia de ferramentas/delegação;
+- preparação paralela de uma nova instância com prefill antes de migrar uma sessão;
+- compaction do contexto em paralelo, seguida de cutover;
+- sessão de reasoning pré-aquecida;
+- prompt caching e session affinity;
+- WARP, uma extensão de startup WebRTC que combina ICE/DTLS/SCTP/data-channel negotiation para reduzir seis round trips a um. [Engenharia do GPT‑Live](https://openai.com/index/continuous-voice-interaction-with-gpt-live/).
+
+Parte disso pertence ao GPT‑Live, não ao Realtime/Advanced Voice clássico. E não há documentação pública suficiente para afirmar detalhes como speculative decoding, batching contínuo ou quantização usada em produção.
+
+## 7. O que replicar agora na Fase 2
+
+A arquitetura local realista continua sendo cascata:
+
+```text
+AudioWorklet / microfone
+    │
+    ├── AEC/NS + ring buffer + VAD ───────────────┐
+    │                                             │ barge-in
+    ▼                                             ▼
+Node: sessão + epoch/turnId + cancelamento ──> flush/cancel
+    │
+    ▼
+MLX Whisper batch
+    │ texto
+    ▼
+Qwen streaming
+    │ tokens
+    ▼
+segmentador de cláusulas/frases
+    │
+    ▼
+TTS local ──> chunks ──> fila de playback do browser
+```
+
+É captura duplex com geração turn-based, não um modelo full-duplex.
+
+Prioridades aplicáveis agora:
+
+1. **Manter modelos e processos aquecidos.** Já está correto no plano. Não reiniciar o worker em barge-in.
+
+2. **Garantir um canal de cancelamento realmente concorrente.** Se o mesmo thread Python estiver preso em `stream_generate`, ele não conseguirá ler uma mensagem `cancel` do stdin. É necessário um reader thread permanente, um segundo file descriptor/socket de controle ou outra via que consiga setar o `threading.Event` enquanto a geração está rodando.
+
+3. **Usar cancelamento hierárquico.** Todo artefato deve carregar `sessionId + turnId + generationEpoch`: transcrição, tokens, jobs TTS, arquivos, fetches e playback. A checagem não pode existir apenas no SSE.
+
+4. **Adicionar o ledger de playback.** O cliente deve informar `chunk_started`, `chunk_completed` e, idealmente, progresso aproximado. Só áudio efetivamente ouvido deve consolidar texto no histórico.
+
+5. **Manter o VAD simples na Fase 2.** O pre-roll de ~200 ms, 700 ms de silêncio, mínimo de 400 ms e histerese de 250 ms durante TTS são razoáveis. Acrescente:
+
+   - noise floor adaptativo;
+   - limiares diferentes para início e fim;
+   - hangover;
+   - rejeição de eventos muito correlacionados com o áudio que está sendo reproduzido.
+
+   O `echoCancellation: true` do navegador ajuda, mas não garante mãos-livres em todos os hardwares. Fones continuam sendo um baseline honesto.
+
+6. **Não tentar semantic VAD completo ainda.** Com `mlx-whisper` executado apenas após o segmento fechar, não há transcript parcial barato para decidir semanticamente o fim. Uma aproximação futura seria iniciar STT especulativo ao detectar 300–500 ms de silêncio e prolongar o turno se o texto parecer incompleto. Isso duplica computação e só vale depois de benchmark.
+
+7. **Continuar o TTS por frase, já previsto no plano.** Para reduzir o silêncio inicial, use limite máximo além da pontuação: por exemplo, emitir a primeira cláusula natural depois de um tamanho mínimo, mesmo que o ponto final ainda não tenha chegado. Chunks curtos demais produzem prosódia quebrada.
+
+8. **Evitar conversões e disco quando possível.** `say → AIFF → ffmpeg → WAV → HTTP → browser` acrescenta startup, escrita, leitura e cópia. Não bloquearia a Fase 2 por isso, mas o primeiro upgrade posterior deve ser TTS que entregue PCM incremental diretamente para a fila de áudio.
+
+9. **Medir o orçamento corretamente.** Registre timestamps monotônicos distintos:
+
+   - último frame vocal real;
+   - `vad_stop`;
+   - início/fim de STT;
+   - primeiro token do LLM;
+   - primeira cláusula estável;
+   - início do TTS;
+   - primeiro byte/chunk de áudio;
+   - primeiro sample efetivamente tocado.
+
+   Assim vocês separam `latência do hangover + STT + TTFT + TTS + buffering`. “Primeiro áudio” também deve ser distinguido de “primeira resposta útil”.
+
+10. **REST+SSE não precisa ser substituído antes do benchmark.** Para uma sessão local e turn-based, funciona. Se aparecer overhead ou se quiserem áudio frame-a-frame, migrem para um WebSocket binário único. WebRTC local não é uma prioridade de Fase 2.
+
+## 8. Function calling durante voz
+
+No Realtime, ferramentas são itens estruturados da conversa:
+
+1. A aplicação declara funções e JSON Schemas em `session.tools` ou apenas em `response.tools`.
+2. O modelo decide chamar uma função.
+3. Argumentos chegam incrementalmente em eventos delta e, ao final, como um item `function_call` com `name`, `arguments` e `call_id`.
+4. A aplicação valida e executa a função.
+5. Ela envia um item `function_call_output` com o mesmo `call_id`.
+6. Emite `response.create` para o modelo incorporar o resultado e continuar falando.
+
+Pelo WebRTC esses eventos passam no data channel; pelo WebSocket passam no mesmo stream de eventos. A aplicação — não o modelo — é responsável por autorização, execução, timeout e idempotência. A API atual também pode chamar servidores MCP remotos e conectores, mas uma função executada pelo backend é o padrão adequado para lógica privada. [Realtime tools](https://developers.openai.com/api/docs/guides/realtime-mcp).
+
+Para Rodrigo AI, o equivalente local é totalmente replicável:
+
+- o Qwen produz um envelope estruturado em vez de texto falável;
+- Node valida com JSON Schema;
+- Node executa a ferramenta;
+- o resultado entra no histórico como mensagem de ferramenta;
+- a geração recomeça;
+- o JSON nunca é enviado ao TTS.
+
+Mas ferramentas estão fora da Fase 2. Agora eu prepararia somente o contrato futuro: `tool.call`, `tool.result`, `callId`, timeout, `AbortSignal`, confirmação e idempotency key.
+
+Uma interrupção de voz não deve desfazer automaticamente uma ferramenta:
+
+- uma consulta read-only pode ser cancelada;
+- uma ação já enviada — apagar arquivo, enviar mensagem, comprar algo — pode não ser reversível;
+- o job da ferramenta precisa ter lifecycle independente do playback;
+- se o usuário interromper, o sistema ainda deve registrar se a ação terminou.
+
+## 9. O que reservar para a Fase 10 paga
+
+Se decidirem usar OpenAI:
+
+- Para Realtime em browser, use WebRTC direto browser→OpenAI.
+- O backend Node emite a credencial efêmera e mantém chaves permanentes fora do browser.
+- Ferramentas privadas e políticas ficam no Node, usando conexão sideband quando necessário.
+- Use `semantic_vad` se a prioridade for evitar cortar hesitações.
+- Aproveite truncamento automático no caminho WebRTC.
+- Considere GPT‑Live, em vez do Realtime turn-based, se o requisito real for escuta/fala simultânea e delegação assíncrona. A documentação atual diferencia explicitamente Realtime, GPT‑Live e pipelines encadeados. [Escolha de arquitetura de voz](https://developers.openai.com/api/docs/guides/voice-agents), [GPT‑Live](https://openai.com/index/introducing-gpt-live/).
+
+Preservem uma API interna independente do fornecedor. Por exemplo, o Rodrigo AI deveria entender conceitos como `speech_started`, `turn_committed`, `audio_delta`, `response_cancel`, `assistant_truncate`, `tool_call` e `tool_result`; cada provider traduz isso para seus eventos próprios.
+
+## 10. O que é realmente não replicável localmente
+
+| Capacidade | Situação |
+|---|---|
+| VAD acústico, pre-roll, hangover, barge-in | Replicável agora |
+| Semantic end-of-turn aproximado | Replicável, com qualidade inferior |
+| Streaming de tokens + TTS por frase | Replicável agora |
+| Cancelamento e truncamento do histórico | Replicável agora |
+| Function calling estruturado | Replicável localmente |
+| WebSocket/WebRTC | Ambos são tecnologias abertas |
+| Speech-to-speech nativo | Não é conceitualmente cloud-only, mas os pesos/treinamento OpenAI não são públicos e não cabem realisticamente na pilha escolhida com qualidade comparável |
+| Full-duplex aprendido, com decisões contínuas do modelo | Não reproduzível com Qwen texto + Whisper batch + TTS; apenas simulável pelo orquestrador |
+| Voz expressiva preservando prosódia do input | Fundamentalmente limitada pelo pipeline com gargalo textual |
+| Relay global, geo-routing, failover e autoscaling | Infraestrutura de nuvem; irrelevante para loopback |
+| Handoff transparente entre instâncias e compaction paralela | Possível em teoria, mas injustificável num único Mac de 16 GB |
+| Safety classifiers e monitoramento de áudio em escala | Provider/cloud-specific |
+| Latência e qualidade de um frontier native-audio model | Dependente de pesos, treinamento e compute não disponíveis localmente |
+
+Minha avaliação prática: o plano da Fase 2 está arquiteturalmente coerente para um protótipo local. As duas melhorias de maior valor inspiradas diretamente no Realtime são o **histórico baseado no que foi realmente ouvido** e um **canal de cancelamento concorrente que continue operando enquanto `stream_generate` ocupa o worker**. WebRTC e semantic VAD podem esperar; sem corrigir esses dois pontos, o barge-in pode parecer funcionar no alto-falante enquanto deixa estado conversacional incorreto por baixo.
+tokens used
+196.090
+A resposta curta é: o Realtime API/Advanced Voice clássico não é simplesmente Whisper → LLM → TTS escondido atrás de uma conexão persistente. Ele usa um modelo multimodal nativo que recebe e gera áudio diretamente. Porém, até a geração “Advanced Voice/Realt​ime” tradicional, a conversa continuava organizada em turnos: um mecanismo externo decidia que o usuário terminou de falar antes de iniciar a resposta.
+
+Há ainda uma distinção temporal importante: em setembro de 2026, “ChatGPT Voice”, “Advanced Voice Mode histórico”, “Realtime API” e o novo “GPT‑Live” já não são exatamente a mesma arquitetura.
+
+## 1. A linhagem correta
+
+- O Voice Mode original era uma cadeia explícita: STT → modelo de texto → TTS.
+- O Advanced Voice baseado em GPT‑4o e o Realtime API introduziram speech-to-speech nativo: um modelo treinado end-to-end em texto, visão e áudio.
+- Essa geração era speech-to-speech, mas turn-based: o sistema ainda esperava um detector declarar o fim do turno.
+- Em 2026, a OpenAI passou o ChatGPT Voice para GPT‑Live, uma arquitetura full-duplex contínua na qual o próprio modelo de voz decide várias vezes por segundo se deve ouvir, falar, pausar, interromper ou delegar trabalho.
+
+A OpenAI documenta que GPT‑4o foi treinado como “um único modelo” end-to-end e contrasta isso explicitamente com a cadeia de três modelos anterior. Também publicou 232 ms no melhor caso e 320 ms em média para resposta a áudio — mas isso é um número de capacidade/modelo divulgado no lançamento, não um SLA de latência ponta-a-ponta da API e não está claro quanto do VAD, rede e playback está incluído. Não deve ser usado como benchmark diretamente comparável ao Rodrigo AI. [GPT‑4o](https://openai.com/index/hello-gpt-4o/), [GPT‑4o System Card](https://openai.com/index/gpt-4o-system-card/).
+
+## 2. “Speech-to-speech nativo” significa exatamente o quê?
+
+Publicamente documentado:
+
+- O caminho principal do Realtime recebe áudio e produz áudio sem um estágio obrigatório de STT ou TTS intermediário.
+- O mesmo modelo interpreta conteúdo verbal, tom, ritmo e inflexão e gera áudio.
+- O Realtime mantém estado de conversa e gera itens de texto, áudio ou chamadas de função dentro da mesma sessão. [Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations).
+
+Isso não significa que “PCM cru entra num Transformer e PCM cru sai” sem componentes auxiliares. Um sistema desse tipo quase certamente possui representação/tokenização de áudio, encoder/decoder acústico e possivelmente componentes semelhantes a codec neural ou vocoder. O GPT‑4o System Card o chama de modelo omni autoregressivo, mas a OpenAI não publicou:
+
+- arquitetura exata do tokenizer/codec de áudio;
+- taxa ou estrutura interna dos audio tokens;
+- separação precisa entre backbone, decoder acústico e vocoder;
+- mecanismo de streaming de KV cache;
+- algoritmo de speculative decoding;
+- topologia de serving e batching do modelo;
+- quanto do VAD ou da transcrição auxiliar compartilha pesos com o modelo principal.
+
+Portanto, qualquer diagrama da internet mostrando “Whisper interno”, um codec específico ou um vocoder específico deve ser tratado como inferência, não documentação.
+
+O Realtime pode emitir transcrições para interface, logging e ferramentas. Isso não torna o caminho principal uma cadeia STT→LLM. A transcrição é uma representação auxiliar; não é seguro assumir que ela é exatamente “o texto que o modelo ouviu”. A própria API reconhece que não consegue alinhar perfeitamente transcript e áudio ao truncar uma fala interrompida.
+
+## 3. WebRTC e WebSocket são transportes, não arquiteturas de modelo
+
+### WebRTC
+
+No navegador, o caminho típico é:
+
+1. O browser cria um `RTCPeerConnection`.
+2. Adiciona a track do microfone.
+3. Cria um data channel, normalmente `oai-events`.
+4. Gera uma oferta SDP.
+5. O servidor da aplicação troca o SDP com `/v1/realtime/calls`, usando a chave permanente no backend ou emitindo antes uma credencial efêmera.
+6. A OpenAI devolve o SDP answer.
+7. Áudio trafega pelas media tracks; eventos JSON trafegam pelo data channel.
+
+WebRTC fornece ICE/NAT traversal, DTLS, SRTP, RTP/RTCP, negociação de codec, jitter buffer, adaptação a perda e integração com processamento de áudio do cliente. Ele normalmente usa UDP, mas pode cair em outros caminhos; não se deve assumir UDP em toda sessão. A documentação recomenda WebRTC para browser/mobile por ser mais robusto sob redes variáveis. [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc).
+
+Internamente, a OpenAI documentou uma arquitetura 1:1 sem SFU como padrão:
+
+- Um transceiver stateful termina ICE, DTLS e SRTP.
+- Esse transceiver converte mídia/eventos para protocolos internos mais simples destinados a inferência, transcrição, speech generation e orquestração.
+- Um relay UDP leve fica na frente do transceiver.
+- O relay usa informação codificada no ICE `ufrag` para encaminhar o primeiro pacote ao transceiver dono da sessão.
+- Há ingressos geográficos e signaling com geo/proximity steering.
+- A implementação usa Pion/Go, buffers pré-alocados, cópias mínimas, `SO_REUSEPORT` e afinidade de threads.
+
+Isso é otimização para escala global e Kubernetes; não é necessário para uma sessão local no mesmo Mac. [Arquitetura WebRTC da OpenAI](https://openai.com/index/delivering-low-latency-voice-ai-at-scale/).
+
+### WebSocket
+
+WebSocket é recomendado principalmente para integrações server-to-server:
+
+- uma conexão TLS/TCP persistente;
+- áudio enviado em chunks, normalmente dentro de eventos JSON e codificado em Base64;
+- áudio de saída recebido em eventos delta;
+- o cliente implementa buffering, reprodução, cancelamento e controle de backpressure;
+- todos os eventos no socket têm ordenação TCP, com possível head-of-line blocking em redes ruins.
+
+É mais simples e totalmente adequado para loopback/local. [WebSockets](https://developers.openai.com/api/docs/guides/voice-websockets).
+
+Para o Rodrigo AI, WebRTC entre navegador e Node seria complexidade excessiva neste momento. Um WebSocket binário local seria suficiente se o REST+SSE atual se tornar gargalo.
+
+## 4. VAD e detecção de fim de turno
+
+O Realtime tradicional oferece dois mecanismos públicos.
+
+### `server_vad`
+
+É detecção acústica baseada em atividade e silêncio. Os parâmetros expostos são:
+
+- `threshold`: limiar de ativação;
+- `prefix_padding_ms`: áudio anterior ao ponto detectado que será reincorporado;
+- `silence_duration_ms`: silêncio necessário para terminar o turno;
+- `create_response`: iniciar resposta automaticamente;
+- `interrupt_response`: cancelar a resposta atual quando nova fala for detectada.
+
+Os eventos fundamentais são:
+
+- `input_audio_buffer.speech_started`;
+- `input_audio_buffer.speech_stopped`.
+
+A OpenAI não publica se o detector acústico é energia, uma rede neural ou uma combinação. Portanto, “baseado em silêncio” é documentado; o algoritmo exato não é. [Realtime VAD](https://developers.openai.com/api/docs/guides/realtime-vad).
+
+### `semantic_vad`
+
+Aqui existe explicitamente um classificador semântico que estima a probabilidade de o usuário ter terminado:
+
+- uma afirmação claramente completa pode terminar quase imediatamente;
+- um “hmm…”, frase incompleta ou hesitação produz um timeout maior;
+- `eagerness: low | medium | high | auto` controla a agressividade.
+
+É essencialmente um classificador de end-of-utterance combinado com timeout dinâmico. Os pesos, features e arquitetura desse classificador não são públicos.
+
+### VAD desabilitado
+
+Com `turn_detection: null`, a aplicação controla:
+
+1. envio dos chunks;
+2. `input_audio_buffer.commit`;
+3. `response.create`.
+
+É a base para push-to-talk. Em ambientes ruidosos, isso pode ser mais confiável e até mais rápido porque elimina o hangover do VAD.
+
+## 5. Barge-in e interrupção
+
+Barge-in não é apenas “parar o alto-falante”. Há três operações diferentes:
+
+1. Interromper o áudio que o usuário ainda não ouviu.
+2. Cancelar a geração ainda em andamento.
+3. Corrigir o histórico da conversa para que o modelo não acredite que falou algo que nunca foi reproduzido.
+
+Com VAD, quando `speech_started` chega:
+
+- o servidor cancela a resposta em geração;
+- em WebRTC/SIP, o servidor conhece o buffer de saída e trunca automaticamente a parte não reproduzida;
+- em WebSocket, o cliente deve parar o playback, calcular quanto áudio foi efetivamente ouvido e enviar `conversation.item.truncate` com `audio_end_ms`.
+
+Isso é uma pista arquitetural importante: interrupção é um protocolo de cancelamento mais uma reconciliação do histórico, não uma propriedade mágica do modelo. [Interruption and Truncation](https://developers.openai.com/api/docs/guides/realtime-conversations#interruption-and-truncation).
+
+### Lacuna atual no plano da Fase 2
+
+O plano de vocês já possui `turnId`, descarte de resultados tardios e limpeza da fila de áudio. Isso resolve reprodução obsoleta, mas deve existir também uma política explícita para o histórico do LLM.
+
+Exemplo:
+
+- O Qwen produziu três frases.
+- Apenas a primeira foi ouvida.
+- O usuário interrompeu no início da segunda.
+- Se as três forem colocadas no histórico, o modelo passa a acreditar que comunicou informação que Rodrigo nunca ouviu.
+
+Para a Fase 2, a solução simples é:
+
+- só confirmar uma frase do assistente no histórico depois do `playback_completed` daquela frase;
+- frases ainda na fila não entram no histórico;
+- se a interrupção ocorrer no meio de uma frase, descarte a frase incompleta do histórico.
+
+Isso é menos preciso que forced alignment, mas semanticamente correto e mais fácil que truncar por milissegundo.
+
+## 6. Como a OpenAI reduz latência
+
+Publicamente observável/documentado:
+
+- conexão persistente e sessão stateful;
+- áudio de entrada e saída em streaming;
+- ausência do gargalo sequencial STT→LLM→TTS no Realtime;
+- geração incremental;
+- WebRTC para jitter, perda, clock drift e congestionamento;
+- ingresso geográfico próximo;
+- media path separado de lógica de aplicação;
+- processos/modelos aquecidos e estado mantido entre turnos;
+- uso e preservação de KV cache;
+- prefill antecipado;
+- output e reasoning limits;
+- ferramentas preparadas antes de serem necessárias.
+
+Na nova infraestrutura GPT‑Live, a OpenAI também documenta:
+
+- frontend de mídia/inferência reescrito de Python `asyncio` para Go;
+- p95 do novo caminho comparável ao antigo p50;
+- RPC assíncrono separando mídia de ferramentas/delegação;
+- preparação paralela de uma nova instância com prefill antes de migrar uma sessão;
+- compaction do contexto em paralelo, seguida de cutover;
+- sessão de reasoning pré-aquecida;
+- prompt caching e session affinity;
+- WARP, uma extensão de startup WebRTC que combina ICE/DTLS/SCTP/data-channel negotiation para reduzir seis round trips a um. [Engenharia do GPT‑Live](https://openai.com/index/continuous-voice-interaction-with-gpt-live/).
+
+Parte disso pertence ao GPT‑Live, não ao Realtime/Advanced Voice clássico. E não há documentação pública suficiente para afirmar detalhes como speculative decoding, batching contínuo ou quantização usada em produção.
+
+## 7. O que replicar agora na Fase 2
+
+A arquitetura local realista continua sendo cascata:
+
+```text
+AudioWorklet / microfone
+    │
+    ├── AEC/NS + ring buffer + VAD ───────────────┐
+    │                                             │ barge-in
+    ▼                                             ▼
+Node: sessão + epoch/turnId + cancelamento ──> flush/cancel
+    │
+    ▼
+MLX Whisper batch
+    │ texto
+    ▼
+Qwen streaming
+    │ tokens
+    ▼
+segmentador de cláusulas/frases
+    │
+    ▼
+TTS local ──> chunks ──> fila de playback do browser
+```
+
+É captura duplex com geração turn-based, não um modelo full-duplex.
+
+Prioridades aplicáveis agora:
+
+1. **Manter modelos e processos aquecidos.** Já está correto no plano. Não reiniciar o worker em barge-in.
+
+2. **Garantir um canal de cancelamento realmente concorrente.** Se o mesmo thread Python estiver preso em `stream_generate`, ele não conseguirá ler uma mensagem `cancel` do stdin. É necessário um reader thread permanente, um segundo file descriptor/socket de controle ou outra via que consiga setar o `threading.Event` enquanto a geração está rodando.
+
+3. **Usar cancelamento hierárquico.** Todo artefato deve carregar `sessionId + turnId + generationEpoch`: transcrição, tokens, jobs TTS, arquivos, fetches e playback. A checagem não pode existir apenas no SSE.
+
+4. **Adicionar o ledger de playback.** O cliente deve informar `chunk_started`, `chunk_completed` e, idealmente, progresso aproximado. Só áudio efetivamente ouvido deve consolidar texto no histórico.
+
+5. **Manter o VAD simples na Fase 2.** O pre-roll de ~200 ms, 700 ms de silêncio, mínimo de 400 ms e histerese de 250 ms durante TTS são razoáveis. Acrescente:
+
+   - noise floor adaptativo;
+   - limiares diferentes para início e fim;
+   - hangover;
+   - rejeição de eventos muito correlacionados com o áudio que está sendo reproduzido.
+
+   O `echoCancellation: true` do navegador ajuda, mas não garante mãos-livres em todos os hardwares. Fones continuam sendo um baseline honesto.
+
+6. **Não tentar semantic VAD completo ainda.** Com `mlx-whisper` executado apenas após o segmento fechar, não há transcript parcial barato para decidir semanticamente o fim. Uma aproximação futura seria iniciar STT especulativo ao detectar 300–500 ms de silêncio e prolongar o turno se o texto parecer incompleto. Isso duplica computação e só vale depois de benchmark.
+
+7. **Continuar o TTS por frase, já previsto no plano.** Para reduzir o silêncio inicial, use limite máximo além da pontuação: por exemplo, emitir a primeira cláusula natural depois de um tamanho mínimo, mesmo que o ponto final ainda não tenha chegado. Chunks curtos demais produzem prosódia quebrada.
+
+8. **Evitar conversões e disco quando possível.** `say → AIFF → ffmpeg → WAV → HTTP → browser` acrescenta startup, escrita, leitura e cópia. Não bloquearia a Fase 2 por isso, mas o primeiro upgrade posterior deve ser TTS que entregue PCM incremental diretamente para a fila de áudio.
+
+9. **Medir o orçamento corretamente.** Registre timestamps monotônicos distintos:
+
+   - último frame vocal real;
+   - `vad_stop`;
+   - início/fim de STT;
+   - primeiro token do LLM;
+   - primeira cláusula estável;
+   - início do TTS;
+   - primeiro byte/chunk de áudio;
+   - primeiro sample efetivamente tocado.
+
+   Assim vocês separam `latência do hangover + STT + TTFT + TTS + buffering`. “Primeiro áudio” também deve ser distinguido de “primeira resposta útil”.
+
+10. **REST+SSE não precisa ser substituído antes do benchmark.** Para uma sessão local e turn-based, funciona. Se aparecer overhead ou se quiserem áudio frame-a-frame, migrem para um WebSocket binário único. WebRTC local não é uma prioridade de Fase 2.
+
+## 8. Function calling durante voz
+
+No Realtime, ferramentas são itens estruturados da conversa:
+
+1. A aplicação declara funções e JSON Schemas em `session.tools` ou apenas em `response.tools`.
+2. O modelo decide chamar uma função.
+3. Argumentos chegam incrementalmente em eventos delta e, ao final, como um item `function_call` com `name`, `arguments` e `call_id`.
+4. A aplicação valida e executa a função.
+5. Ela envia um item `function_call_output` com o mesmo `call_id`.
+6. Emite `response.create` para o modelo incorporar o resultado e continuar falando.
+
+Pelo WebRTC esses eventos passam no data channel; pelo WebSocket passam no mesmo stream de eventos. A aplicação — não o modelo — é responsável por autorização, execução, timeout e idempotência. A API atual também pode chamar servidores MCP remotos e conectores, mas uma função executada pelo backend é o padrão adequado para lógica privada. [Realtime tools](https://developers.openai.com/api/docs/guides/realtime-mcp).
+
+Para Rodrigo AI, o equivalente local é totalmente replicável:
+
+- o Qwen produz um envelope estruturado em vez de texto falável;
+- Node valida com JSON Schema;
+- Node executa a ferramenta;
+- o resultado entra no histórico como mensagem de ferramenta;
+- a geração recomeça;
+- o JSON nunca é enviado ao TTS.
+
+Mas ferramentas estão fora da Fase 2. Agora eu prepararia somente o contrato futuro: `tool.call`, `tool.result`, `callId`, timeout, `AbortSignal`, confirmação e idempotency key.
+
+Uma interrupção de voz não deve desfazer automaticamente uma ferramenta:
+
+- uma consulta read-only pode ser cancelada;
+- uma ação já enviada — apagar arquivo, enviar mensagem, comprar algo — pode não ser reversível;
+- o job da ferramenta precisa ter lifecycle independente do playback;
+- se o usuário interromper, o sistema ainda deve registrar se a ação terminou.
+
+## 9. O que reservar para a Fase 10 paga
+
+Se decidirem usar OpenAI:
+
+- Para Realtime em browser, use WebRTC direto browser→OpenAI.
+- O backend Node emite a credencial efêmera e mantém chaves permanentes fora do browser.
+- Ferramentas privadas e políticas ficam no Node, usando conexão sideband quando necessário.
+- Use `semantic_vad` se a prioridade for evitar cortar hesitações.
+- Aproveite truncamento automático no caminho WebRTC.
+- Considere GPT‑Live, em vez do Realtime turn-based, se o requisito real for escuta/fala simultânea e delegação assíncrona. A documentação atual diferencia explicitamente Realtime, GPT‑Live e pipelines encadeados. [Escolha de arquitetura de voz](https://developers.openai.com/api/docs/guides/voice-agents), [GPT‑Live](https://openai.com/index/introducing-gpt-live/).
+
+Preservem uma API interna independente do fornecedor. Por exemplo, o Rodrigo AI deveria entender conceitos como `speech_started`, `turn_committed`, `audio_delta`, `response_cancel`, `assistant_truncate`, `tool_call` e `tool_result`; cada provider traduz isso para seus eventos próprios.
+
+## 10. O que é realmente não replicável localmente
+
+| Capacidade | Situação |
+|---|---|
+| VAD acústico, pre-roll, hangover, barge-in | Replicável agora |
+| Semantic end-of-turn aproximado | Replicável, com qualidade inferior |
+| Streaming de tokens + TTS por frase | Replicável agora |
+| Cancelamento e truncamento do histórico | Replicável agora |
+| Function calling estruturado | Replicável localmente |
+| WebSocket/WebRTC | Ambos são tecnologias abertas |
+| Speech-to-speech nativo | Não é conceitualmente cloud-only, mas os pesos/treinamento OpenAI não são públicos e não cabem realisticamente na pilha escolhida com qualidade comparável |
+| Full-duplex aprendido, com decisões contínuas do modelo | Não reproduzível com Qwen texto + Whisper batch + TTS; apenas simulável pelo orquestrador |
+| Voz expressiva preservando prosódia do input | Fundamentalmente limitada pelo pipeline com gargalo textual |
+| Relay global, geo-routing, failover e autoscaling | Infraestrutura de nuvem; irrelevante para loopback |
+| Handoff transparente entre instâncias e compaction paralela | Possível em teoria, mas injustificável num único Mac de 16 GB |
+| Safety classifiers e monitoramento de áudio em escala | Provider/cloud-specific |
+| Latência e qualidade de um frontier native-audio model | Dependente de pesos, treinamento e compute não disponíveis localmente |
+
+Minha avaliação prática: o plano da Fase 2 está arquiteturalmente coerente para um protótipo local. As duas melhorias de maior valor inspiradas diretamente no Realtime são o **histórico baseado no que foi realmente ouvido** e um **canal de cancelamento concorrente que continue operando enquanto `stream_generate` ocupa o worker**. WebRTC e semantic VAD podem esperar; sem corrigir esses dois pontos, o barge-in pode parecer funcionar no alto-falante enquanto deixa estado conversacional incorreto por baixo.

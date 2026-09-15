@@ -1,0 +1,199 @@
+# Relatório de Reauditoria Adversarial — Rodrigo AI Fase 4 v2
+
+**Papel:** Auditor Adversarial de Software (Modo Somente Leitura)  
+**Alvo Auditado:** [`docs/phase-4-v2.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md)  
+**Documentos de Referência:** [`docs/phase-4-v1.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v1.md), [`docs/audits/phase-4-audit-result-v1-agy.log`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-4-audit-result-v1-agy.log), [`docs/phase-3-v2.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-3-v2.md), [`CLAUDE.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/CLAUDE.md) e o código-fonte real do projeto.
+
+---
+
+## 1. Avaliação Ponto a Ponto dos 9 Achados Originais da v1
+
+---
+
+### Achado 1: Quebra Imediata da Suíte de Testes Existente em `extensions.test.ts`
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:13-14, 423-427, 452, 464`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L13-L14)
+* **Confronto com o Código:**
+  No código real, [`src/backend/__tests__/extensions.test.ts:30,34`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/extensions.test.ts#L30) afirmava `agents?.phase === 3` e `tools?.phase === 4`. A v2 incluiu explicitamente `extensions.test.ts` na lista de arquivos a atualizar (linhas 423-427), alterando as asserções para fases `4` e `5` e mantendo válidas as verificações de estado padrão (`available: false`, `getAgents()` vazio). O Critério C1 e a Sequência de Implementação (linhas 452 e 464) agora cobrem essa sincronização formalmente.
+
+---
+
+### Achado 2: Emissão Prematura de `routing` e `state: falando` Antes de Validar o Agente
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:15-16, 346-354`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L15-L16)
+* **Confronto com o Código:**
+  No pseudocódigo de [`SessionManager.runTurn()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L212), a v2 inverteu a ordem de operações:
+  ```typescript
+  // Linhas 346-354 da v2:
+  const agent = selectAgentForLabel(label, this.agents);
+  const systemPrompt = `${agent.getSystemPrompt()}\n\n${VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS}`;
+
+  const handled = label !== 'AMBIGUO';
+  this.emit(session, { type: 'routing', turnId: turn.turnId, label, handled });
+  this.emit(session, { type: 'state', state: 'falando' });
+  ```
+  Se [`selectAgentForLabel`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L211) falhar (disparando `AgentNotRegisteredError`), nenhuma emissão de `routing` ou `state: falando` terá ocorrido. O erro é capturado pelo `catch` externo ainda durante o estado `processando`, emitindo `error` e `state: erro`. O pipeline respeita estritamente o contrato de transparência estabelecido na Fase 3.
+
+---
+
+### Achado 3: Alucinação de Endpoint no Critério de Aceite C2 (`GET /api/health`)
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:17-18, 452, 453-454`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L17-L18)
+* **Confronto com o Código:**
+  O Critério C2 foi completamente reescrito (linhas 453-454): não menciona mais `/api/health` nem supõe rotas HTTP inexistentes. Em vez disso, estabelece que a verificação será feita diretamente via teste automatizado invocando `ExtensionRegistry.getInstance().getModuleStatuses()`. O Critério C1 (linha 452) explicitou que [`health.test.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/health.test.ts#L41) permanece inalterado, protegendo a restrição de 2 chaves do payload de saúde (`status` e `version`).
+
+---
+
+### Achado 4: Ausência de Salvaguardas de Segurança e Saúde Mental Fora de Virtologia
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:19-20, 53-67, 112-114, 307-319, 347, 432, 448, 457`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L19-L20)
+* **Confronto com o Código:**
+  A v2 transformou as restrições universais em `VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS`, injetadas em **todos** os agentes (Geral, Teologia, Virtologia e Ambíguo via Geral). O bloco incorpora:
+  1. Cláusula de prioridade absoluta de sistema contra sobrescrita de identidade via voz;
+  2. Protocolo de emergência com encaminhamento médico/CVV 188 para risco à vida ou a terceiros.
+  Além disso, o documento introduziu a seção "Limitações conhecidas e aceitas" (linhas 112-114), contextualizando com sobriedade as limitações adversariais intrínsecas de um modelo local de 4B, e adicionou teste automatizado de presença da cláusula (linha 432) e verificação exploratória manual com prompt adversarial em C6 (linha 448).
+
+---
+
+### Achado 5: Tipagem Insegura e Suposição Cega no Frontend (`main.ts`)
+* **Status:** **PARCIALMENTE RESOLVIDO** (Sanou o cast e a assunção, mas introduziu parâmetro morto que quebra `npm run typecheck` — ver Achado Novo 1)
+* **Evidência na v2:** [`docs/phase-4-v2.md:21-22, 394-409`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L21-L22)
+* **Confronto com o Código:**
+  - **O que foi corrigido:** O cast cego com `as` foi eliminado. A checagem explícita `if (label === 'AMBIGUO')` faz com que o TypeScript aplique *type narrowing*, garantindo que `AGENT_DISPLAY_NAMES[label]` receba estritamente `Exclude<OrchestratorLabel, 'AMBIGUO'>` com total segurança de tipos em tempo de compilação.
+  - **O que ficou pendente / falha residual:** A assinatura proposta foi `function formatAgentIndicator(label: OrchestratorLabel, handled: boolean): string`. O parâmetro `handled` **não é utilizado** no corpo da função. Como [`tsconfig.json:15`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/tsconfig.json#L15) habilita `"noUnusedParameters": true`, o typecheck falhará (ver detalhes no Achado Novo 1).
+
+---
+
+### Achado 6: Registro Duplicado no Singleton `ExtensionRegistry` sem Idempotência
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:23-24, 235-238, 420-421, 453`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L23-L24)
+* **Confronto com o Código:**
+  Em [`src/shared/extensions/registry.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/extensions/registry.ts#L28), o método `registerAgent()` passou a checar:
+  ```typescript
+  public registerAgent(agent: IAgent): void {
+    if (this.agents.some((a) => a.id === agent.id)) return;
+    this.agents.push(agent);
+  }
+  ```
+  Isso previne o acúmulo de instâncias caso `createVoiceRuntime()` seja invocado mais de uma vez no mesmo processo (por exemplo, em múltiplos testes). O comportamento é testado em `agents.test.ts` e exigido no Critério C2.
+
+---
+
+### Achado 7: Contrato Inerte de Limite de Tokens (`MAX_CONTEXT_TOKENS`)
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:25-26, 37`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L25-L26)
+* **Confronto com o Código:**
+  A v2 admitiu com honestidade técnica que `MAX_CONTEXT_TOKENS = 4096` não é fiscalizado ativamente em tempo de execução nem por [`sessionManager.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L169-L174) nem por [`scripts/worker/worker.py`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L287) (ambos podam estritamente por número de mensagens). O plano documentou a constante como uma diretriz de dimensionamento de engenharia para guiar o tamanho dos prompts condensados, mantendo o comportamento como limitação herdada conhecida e aceita.
+
+---
+
+### Achado 8: Redução Prematura da Matriz de Validação Real (C6)
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:27-28, 438-447, 457`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L27-L28)
+* **Confronto com o Código:**
+  A tabela de verificação com áudio real do Critério C6 foi ampliada de 3 para 5 casos obrigatórios, resgatando da Fase 3:
+  - Caso 4: Negativo adjacente ("Preciso de mais aceitação da minha família ultimamente"), testando se o agente Geral responde sem acionar vocabulário técnico indevido de Virtologia;
+  - Caso 5: Pergunta mista ("É teologia ou senso comum? Explica os dois"), testando se cai no agente Geral com `handled: false` no evento `routing`.
+  Adicionalmente, inclui o teste exploratório com frase adversarial (linha 448).
+
+---
+
+### Achado 9: Omissão do Arquivo `src/shared/voiceProtocol.ts`
+* **Status:** **REALMENTE RESOLVIDO**
+* **Evidência na v2:** [`docs/phase-4-v2.md:29-30, 375-390, 463`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L29-L30)
+* **Confronto com o Código:**
+  O arquivo [`src/shared/voiceProtocol.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts#L36-L45) agora consta formalmente na seção de Arquitetura (linhas 375-390) com a atualização da documentação de `RoutingEvent` (refletindo que `handled` passa a ser `false` apenas para `AMBIGUO`), e foi integrado no passo 2 da Sequência de Implementação (linha 463).
+
+---
+
+## 2. Achados Novos Introduzidos pela v2 (Regressões e Inconsistências)
+
+---
+
+### [NOVO] Achado 10: Parâmetro não utilizado em `formatAgentIndicator` quebra `npm run typecheck`
+* **Gravidade:** Média
+* **Confiança:** Alta
+* **Localização:** [`docs/phase-4-v2.md:400`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L400) vs [`tsconfig.json:15`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/tsconfig.json#L15) e [`package.json:12`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/package.json#L12)
+* **Descrição:**
+  Na correção do Achado 5, a função proposta em `src/frontend/main.ts` foi escrita como:
+  ```typescript
+  function formatAgentIndicator(label: OrchestratorLabel, handled: boolean): string {
+    if (label === 'AMBIGUO') {
+      return 'Classificado como: AMBÍGUO (respondido pelo agente Geral)';
+    }
+    return `Agente: ${AGENT_DISPLAY_NAMES[label]}`;
+  }
+  ```
+  O parâmetro `handled` foi declarado na função, mas não é referenciado em nenhuma linha de seu corpo.
+  O arquivo [`tsconfig.json`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/tsconfig.json#L15) (que compila `src/frontend/**/*`) define obrigatoriamente:
+  ```json
+  "noUnusedParameters": true
+  ```
+  Como o comando `npm run typecheck` roda `tsc --noEmit && tsc -p tsconfig.server.json --noEmit`, a presença de um parâmetro sem uso dispara imediatamente o erro:
+  `error TS6133: 'handled' is declared but its value is never read.`
+  Isso causará a falha do `npm run typecheck`, violando o Critério C1 (`npm run typecheck` sem regressão).
+* **Ação mínima recomendada:**
+  Remover o parâmetro da assinatura (`function formatAgentIndicator(label: OrchestratorLabel): string`) ou prefixá-lo com underscore (`_handled: boolean`) para atender à exigência do compilador TypeScript.
+
+---
+
+### [NOVO] Achado 11: Risco de quebra por variável órfã `ORCHESTRATOR_LABEL_NAMES` (`noUnusedLocals`)
+* **Gravidade:** Baixa
+* **Confiança:** Alta
+* **Localização:** [`docs/phase-4-v2.md:394-409`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L394-L409) vs [`src/frontend/main.ts:143-148`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/main.ts#L143-L148) e [`tsconfig.json:14`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/tsconfig.json#L14)
+* **Descrição:**
+  No arquivo [`src/frontend/main.ts:143`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/main.ts#L143) existe a constante `ORCHESTRATOR_LABEL_NAMES`. A v2 adiciona `AGENT_DISPLAY_NAMES` e `formatAgentIndicator()`. O plano não orienta explicitamente a remoção de `ORCHESTRATOR_LABEL_NAMES`.
+  Como [`tsconfig.json:14`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/tsconfig.json#L14) possui `"noUnusedLocals": true`, se o desenvolvedor apenas colar o trecho da v2 sem remover `ORCHESTRATOR_LABEL_NAMES`, `npm run typecheck` falhará com `TS6133: 'ORCHESTRATOR_LABEL_NAMES' is declared but its value is never read.`.
+* **Ação mínima recomendada:**
+  Explicitar no plano que `ORCHESTRATOR_LABEL_NAMES` deve ser removido ao introduzir `AGENT_DISPLAY_NAMES`.
+
+---
+
+### [NOVO] Achado 12: Inconsistência na contagem de tokens com as salvaguardas no Critério C5
+* **Gravidade:** Baixa
+* **Confiança:** Média
+* **Localização:** [`docs/phase-4-v2.md:35, 456`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-4-v2.md#L35) vs [`docs/audits/phase-4-audit-result-v1-codex-incomplete.log:4646-4647`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-4-audit-result-v1-codex-incomplete.log#L4646)
+* **Descrição:**
+  As linhas 35 e 456 afirmam que os prompts de Teologia e Virtologia consomem 358 e 333 tokens. No log de medição com o tokenizer real do modelo, esses valores correspondiam aos prompts de especialidade **isolados**.
+  Com as adições da v2 em `VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS` (duas frases novas para atender ao Achado 4), o bloco de restrições universais passou de 121 para ~170 tokens. O prompt real combinado enviado ao motor na Fase 4 tem ~530 tokens (Teologia) e ~500 tokens (Virtologia).
+  Embora ambos permaneçam com folga enorme dentro da janela de 4096 tokens, citar 358/333 no Critério C5 como "prompts reais" gera uma divergência numérica com o que o tokenizer medirá na prática.
+* **Ação mínima recomendada:**
+  Ajustar a redação do C5 para esclarecer que 358 e 333 tokens são os prompts especialistas puros, totalizando ~500-530 tokens com a salvaguarda universal acoplada.
+
+---
+
+## 3. Resumo da Reauditoria
+
+| # | Item Original / Novo | Status | Gravidade | Impacto |
+|---|---|---|---|---|
+| 1 | Quebra em `extensions.test.ts` | **Realmente Resolvido** | Alta | Resolvido |
+| 2 | Emissão prematura de `routing`/`falando` | **Realmente Resolvido** | Alta | Resolvido |
+| 3 | Alucinação de endpoint `/api/health` em C2 | **Realmente Resolvido** | Média | Resolvido |
+| 4 | Salvaguarda de segurança/saúde mental universal | **Realmente Resolvido** | Alta | Resolvido |
+| 5 | Tipagem e suposição no frontend | **Parcialmente Resolvido** | Média | Ver Achado Novo 10 |
+| 6 | Idempotência em `ExtensionRegistry` | **Realmente Resolvido** | Média | Resolvido |
+| 7 | Contrato de `MAX_CONTEXT_TOKENS` como diretriz | **Realmente Resolvido** | Baixa | Resolvido |
+| 8 | Matriz ampliada com áudio real (5 casos) | **Realmente Resolvido** | Média | Resolvido |
+| 9 | Inclusão de `src/shared/voiceProtocol.ts` | **Realmente Resolvido** | Baixa | Resolvido |
+| 10 | **[NOVO]** Parâmetro não usado quebra `noUnusedParameters` | **Pendente de ajuste** | Média | Ressalva (1 linha) |
+| 11 | **[NOVO]** Remoção explícita de `ORCHESTRATOR_LABEL_NAMES` | **Pendente de ajuste** | Baixa | Ressalva |
+| 12 | **[NOVO]** Ajuste da soma de tokens em C5 (~500 vs 358) | **Pendente de ajuste** | Baixa | Ressalva |
+
+---
+
+## 4. Veredito
+
+# **APTO COM RESSALVAS NÃO BLOQUEANTES**
+
+### Justificativa do Veredito:
+A versão `docs/phase-4-v2.md` realizou um trabalho exemplar ao sanar todos os problemas estruturais, lógicos e conceituais que motivaram o bloqueio da v1:
+1. Os testes existentes não serão quebrados;
+2. A inversão da ordem de eventos no `SessionManager` foi corrigida e blindada contra falhas antes da geração;
+3. As alucinações de endpoints foram expurgadas;
+4. As salvaguardas de segurança e saúde mental cobrem agora todos os agentes, inclusive o agente Geral;
+5. O singleton foi tornado estritamente idempotente;
+6. A matriz de validação prática foi restaurada com casos de fronteira e negativos adjacentes.
+
+Os novos achados identificados (Achados 10, 11 e 12) são atritos menores de compilação TypeScript e precisão textual, **não representam falhas arquiteturais** e podem ser ajustados diretamente durante a escrita do código (basta não declarar parâmetros não utilizados em `main.ts` e remover a constante substituída).
+
+O plano está liberado para execução.

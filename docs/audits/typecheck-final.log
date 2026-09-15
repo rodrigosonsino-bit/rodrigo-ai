@@ -1,0 +1,4 @@
+
+> rodrigo-ai@0.0.1 typecheck
+> tsc --noEmit && tsc -p tsconfig.server.json --noEmit
+
