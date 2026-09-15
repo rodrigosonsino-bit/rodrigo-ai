@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-14",
+  "note": "Verificação suplementar da Fase 4 (C5) — bench-voice.mjs cobre só o corpus GERAL; aqui medimos latência real com os system prompts maiores de TEOLOGIA (617 tokens) e VIRTOLOGIA (592 tokens), servidor real com MLX (Qwen3-4B-Instruct-2507-4bit) em http://127.0.0.1:3000.",
+  "target": { "firstAudioMedianMs": 4000, "firstAudioP95Ms": 8000 },
+  "results": [
+    {
+      "label": "TEOLOGIA",
+      "question": "Faça uma análise exegética de Hebreus cinco.",
+      "transcript": "Faça uma análise exegética de hebreu-5.",
+      "classifiedLabel": "TEOLOGIA",
+      "sttMs": 388,
+      "firstAudioMs": 2236,
+      "totalMs": 5547,
+      "withinTarget": true
+    },
+    {
+      "label": "VIRTOLOGIA",
+      "question": "Explique a Aceitação dentro da Virtologia.",
+      "transcript": "Explique a aceitação dentro da Virtologia.",
+      "classifiedLabel": "VIRTOLOGIA",
+      "sttMs": 200,
+      "firstAudioMs": 2095,
+      "totalMs": 5590,
+      "withinTarget": true
+    }
+  ],
+  "conclusion": "Ambos os casos com prompt real de especialista ficaram bem dentro da meta de latência (<=4000ms mediana de fim-de-fala->1o-audio), mesmo com o system prompt combinado (identidade + VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS) sendo 5-6x maior que o do agente Geral."
+}

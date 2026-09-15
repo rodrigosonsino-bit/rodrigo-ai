@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Rodrigo AI — Orchestrator Local (Fase 3)" />
+    <title>Rodrigo AI — Fase 3</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <header class="app-header">
+        <h1 class="app-title">Rodrigo AI</h1>
+        <p class="app-phase">Fase 4 — Multi-Agent (v0.3.0)</p>
+      </header>
+
+      <main class="main-content">
+        <!-- Card de Conversa por Voz -->
+        <section class="card voice-card" aria-labelledby="voice-title">
+          <h2 id="voice-title">Conversa por Voz</h2>
+
+          <div id="voice-state" class="voice-state" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="voice-state-text">Parado — clique em "Iniciar conversa" para começar.</span>
+          </div>
+
+          <div class="actions voice-actions">
+            <button id="voice-start-btn" type="button" class="btn btn-primary">Iniciar conversa</button>
+            <button id="voice-end-btn" type="button" class="btn" disabled>Encerrar</button>
+            <button id="voice-mute-btn" type="button" class="btn" disabled aria-pressed="false">Silenciar microfone</button>
+            <button id="voice-interrupt-btn" type="button" class="btn" disabled>Interromper resposta</button>
+          </div>
+
+          <p id="voice-agent-indicator" class="voice-agent-indicator" role="status" aria-live="polite"></p>
+
+          <div id="voice-transcript-log" class="transcript-log" role="log" aria-live="polite" aria-label="Transcrição da conversa"></div>
+
+          <p class="voice-note">
+            Recomendado usar fone de ouvido no primeiro teste — sem ele, o eco do alto-falante pode
+            confundir a detecção de fala. Voz 100% local, sem envio de áudio para serviços externos.
+          </p>
+        </section>
+
+        <!-- Card de Conexão com o Sistema -->
+        <section class="card status-card" aria-labelledby="status-title">
+          <h2 id="status-title">Conexão com o Sistema</h2>
+          <div
+            id="health-status-container"
+            class="status-indicator loading"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="health-message" class="status-text">Verificando conexão com o sistema neste computador...</span>
+          </div>
+
+          <div id="health-details" class="health-details" hidden>
+            <p><strong>Status do Sistema:</strong> <span id="server-status">-</span></p>
+            <p><strong>Versão:</strong> <span id="server-version">-</span></p>
+          </div>
+
+          <div class="actions">
+            <button id="retry-btn" type="button" class="btn" disabled>
+              Tentar novamente
+            </button>
+          </div>
+        </section>
+
+        <!-- Informações das Funcionalidades e Fases Futuras -->
+        <section class="card info-card" aria-labelledby="features-title">
+          <h2 id="features-title">Funcionalidades do Rodrigo AI</h2>
+          <p class="info-intro">
+            A Fase 1 entrega o núcleo inicial do aplicativo em execução direta no seu computador.
+            As capacidades avançadas de voz, conversação e automação serão integradas nas próximas fases.
+          </p>
+
+          <div class="modules-grid">
+            <article class="module-item active">
+              <header class="module-header">
+                <h3>1. Base do Sistema Local</h3>
+                <span class="badge badge-active">Ativo</span>
+              </header>
+              <p>Estrutura básica em funcionamento direto no seu computador, com verificação de prontidão em tempo real.</p>
+            </article>
+
+            <article class="module-item active">
+              <header class="module-header">
+                <h3>2. Comunicação por Voz</h3>
+                <span class="badge badge-active">Ativo (protótipo local)</span>
+              </header>
+              <p>Conversa por voz em PT-BR, 100% local (sem API paga) — veja o card "Conversa por Voz" acima.</p>
+            </article>
+
+            <article class="module-item active">
+              <header class="module-header">
+                <h3>3. Orquestrador</h3>
+                <span class="badge badge-active">Ativo (classificação, sem especialistas ainda)</span>
+              </header>
+              <p>Cada pergunta é classificada (Geral/Teologia/Virtologia/Ambíguo) e a decisão é mostrada na conversa — mas os especialistas de verdade ainda não existem (Fase 4); toda categoria continua respondida pelo agente geral.</p>
+            </article>
+
+            <article class="module-item inactive">
+              <header class="module-header">
+                <h3>4. Ferramentas e Ações</h3>
+                <span class="badge badge-inactive">Indisponível nesta fase</span>
+              </header>
+              <p>A integração de ferramentas do sistema e automações será habilitada futuramente.</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- Transparência de Custos -->
+        <section class="card cost-card" aria-labelledby="cost-title">
+          <h2 id="cost-title">Sem cobrança de API nesta fase</h2>
+          <p>
+            Nenhum serviço pago, chave de acesso ou chamada a servidores externos é utilizada pela aplicação.
+          </p>
+          <p class="cost-note">
+            O aplicativo opera localmente no seu computador, consumindo apenas o processamento e energia da sua máquina. A instalação inicial de pacotes (npm) e o download único dos modelos de voz (via "npm run setup:voice") requerem internet; a conversa em si roda sempre offline.
+          </p>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        <p>Rodrigo AI — Execução local no computador sem tráfego de dados para terceiros.</p>
+      </footer>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

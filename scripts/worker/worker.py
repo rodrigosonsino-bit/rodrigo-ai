@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""
+Worker persistente de voz local (Fase 2, Rodrigo AI).
+
+Protocolo: NDJSON via stdin/stdout.
+- stdout carrega EXCLUSIVAMENTE o protocolo (uma linha JSON por evento). Nunca escrever
+  transcrições, texto de conversa ou segredos em stderr; stderr é só para diagnóstico técnico.
+- Comandos chegam por stdin (um JSON por linha): transcribe, generate, cancel, ping.
+- Uma thread dedicada (`_stdin_reader_loop`) lê stdin continuamente e nunca bloqueia em
+  inferência — comandos "cancel" são aplicados imediatamente a partir dela, mesmo enquanto
+  a thread de trabalho está presa dentro de stream_generate (achado de auditoria: um único
+  thread que faz as duas coisas não consegue processar cancelamento a tempo).
+- Apenas uma tarefa de inferência roda por vez (fila de tamanho 1): um novo comando
+  "generate" cancela e substitui qualquer geração em andamento, nunca enfileira atrás dela.
+
+Modelos (MLX, 100% local, sem rede em operação):
+- LLM: mlx-community/Qwen3-4B-Instruct-2507-4bit
+- STT: mlx-community/whisper-small-mlx
+
+Offline por padrão: HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1 são setados antes de importar
+qualquer biblioteca de rede, exceto durante o setup explícito (scripts/setup-voice.mjs), que
+roda este mesmo worker com HF_HUB_OFFLINE=0 apenas para baixar/materializar os modelos.
+"""
+import json
+import os
+import queue
+import re
+import sys
+import threading
+import time
+import traceback
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+# Offline em operação normal — o setup script sobrescreve isso explicitamente para baixar modelos.
+if os.environ.get("RODRIGO_VOICE_SETUP") != "1":
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+CACHE_LIMIT_BYTES = 1024 * 1024 * 1024  # 1 GiB — Achado v2-8: API moderna, não mx.metal.*
+LLM_MODEL_ID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+CLASSIFICATION_LABELS = frozenset({"GERAL", "TEOLOGIA", "VIRTOLOGIA", "AMBIGUO"})
+CLASSIFICATION_SYSTEM_PROMPT = (
+    "Você classifica uma frase do usuário em EXATAMENTE uma categoria. "
+    "Responda com UMA ÚNICA PALAVRA, sem pontuação, sem explicação: "
+    "GERAL, TEOLOGIA, VIRTOLOGIA ou AMBIGUO.\n"
+    "TEOLOGIA: perguntas sobre a Bíblia, exegese, doutrina cristã, sermões, teologia cristã.\n"
+    "VIRTOLOGIA: perguntas sobre os CONCEITOS e terminologia técnica da área chamada "
+    "Virtologia — só quando a frase pede para explicar, definir ou discutir o conceito em "
+    "si dentro desse método/abordagem.\n"
+    "GERAL: qualquer outra coisa — matemática, conversa cotidiana, perguntas factuais gerais, "
+    "pedidos de ação/ferramenta (ainda não implementados, tratar como GERAL). Isso inclui "
+    "frases que usam palavras que TAMBÉM aparecem como termos técnicos em outra categoria, "
+    "mas aqui no sentido comum do dia a dia (ex.: 'aceitação', 'perdão', 'graça' usadas como "
+    "sentimento ou experiência pessoal, não como conceito técnico sendo explicado).\n"
+    "AMBIGUO: a frase pertence claramente a mais de uma categoria acima, ou não há "
+    "contexto suficiente pra decidir com confiança.\n"
+    "Exemplos que distinguem sentido técnico de sentido cotidiano da MESMA palavra:\n"
+    "- 'Explique o conceito de Aceitação nesse método' -> VIRTOLOGIA (pede o conceito técnico).\n"
+    "- 'Preciso de mais aceitação da minha família' -> GERAL (sentimento cotidiano, não pede o conceito)."
+)
+STT_MODEL_ID = "mlx-community/whisper-small-mlx"
+MAX_TURN_TOKENS = 160
+
+
+def log_diag(message: str) -> None:
+    """Diagnóstico técnico em stderr — nunca inclui transcrição ou conteúdo de conversa."""
+    print(f"[worker] {message}", file=sys.stderr, flush=True)
+
+
+def emit(event: dict[str, Any]) -> None:
+    """Único ponto de escrita em stdout — protocolo NDJSON."""
+    sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+# --- Segmentador de frases PT-BR (Achado v2-3: não fragmentar decimais/abreviações) ---
+
+_ABBREVIATIONS = {
+    "sr", "sra", "srta", "dr", "dra", "prof", "profa", "ex", "etc",
+    "ltda", "vs", "pág", "p", "ed", "nº", "art", "cap"
+}
+
+# Pontuação terminativa seguida de espaço/quebra/fim-de-string, sem ponto entre dígitos
+# (ex.: "3.5"), sem reticências no meio, e com piso mínimo de conteúdo antes de fechar.
+_SENTENCE_BOUNDARY = re.compile(r"([.!?]+)(\s+|$)")
+
+
+def find_sentence_boundary(buffer: str) -> Optional[int]:
+    """
+    Retorna o índice (exclusive, após a pontuação+espaço) do primeiro limite de frase
+    seguro em `buffer`, ou None se ainda não há um. Regras:
+    - "3.5", "3." seguido de dígito -> não é limite (decimal/numeração).
+    - Abreviação conhecida antes do ponto -> não é limite.
+    - Reticências "..." contam como um único limite (não um por ponto).
+    - Chunk resultante deve ter pelo menos 15 caracteres (senão adia o corte).
+    """
+    for match in _SENTENCE_BOUNDARY.finditer(buffer):
+        end = match.end()
+        punct_start = match.start()
+
+        if end < len(buffer) and buffer[end - 1] != " " and end == len(buffer):
+            # ainda não sabemos o que vem depois (pode ser decimal) — espera mais texto
+            continue
+
+        # Reticências: colapsa em um único ponto de corte, não corta no primeiro "."
+        if match.group(1).startswith("..") or (
+            punct_start > 0 and buffer[punct_start - 1] in ".!?"
+        ):
+            # se o próximo char depois do espaço também for pontuação, ainda não é o fim real
+            pass
+
+        # Não cortar em decimal: dígito imediatamente antes E depois do ponto (ex.: "3.5")
+        if match.group(1) == "." and punct_start > 0 and buffer[punct_start - 1].isdigit():
+            after = buffer[end:end + 1]
+            if after.isdigit():
+                continue
+
+        # Não cortar em abreviação conhecida (ex.: "Sr.", "Dr.")
+        if match.group(1) == ".":
+            word_start = punct_start
+            while word_start > 0 and (buffer[word_start - 1].isalnum()):
+                word_start -= 1
+            word = buffer[word_start:punct_start].lower()
+            if word in _ABBREVIATIONS:
+                continue
+
+        candidate_len = len(buffer[:end].strip())
+        if candidate_len < 15 and end < len(buffer):
+            # frase curta demais e ainda há mais texto chegando — deixa acumular
+            continue
+
+        return end
+
+    return None
+
+
+# --- Estado de geração cancelável ---
+
+@dataclass
+class GenerationHandle:
+    turn_id: str
+    epoch: int
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+
+class Worker:
+    def __init__(self) -> None:
+        self.work_queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=1)
+        self._current: Optional[GenerationHandle] = None
+        self._current_lock = threading.Lock()
+        self._llm = None
+        self._llm_tokenizer = None
+        self._stt = None
+        self._mx = None
+
+    # --- Carregamento de modelos (warmup) ---
+
+    def load_models(self) -> None:
+        import mlx.core as mx
+
+        self._mx = mx
+        mx.set_cache_limit(CACHE_LIMIT_BYTES)
+
+        log_diag(f"Carregando LLM ({LLM_MODEL_ID})...")
+        from mlx_lm import load as mlx_lm_load
+
+        self._llm, self._llm_tokenizer = mlx_lm_load(LLM_MODEL_ID)
+        log_diag("LLM carregado.")
+
+        log_diag(f"Carregando STT ({STT_MODEL_ID})...")
+        # mlx_whisper carrega o modelo sob demanda por chamada de transcribe(path_or_hf_repo=...);
+        # fazemos uma chamada de aquecimento silenciosa não é viável sem áudio real, então
+        # apenas confirmamos que o pacote importa e o repo é resolvível localmente.
+        import mlx_whisper  # noqa: F401
+
+        self._stt_model_id = STT_MODEL_ID
+        log_diag("STT pronto (carregamento perezoso na primeira transcrição).")
+
+        mx.clear_cache()
+        emit({"event": "ready"})
+
+    # --- Comandos ---
+
+    def handle_cancel(self, msg: dict[str, Any]) -> None:
+        turn_id = msg.get("turnId")
+        with self._current_lock:
+            current = self._current
+            if current is not None and current.turn_id == turn_id:
+                current.cancel_event.set()
+        emit({"event": "cancelled", "turnId": turn_id})
+
+    def handle_transcribe(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        audio_path = msg["audioPath"]
+        try:
+            import mlx_whisper
+
+            result = mlx_whisper.transcribe(
+                audio_path,
+                path_or_hf_repo=self._stt_model_id,
+                language="pt",
+                fp16=True,
+            )
+            text = (result.get("text") or "").strip()
+            emit({"event": "transcript", "reqId": req_id, "text": text})
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na transcrição: {exc}\n{traceback.format_exc()}")
+            emit({"event": "error", "reqId": req_id, "message": "Falha ao transcrever áudio."})
+        finally:
+            if self._mx is not None:
+                self._mx.clear_cache()
+
+    def handle_classify(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        turn_id = msg["turnId"]
+        epoch = msg["epoch"]
+        text = msg["text"]
+
+        # Achado v2-1 da auditoria: texto vazio/só espaço nunca vai pro LLM — o STT pode
+        # devolver "" para ruído/fala inaudível que passou pelo VAD; sem essa checagem o
+        # resultado da classificação fica imprevisível em vez de ser um erro técnico claro.
+        if not text or not text.strip():
+            emit({
+                "event": "error", "reqId": req_id, "turnId": turn_id,
+                "message": "Texto vazio para classificação."
+            })
+            return
+
+        handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
+        with self._current_lock:
+            self._current = handle
+
+        try:
+            messages = [
+                {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ]
+            prompt = self._llm_tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
+            )
+
+            from mlx_lm.generate import stream_generate
+            from mlx_lm.sample_utils import make_sampler
+
+            sampler = make_sampler(temp=0.0)  # determinístico — classificação, não geração criativa
+            raw = ""
+            for response in stream_generate(
+                self._llm, self._llm_tokenizer, prompt, max_tokens=8, sampler=sampler
+            ):
+                if handle.cancel_event.is_set():
+                    log_diag(f"Classificação cancelada pelo worker (turnId={turn_id}) — Node já resolveu localmente.")
+                    return
+                raw += response.text
+
+            normalized = raw.strip().upper().strip(".!? \n")
+            if normalized not in CLASSIFICATION_LABELS:
+                log_diag(f"Saída de classificação fora do formato esperado (turnId={turn_id}).")
+                emit({
+                    "event": "error", "reqId": req_id, "turnId": turn_id,
+                    "message": "Falha ao classificar: formato de saída inesperado."
+                })
+                return
+
+            emit({"event": "classification", "reqId": req_id, "turnId": turn_id, "label": normalized})
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na classificação: {exc}\n{traceback.format_exc()}")
+            emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao classificar a intenção."})
+        finally:
+            with self._current_lock:
+                if self._current is handle:
+                    self._current = None
+            if self._mx is not None:
+                self._mx.clear_cache()
+
+    def handle_generate(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        turn_id = msg["turnId"]
+        epoch = msg["epoch"]
+        messages = msg["messages"]
+
+        handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
+        with self._current_lock:
+            self._current = handle
+
+        try:
+            prompt = self._llm_tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
+            )
+
+            from mlx_lm.generate import stream_generate
+            from mlx_lm.sample_utils import make_logits_processors, make_sampler
+
+            sampler = make_sampler(temp=0.7)
+            # Achado real de teste (Fase 4, verificação com áudio real): sem penalidade de
+            # repetição, o Qwen3-4B-Instruct-2507-4bit entra em loop, repetindo a mesma
+            # frase dezenas de vezes antes de variar — mais visível em respostas longas e
+            # discursivas (Teologia/Virtologia) do que nas perguntas curtas usadas nos
+            # benchmarks das Fases 2-3, que não expunham o problema. `repetition_context_size`
+            # igual a MAX_TURN_TOKENS (não o padrão de 20) porque uma frase repetida some da
+            # janela de contexto do penalizador antes do fim do turno se a janela for menor
+            # que a resposta inteira — testado com 64: o loop reaparecia depois de ~2
+            # repetições, exatamente quando a 1ª ocorrência saía da janela.
+            logits_processors = make_logits_processors(
+                repetition_penalty=1.3, repetition_context_size=MAX_TURN_TOKENS
+            )
+            buffer = ""
+            sentence_index = 0
+            token_count = 0
+
+            for response in stream_generate(
+                self._llm,
+                self._llm_tokenizer,
+                prompt,
+                max_tokens=MAX_TURN_TOKENS,
+                sampler=sampler,
+                logits_processors=logits_processors,
+            ):
+                if handle.cancel_event.is_set():
+                    log_diag(f"Geração cancelada (turnId={turn_id}) — descartando sem mx.eval().")
+                    break
+
+                buffer += response.text
+                token_count += 1
+
+                boundary = find_sentence_boundary(buffer)
+                while boundary is not None:
+                    sentence = buffer[:boundary].strip()
+                    buffer = buffer[boundary:]
+                    if sentence:
+                        emit({
+                            "event": "sentence",
+                            "reqId": req_id,
+                            "turnId": turn_id,
+                            "index": sentence_index,
+                            "text": sentence,
+                        })
+                        sentence_index += 1
+                    boundary = find_sentence_boundary(buffer)
+
+                if token_count >= MAX_TURN_TOKENS:
+                    break
+
+            if not handle.cancel_event.is_set():
+                leftover = buffer.strip()
+                if leftover:
+                    emit({
+                        "event": "sentence",
+                        "reqId": req_id,
+                        "turnId": turn_id,
+                        "index": sentence_index,
+                        "text": leftover,
+                    })
+                emit({"event": "done", "reqId": req_id, "turnId": turn_id})
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na geração: {exc}\n{traceback.format_exc()}")
+            emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao gerar resposta."})
+        finally:
+            with self._current_lock:
+                if self._current is handle:
+                    self._current = None
+            # Ponto crítico (Refinamento 2 do adendo): limpar cache sem forçar mx.eval()
+            # nos tensores pendentes do turno cancelado.
+            if self._mx is not None:
+                self._mx.clear_cache()
+
+    # --- Loop de trabalho (thread principal) ---
+
+    def work_loop(self) -> None:
+        while True:
+            msg = self.work_queue.get()
+            cmd = msg.get("cmd")
+            try:
+                if cmd == "transcribe":
+                    self.handle_transcribe(msg)
+                elif cmd == "classify":
+                    self.handle_classify(msg)
+                elif cmd == "generate":
+                    self.handle_generate(msg)
+            except Exception as exc:  # noqa: BLE001
+                log_diag(f"Erro não tratado no work_loop: {exc}\n{traceback.format_exc()}")
+                emit({"event": "error", "message": "Falha interna do worker."})
+
+    # --- Thread leitora de stdin (dedicada, nunca bloqueia em inferência) ---
+
+    def stdin_reader_loop(self) -> None:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                log_diag("Linha stdin inválida (não é JSON) — ignorada.")
+                continue
+
+            cmd = msg.get("cmd")
+            if cmd == "cancel":
+                self.handle_cancel(msg)
+            elif cmd == "ping":
+                emit({"event": "pong"})
+            elif cmd in ("transcribe", "classify", "generate"):
+                # Fila de tamanho 1: se algo estiver esperando (não deveria, pois o Node só
+                # envia um novo comando após cancelar o anterior), descarta o mais antigo.
+                try:
+                    self.work_queue.put_nowait(msg)
+                except queue.Full:
+                    try:
+                        self.work_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self.work_queue.put_nowait(msg)
+            else:
+                log_diag(f"Comando desconhecido ignorado: {cmd!r}")
+
+        # stdin fechado (Node encerrou) — sai limpo.
+        log_diag("stdin fechado — encerrando worker.")
+        os._exit(0)
+
+
+def main() -> None:
+    worker = Worker()
+
+    reader_thread = threading.Thread(target=worker.stdin_reader_loop, daemon=True)
+    reader_thread.start()
+
+    start = time.monotonic()
+    try:
+        worker.load_models()
+    except Exception as exc:  # noqa: BLE001
+        log_diag(f"Falha catastrófica ao carregar modelos: {exc}\n{traceback.format_exc()}")
+        emit({"event": "error", "message": "Falha ao inicializar modelos locais."})
+        sys.exit(1)
+
+    log_diag(f"Aquecimento concluído em {time.monotonic() - start:.1f}s.")
+    worker.work_loop()
+
+
+if __name__ == "__main__":
+    main()

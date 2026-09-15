@@ -1,0 +1,247 @@
+import type { HealthResponse } from '../shared/types.ts';
+import { VoiceController } from './voice.ts';
+
+// Elementos da interface do usuário
+const statusContainer = document.getElementById('health-status-container') as HTMLDivElement;
+const statusMessage = document.getElementById('health-message') as HTMLSpanElement;
+const detailsContainer = document.getElementById('health-details') as HTMLDivElement;
+const serverStatusSpan = document.getElementById('server-status') as HTMLSpanElement;
+const serverVersionSpan = document.getElementById('server-version') as HTMLSpanElement;
+const retryButton = document.getElementById('retry-btn') as HTMLButtonElement;
+
+// Controle de concorrência para evitar chamadas simultâneas
+let isChecking = false;
+
+/**
+ * Atualiza o status visual e acessível (via role="status" e aria-live="polite").
+ */
+function setStatus(
+  type: 'loading' | 'connected' | 'error',
+  message: string,
+  details?: { status: string; version: string }
+): void {
+  statusContainer.className = `status-indicator ${type}`;
+  statusMessage.textContent = message;
+
+  if (type === 'connected' && details) {
+    detailsContainer.hidden = false;
+    serverStatusSpan.textContent = details.status;
+    serverVersionSpan.textContent = details.version;
+  } else {
+    detailsContainer.hidden = true;
+    serverStatusSpan.textContent = '-';
+    serverVersionSpan.textContent = '-';
+  }
+}
+
+/**
+ * Traduz mensagens de erro de rede para português simples, sem expor mensagens em inglês como "Failed to fetch".
+ */
+function formatPortugueseErrorMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return 'Tempo limite de resposta (5s) esgotado aguardando o sistema local.';
+  }
+
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed') || msg.includes('load failed')) {
+      return 'Não foi possível conectar ao sistema neste computador. Verifique se o serviço está em execução.';
+    }
+    return error.message;
+  }
+
+  return 'Ocorreu uma falha inesperada ao comunicar com o sistema local.';
+}
+
+/**
+ * Executa a verificação real da saúde do sistema local.
+ * Mantém o timeout ativo durante toda a requisição e leitura do corpo JSON.
+ */
+async function checkHealth(): Promise<void> {
+  // Prevenir requisições concorrentes
+  if (isChecking) {
+    return;
+  }
+
+  isChecking = true;
+  retryButton.disabled = true;
+  setStatus('loading', 'Verificando conexão com o sistema neste computador...');
+
+  const controller = new AbortController();
+  let timeoutId: number | undefined;
+
+  try {
+    timeoutId = window.setTimeout(() => {
+      controller.abort();
+    }, 5000);
+
+    const response = await fetch('/api/health', {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`O sistema retornou uma resposta inesperada (código ${response.status}).`);
+    }
+
+    // Leitura e parse do JSON protegidos pelo mesmo timeout
+    const data = (await response.json()) as HealthResponse;
+
+    if (data && data.status === 'ok' && data.version === '0.3.0') {
+      setStatus('connected', 'Tudo pronto neste computador. O sistema está conectado e respondendo normalmente.', {
+        status: 'Ativo',
+        version: data.version
+      });
+    } else {
+      throw new Error('Formato de resposta do sistema não reconhecido.');
+    }
+  } catch (error: unknown) {
+    const friendlyError = formatPortugueseErrorMessage(error);
+    setStatus('error', `Falha de conexão: ${friendlyError} Clique em "Tentar novamente".`);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+    isChecking = false;
+    retryButton.disabled = false;
+  }
+}
+
+// Vinculação de eventos
+retryButton.addEventListener('click', () => {
+  checkHealth();
+});
+
+// Verificação inicial ao carregar a página
+document.addEventListener('DOMContentLoaded', () => {
+  checkHealth();
+});
+
+// --- Conversa por Voz (Fase 2) ---
+
+const voiceStateContainer = document.getElementById('voice-state') as HTMLDivElement;
+const voiceStateText = document.getElementById('voice-state-text') as HTMLSpanElement;
+const voiceStartBtn = document.getElementById('voice-start-btn') as HTMLButtonElement;
+const voiceEndBtn = document.getElementById('voice-end-btn') as HTMLButtonElement;
+const voiceMuteBtn = document.getElementById('voice-mute-btn') as HTMLButtonElement;
+const voiceInterruptBtn = document.getElementById('voice-interrupt-btn') as HTMLButtonElement;
+const voiceTranscriptLog = document.getElementById('voice-transcript-log') as HTMLDivElement;
+const voiceAgentIndicator = document.getElementById('voice-agent-indicator') as HTMLSpanElement;
+
+const VOICE_STATE_LABELS: Record<string, string> = {
+  idle: 'Parado — clique em "Iniciar conversa" para começar.',
+  ouvindo: 'Ouvindo — pode falar.',
+  processando: 'Processando sua fala...',
+  falando: 'Rodrigo AI está respondendo...',
+  aquecendo: 'Aquecendo os modelos locais (pode levar até 2 minutos na primeira vez)...',
+  erro: 'Ocorreu um erro. Veja a mensagem no log abaixo.'
+};
+
+const ORCHESTRATOR_LABEL_NAMES: Record<string, string> = {
+  GERAL: 'Geral',
+  TEOLOGIA: 'Teologia',
+  VIRTOLOGIA: 'Virtologia',
+  AMBIGUO: 'Ambiguidade'
+};
+
+let muted = false;
+
+/**
+ * O indicador de agente é resetado a cada novo turno ("processando"), erro, ou fim de
+ * sessão — nunca mostra o rótulo de um turno que não é mais o atual (Achado 9 da
+ * auditoria). Como a sessão só processa um turno por vez (o anterior é sempre cancelado
+ * antes de "processando" disparar de novo), esse reset por estado já é suficiente sem
+ * precisar rastrear turnId independentemente aqui.
+ */
+function resetAgentIndicator(): void {
+  voiceAgentIndicator.textContent = '';
+}
+
+function appendTranscriptEntry(speaker: 'Você' | 'Rodrigo AI', text: string): void {
+  const entry = document.createElement('p');
+  entry.className = 'transcript-entry';
+  const strong = document.createElement('strong');
+  strong.textContent = `${speaker}: `;
+  entry.appendChild(strong);
+  entry.appendChild(document.createTextNode(text));
+  voiceTranscriptLog.appendChild(entry);
+  voiceTranscriptLog.scrollTop = voiceTranscriptLog.scrollHeight;
+}
+
+function appendErrorEntry(message: string): void {
+  const entry = document.createElement('p');
+  entry.className = 'transcript-entry transcript-error';
+  entry.textContent = `Erro: ${message}`;
+  voiceTranscriptLog.appendChild(entry);
+  voiceTranscriptLog.scrollTop = voiceTranscriptLog.scrollHeight;
+}
+
+const voiceController = new VoiceController(
+  (state) => {
+    voiceStateContainer.className = `voice-state voice-state-${state}`;
+    voiceStateText.textContent = VOICE_STATE_LABELS[state] || state;
+    voiceInterruptBtn.disabled = state !== 'falando';
+    // Novo turno começando (processando) ou erro: o rótulo do turno anterior não vale mais.
+    if (state === 'processando' || state === 'erro') {
+      resetAgentIndicator();
+    }
+  },
+  (text) => appendTranscriptEntry('Você', text),
+  (text) => appendTranscriptEntry('Rodrigo AI', text),
+  (message) => appendErrorEntry(message),
+  (_turnId, label, _handled) => {
+    // Checa o rótulo explicitamente (não `handled`) — `!handled` sozinho não garante
+    // que o rótulo é AMBIGUO, e presumir isso podia exibir texto enganoso se algum dia
+    // deixasse de valer. `handled` não é mais lido aqui (Fase 4: GERAL/TEOLOGIA/VIRTOLOGIA
+    // já são todos `handled: true`) — renomeado para `_handled` como `_turnId` acima.
+    const name = ORCHESTRATOR_LABEL_NAMES[label] || label;
+    voiceAgentIndicator.textContent =
+      label === 'AMBIGUO' ? 'Classificado como: AMBÍGUO (respondido pelo agente Geral)' : `Agente: ${name}`;
+  }
+);
+
+voiceStartBtn.addEventListener('click', () => {
+  void (async () => {
+    voiceStartBtn.disabled = true;
+    try {
+      await voiceController.start();
+      voiceEndBtn.disabled = false;
+      voiceMuteBtn.disabled = false;
+    } catch (error) {
+      appendErrorEntry(formatPortugueseErrorMessage(error));
+      voiceStartBtn.disabled = false;
+    }
+  })();
+});
+
+voiceEndBtn.addEventListener('click', () => {
+  void (async () => {
+    await voiceController.stop();
+    voiceStartBtn.disabled = false;
+    voiceEndBtn.disabled = true;
+    voiceMuteBtn.disabled = true;
+    voiceInterruptBtn.disabled = true;
+    muted = false;
+    voiceMuteBtn.setAttribute('aria-pressed', 'false');
+    voiceMuteBtn.textContent = 'Silenciar microfone';
+    resetAgentIndicator();
+  })();
+});
+
+voiceMuteBtn.addEventListener('click', () => {
+  muted = !muted;
+  voiceController.muteMicrophone(muted);
+  voiceMuteBtn.setAttribute('aria-pressed', String(muted));
+  voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+});
+
+voiceInterruptBtn.addEventListener('click', () => {
+  voiceController.interruptManually();
+});
+
+window.addEventListener('beforeunload', () => {
+  void voiceController.stop();
+});

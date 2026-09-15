@@ -1,0 +1,96 @@
+/**
+ * Contratos compartilhados do protocolo de voz (Fase 2 + Fase 3) — frontend <-> backend.
+ * Eventos SSE emitidos em GET /api/voice/session/events.
+ */
+
+export type VoiceState = 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | 'erro';
+
+/** Fase 3 — rótulo de classificação de intenção. Nenhum tem especialista real ainda (Fase 4). */
+export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'AMBIGUO';
+
+export interface StateEvent {
+  type: 'state';
+  state: VoiceState;
+}
+
+export interface TranscriptEvent {
+  type: 'transcript';
+  turnId: string;
+  text: string;
+}
+
+export interface SentenceAudioReadyEvent {
+  type: 'sentence_audio_ready';
+  turnId: string;
+  sentenceIndex: number;
+  audioId: string;
+  text: string;
+}
+
+export interface TurnDoneEvent {
+  type: 'turn_done';
+  turnId: string;
+}
+
+/**
+ * Fase 4 — decisão de roteamento, informativa/auditável, com efeito real na geração.
+ * `handled` é `false` só para AMBIGUO (sem especialista dedicado — cai no agente Geral
+ * com salvaguardas universais); GERAL, TEOLOGIA e VIRTOLOGIA são `true`, cada um com seu
+ * agente real (ver src/backend/agents/specialistAgents.ts).
+ */
+export interface RoutingEvent {
+  type: 'routing';
+  turnId: string;
+  label: OrchestratorLabel;
+  handled: boolean;
+}
+
+export interface SessionPreemptedEvent {
+  type: 'session_preempted';
+}
+
+export interface ErrorEvent {
+  type: 'error';
+  message: string;
+  turnId?: string;
+}
+
+export type VoiceServerEvent =
+  | StateEvent
+  | TranscriptEvent
+  | RoutingEvent
+  | SentenceAudioReadyEvent
+  | TurnDoneEvent
+  | SessionPreemptedEvent
+  | ErrorEvent;
+
+export interface CreateSessionResponse {
+  sessionId: string;
+  token: string;
+}
+
+export interface AudioTurnResponse {
+  turnId: string;
+}
+
+/**
+ * Mensagem de histórico confirmada (só entra depois que o cliente reproduziu o áudio até o fim).
+ */
+export interface ConversationMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export const VOICE_LIMITS = {
+  MAX_AUDIO_BYTES: 2 * 1024 * 1024,
+  MAX_AUDIO_SECONDS: 20,
+  MAX_TEXT_CHARS: 2000,
+  MAX_TURN_TOKENS: 160,
+  MAX_CONTEXT_TURNS: 8,
+  MAX_CONTEXT_TOKENS: 4096,
+  TURN_TIMEOUT_MS: 60_000,
+  CLASSIFY_TIMEOUT_MS: 10_000,
+  WARMUP_TIMEOUT_MS: 120_000,
+  IDLE_TIMEOUT_MS: 10 * 60_000,
+  WORKER_SHUTDOWN_GRACE_MS: 3_000
+} as const;

@@ -1,0 +1,411 @@
+/*
+ * Estilos da Interface do Rodrigo AI — Fase 2
+ * Totalmente autocontido: sem fontes externas, sem CDNs, sem rastreadores.
+ * Acessibilidade: Contraste WCAG AAA/AA, foco visível, responsivo até 320px.
+ */
+
+:root {
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-border: #cbd5e1;
+  --color-text-main: #0f172a;
+  --color-text-muted: #334155;
+  --color-primary: #1d4ed8;
+  --color-primary-hover: #1e40af;
+  --color-primary-focus: #2563eb;
+  
+  --status-success-bg: #dcfce7;
+  --status-success-text: #14532d;
+  --status-success-border: #86efac;
+  --status-success-dot: #16a34a;
+
+  --status-error-bg: #fee2e2;
+  --status-error-text: #7f1d1d;
+  --status-error-border: #fca5a5;
+  --status-error-dot: #dc2626;
+
+  --status-loading-bg: #dbeafe;
+  --status-loading-text: #1e3a8a;
+  --status-loading-border: #93c5fd;
+  --status-loading-dot: #2563eb;
+
+  --badge-inactive-bg: #f1f5f9;
+  --badge-inactive-text: #475569;
+  --badge-inactive-border: #cbd5e1;
+
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  min-height: 100%;
+  font-family: var(--font-system);
+  background-color: var(--color-bg);
+  color: var(--color-text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-height: 100vh;
+}
+
+/* Header */
+.app-header {
+  padding: 1rem 0;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.app-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-main);
+  letter-spacing: -0.02em;
+}
+
+.app-phase {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Conteúdo Principal */
+.main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  flex: 1;
+}
+
+/* Cards Gerais */
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.card h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--color-text-main);
+}
+
+/* Status do Backend */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+  word-break: break-word;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-indicator.loading {
+  background-color: var(--status-loading-bg);
+  color: var(--status-loading-text);
+  border-color: var(--status-loading-border);
+}
+.status-indicator.loading .status-dot {
+  background-color: var(--status-loading-dot);
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.status-indicator.connected {
+  background-color: var(--status-success-bg);
+  color: var(--status-success-text);
+  border-color: var(--status-success-border);
+}
+.status-indicator.connected .status-dot {
+  background-color: var(--status-success-dot);
+}
+
+.status-indicator.error {
+  background-color: var(--status-error-bg);
+  color: var(--status-error-text);
+  border-color: var(--status-error-border);
+}
+.status-indicator.error .status-dot {
+  background-color: var(--status-error-dot);
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.9); opacity: 0.6; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.6; }
+}
+
+.health-details {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.health-details p {
+  margin-bottom: 0.25rem;
+}
+.health-details p:last-child {
+  margin-bottom: 0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Botão Acessível */
+.btn {
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.625rem 1.25rem;
+  background-color: var(--color-primary);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Foco visível estrito e acessível para navegação por teclado */
+.btn:focus-visible {
+  outline: 3px solid var(--color-primary-focus);
+  outline-offset: 3px;
+}
+
+/* Grid de Módulos */
+.info-intro {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+  margin-bottom: 1rem;
+}
+
+.modules-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.875rem;
+}
+
+@media (min-width: 600px) {
+  .modules-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.module-item {
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.module-item.active {
+  border-color: var(--status-success-border);
+  background-color: #f0fdf4;
+}
+
+.module-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.module-header h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.badge-active {
+  background-color: var(--status-success-bg);
+  color: var(--status-success-text);
+  border: 1px solid var(--status-success-border);
+}
+
+.badge-inactive {
+  background-color: var(--badge-inactive-bg);
+  color: var(--badge-inactive-text);
+  border: 1px solid var(--badge-inactive-border);
+}
+
+.module-item p {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+/* Card de Custos */
+.cost-card p {
+  font-size: 0.95rem;
+  color: var(--color-text-main);
+  margin-bottom: 0.5rem;
+}
+
+.cost-note {
+  font-size: 0.85rem !important;
+  color: var(--color-text-muted) !important;
+}
+
+/* Footer */
+.app-footer {
+  text-align: center;
+  padding: 1rem 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Card de Conversa por Voz (Fase 2) */
+.voice-state {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg);
+  font-size: 0.95rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
+.voice-state .status-dot {
+  background-color: var(--status-loading-dot);
+}
+
+.voice-state-ouvindo .status-dot {
+  background-color: var(--status-success-dot);
+}
+
+.voice-state-processando .status-dot,
+.voice-state-aquecendo .status-dot {
+  background-color: var(--status-loading-dot);
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.voice-state-falando .status-dot {
+  background-color: var(--color-primary);
+  animation: pulse 0.8s infinite ease-in-out;
+}
+
+.voice-state-erro {
+  border-color: var(--status-error-border);
+  background-color: var(--status-error-bg);
+}
+.voice-state-erro .status-dot {
+  background-color: var(--status-error-dot);
+}
+
+.voice-actions {
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-bottom: 1rem;
+}
+
+.btn-primary {
+  background-color: var(--status-success-dot);
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: #15803d;
+}
+
+.transcript-log {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  background-color: var(--color-bg);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.transcript-entry {
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+.transcript-entry:last-child {
+  margin-bottom: 0;
+}
+
+.transcript-error {
+  color: var(--status-error-text);
+}
+
+.voice-note {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.voice-agent-indicator {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 0.75rem;
+  min-height: 1.2em;
+}
+
+/* Compatibilidade com telas muito estreitas (320px) */
+@media (max-width: 360px) {
+  .app-container {
+    padding: 0.5rem;
+  }
+  .card {
+    padding: 0.875rem;
+  }
+  .app-title {
+    font-size: 1.5rem;
+  }
+}
