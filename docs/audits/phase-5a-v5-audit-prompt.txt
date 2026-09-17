@@ -1,0 +1,47 @@
+Você é um auditor adversarial de planos de implementação. Sua tarefa NÃO é confirmar nem aprovar: é encontrar o que está errado.
+
+CONTEXTO
+
+Projeto "Rodrigo AI": orquestrador de voz 100% local (Node + TypeScript ESM, zero dependências de runtime, MLX). O plano é docs/phase-5a-v5.md — leia inteiro antes de julgar.
+
+Esta é a QUINTA rodada. Você (Antigravity CLI) auditou v1, v2 e v4; o Codex auditou a v3. ATENÇÃO: a v5 responde aos SEUS 8 achados da rodada 4, então você está em parte avaliando o cumprimento das suas próprias ordens — esse é um viés conhecido e declarado. Compense-o deliberadamente: procure com mais dureza justamente nas partes que você mesmo mandou mudar, e reconsidere se algum dos seus 8 achados da rodada 4 estava errado.
+
+AVISO: você auditou a v3, e a v4/v5 nasceram em resposta aos seus 28 achados. Não assuma que seus próprios achados da rodada 3 estavam certos — julgue de novo. E não assuma que os achados do Antigravity nas rodadas 1, 2 e 4 estavam certos: nesta linha de trabalho vários achados já caíram por verificação independente.
+
+VERIFICAÇÃO POR EXECUÇÃO (obrigatória)
+
+Transcreva o pseudocódigo das seções 6.2 e 6.3 (hardSplit, splitByParagraph, chunkMarkdown, normalize, ALIAS_FAMILIES, KnowledgeRetriever, buildKnowledgeBlock) e RODE contra docs/research/*.md. Confirme ou derrube:
+- Os 8 casos da seção 5 produzem o ranking publicado?
+- 39 trechos, maior corpo 1.157?
+- hardSplit de um parágrafo de 3.000 chars produz [1200, 1200, 600]?
+- A calibração da seção 3 reproduz? (SINAL n=14 min=2.162 max=8.914; RUÍDO n=14 min=0.000 max=3.587; 6/14 ruídos silenciados)
+- Os tamanhos de prompt (mín +42,2% / mediana +53,9% / máx +71,1%)?
+Divergência é achado ALTA.
+
+ATENÇÃO ESPECIAL À SEÇÃO 3
+
+A §3 declara que a recuperação NÃO distingue "o corpus cobre" de "não cobre", que as populações se sobrepõem, e que isso é aceitável porque o preâmbulo manda o modelo ignorar trecho impertinente. Ataque isso:
+a) A amostra de ruído (14 perguntas) é representativa do que um usuário real perguntaria a esses agentes, ou foi escolhida para facilitar? Proponha perguntas de ruído que o plano não considerou.
+b) A hipótese "o custo é orçamento de contexto, não resposta errada" é testável só pelo caso F10.9? Um único caso de áudio real é amostra suficiente para uma afirmação central do plano?
+c) Se as populações se sobrepõem, a decisão de injetar SEMPRE que algum termo casa é defensável, ou existe opção melhor que o plano não considerou (por exemplo, injetar só quando o score supera o do 2º colocado por alguma margem)?
+
+OUTROS PONTOS
+d) hardSplit fatia uma frase gigante no meio de palavra. Qual o efeito de um trecho que começa/termina no meio de uma palavra dentro do system prompt?
+e) splitByParagraph: a fusão da sobra curta pode fazer o pedaço anterior ULTRAPASSAR MAX_CHUNK_CHARS? Verifique no código proposto.
+f) §6.4 delimita a substituição em sessionManager.ts por linha inicial e final. Confira contra o código REAL se essas linhas existem e são únicas.
+g) §6.6 insere o carregamento do corpus em voiceRuntime.ts "depois da checagem do motor real e antes de construir o SessionManager". Verifique contra o código real se esse ponto existe e se a ordem funciona.
+h) F1 exige "nenhum conteúdo perdido (soma dos corpos ≥ corpo original menos separadores)". Essa asserção é verificável como escrita?
+i) O plano quebra algum teste existente que não listou em §7?
+
+FORMATO OBRIGATÓRIO, por problema:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha ou seção; se por execução, cole a saída real>
+GRAVIDADE: <ALTA | MÉDIA | BAIXA>
+CONFIANÇA: <0-100%>
+AÇÃO RECOMENDADA: <o que mudar, concretamente>
+
+No fim:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Não invente arquivo, linha ou símbolo. Se não conseguiu confirmar, diga "não verificado".

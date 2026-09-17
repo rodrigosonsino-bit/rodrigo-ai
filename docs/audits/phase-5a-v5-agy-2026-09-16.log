@@ -1,0 +1,215 @@
+### Verificação por Execução das Afirmações do Plano
+
+O pseudocódigo das seções 6.1, 6.2 e 6.3 (`hardSplit`, `splitByParagraph`, `chunkMarkdown`, `STOPWORDS`, `ALIAS_FAMILIES`, `normalize`, `KnowledgeRetriever`, `buildKnowledgeBlock`) foi transcrito fielmente e executado contra os arquivos reais em `docs/research/*.md` e contra o código do repositório.
+
+**Resultados confirmados:**
+- **Contagem de trechos e maior corpo:** 39 trechos no total (Teologia: 29 / Virtologia: 10). Maior corpo com **1.157 caracteres** na seção `3. CONVICÇÕES DOUTRINÁRIAS > 3.4 Eclesiologia`. **[CONFIRMADO]**
+- **Os 8 casos da Seção 5:**
+  1. `[virtologia] Explique a Aceitação dentro da Virtologia` => score **2.387** (`4. Exemplo Central: o Conceito de Aceitação`) **[CONFIRMADO]**
+  2. `[teologia] Faça uma análise exegética de Hebreus cinco` => score **3.610** (`4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.2 Sequência obrigatória da análise`) **[CONFIRMADO]**
+  3. `[teologia] Qual é a sua posição sobre o batismo?` => score **3.172** (`3. CONVICÇÕES DOUTRINÁRIAS > 3.6 Temas doutrinários ainda abertos`) **[CONFIRMADO]**
+  4. `[virtologia] Como perdoar na Virtologia?` => score **2.338** (`5. Limites e Diretrizes Negativas...`) **[CONFIRMADO]**
+  5. `[virtologia] O que são as Faixas de Evolução?` => score **3.691** (`2. Estrutura Central... > B. As Faixas de Evolução...`) **[CONFIRMADO]**
+  6. `[virtologia] O que é o medo na Virtologia?` => score **2.162** (`4. Exemplo Central: o Conceito de Aceitação`) **[CONFIRMADO]**
+  7. `[virtologia] O que é o inconsciente booleano?` => score **3.093** (`2. Estrutura Central... > C. Inconsciente Booleano...`) **[CONFIRMADO]**
+  8. `[teologia] Qual a receita de bolo de cenoura?` => **VAZIO** **[CONFIRMADO]**
+- **hardSplit de um parágrafo uniforme de 3.000 caracteres:** Produz exatamente `[1200, 1200, 600]`. **[CONFIRMADO PARA TEXTO SEM PONTUAÇÃO]** *(ver achado crítico abaixo para parágrafos com frases normais)*.
+- **Calibração da Seção 3:**
+  - SINAL (n=14): min = **2.162** (*"O que é o medo na Virtologia?"*), mediana = **4.720** (*"Qual é a sua escatologia?"*), max = **8.914** (*"Como você entende a relação entre Antigo e Novo Testamento?"*). **[CONFIRMADO]**
+  - RUÍDO (n=14): min = **0.000**, mediana = **2.311** (*"Qual o preço da formação em Virtologia?"*), max = **3.587** (*"Quem é o autor do livro de Jó?"*), com 6 ruídos silenciados. **[CONFIRMADO NA AMOSTRA DO AUTOR]**
+
+**Divergências e falhas identificadas:**
+- **Tamanhos de prompt (§5):** O plano publicou `mín +42,2% | mediana +53,9% | máx +71,1%`. A medição real com os 14 casos de sinal resultou em **mín +42,2%**, **mediana +52,3%** e **máx +71,1%**. O valor `+53,9%` corresponde ao 9º elemento ordenado (índice 8), evidenciando erro de índice no cálculo da mediana estatística.
+- **Transgressão estrutural de `MAX_CHUNK_CHARS`:** Falhas graves na lógica de `hardSplit` e `splitByParagraph` produzem trechos de até 1.702 e 1.242 caracteres.
+- **Teste de hipótese F10.9 nulo:** A pergunta escolhida pelo autor para testar a injeção de ruído devolve vazio e não injeta trecho algum.
+
+---
+
+### Achados da Auditoria
+
+ACHADO: `hardSplit` e `splitByParagraph` violam o teto `MAX_CHUNK_CHARS` ao concatenar texto precedente com a fatia dura e ao fundir a sobra curta
+EVIDÊNCIA: `docs/phase-5a-v5.md:236` e `docs/phase-5a-v5.md:263`.
+1. **Em `hardSplit` (linha 236):**
+```ts
+    while (sentence.length > KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS) {
+      const head = sentence.slice(0, KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS);
+      out.push(current ? `${current} ${head}`.trim() : head);
+      sentence = sentence.slice(KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS);
+      current = '';
+    }
+```
+Se `current` acumular uma frase inicial legítima (ex.: 500 caracteres) e a frase seguinte tiver 1.500 caracteres, `head` terá 1.200 caracteres. A linha 236 concatena `current` com `head` antes de dar push!
+Execução com `const p = "A".repeat(500) + ". " + "B".repeat(1500) + ".";`:
+```javascript
+const res = hardSplit(p);
+// Saída: Chunk 0 length: 1702, Chunk 1 length: 301.
+// res[0].length > 1200: TRUE (1702 caracteres!)
+```
+2. **Em `splitByParagraph` (linhas 262-264):**
+```ts
+  if (current.length > 0) {
+    if (current.length < KNOWLEDGE_LIMITS.MIN_CHUNK_CHARS && out.length > 0) {
+      out[out.length - 1] = `${out[out.length - 1]}\n\n${current}`;
+    } else {
+      out.push(current);
+    }
+  }
+```
+Se o último parágrafo tiver tamanho residual inferior a 80 chars (ex.: 50 chars), ele foi separado do parágrafo anterior justamente porque estouraria 1.200 chars. No fim da função, ele é fundido incondicionalmente no chunk anterior sem checar o limite!
+Execução com `splitByParagraph("A".repeat(1190) + "\n\n" + "B".repeat(50))`:
+```javascript
+// Saída: Chunk 0 length: 1242.
+// res[0].length > 1200: TRUE (1242 caracteres!)
+```
+A declaração de §4.1 de que *"a afirmação era falsa, e agora é verdadeira"* é **falsa**. O teto de 1.200 caracteres é violado em dois caminhos de execução independentes.
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: 
+1. Em `hardSplit`: antes de entrar no `while`, descarregar `current` se ele não estiver vazio:
+   ```ts
+   if (sentence.length > KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS) {
+     if (current.length > 0) { out.push(current); current = ''; }
+     while (sentence.length > KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS) { ... }
+   }
+   ```
+2. Em `splitByParagraph`: só fundir a sobra curta no chunk anterior se `out[out.length - 1].length + 2 + current.length <= KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS`. Caso contrário, descartar ou manter como chunk separado.
+
+---
+
+ACHADO: O caso F10.9 da matriz manual ("Concílio de Niceia"), apresentado como o teste crucial da hipótese central da §3, devolve VAZIO e não injeta nenhum trecho no prompt
+EVIDÊNCIA: `docs/phase-5a-v5.md:70-73`, `docs/phase-5a-v5.md:703` e execução no recuperador.
+O plano declara em §3:
+> *"o preâmbulo (§4.5) instrui o modelo a ignorar trecho que não responda à pergunta, então o custo esperado é orçamento de contexto, não resposta errada. Isso é hipótese, não fato — e é exatamente o que o caso F9.9 da matriz de áudio real existe para testar, com uma pergunta de domínio fora do corpus."*
+E estabelece em §8 (F10.9):
+> `| 9 | "Em que ano foi o Concílio de Niceia?" | pergunta de domínio fora do corpus: um trecho vagamente relacionado será injetado (§3). A resposta não pode ficar pior que na Fase 4 — este caso é o teste da hipótese central da §3 |`
+
+Execução real no recuperador:
+```javascript
+retriever.retrieve("teologia", "Em que ano foi o Concílio de Niceia?");
+// Saída: [] (0 trechos recuperados, score = 0.000)
+```
+"Concílio de Niceia" é exatamente um dos 6 casos silenciados da amostra de ruído (`score = 0.000`).
+Como `retrieved.length === 0`, `knowledgeBlock` é uma string vazia (`""`). O system prompt enviado ao LLM é rigorosamente idêntico ao da Fase 4. **Nenhum trecho vagamente relacionado é injetado.**
+O teste concebido para validar a hipótese mais arriscada de todo o documento é um teste nulo que não injeta nada e não testa a hipótese.
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Substituir F10.9 por uma pergunta de ruído que de fato ative o casamento léxico espúrio e injete um trecho não correlato (por exemplo, `"Quem é o autor do livro de Jó?"`, que atinge score 3.587 e injeta o trecho de metodologia exegética, ou `"Você pode me dar um conselho sobre o meu casamento?"`, que atinge score 3.792 e injeta diretrizes negativas em Virtologia).
+
+---
+
+ACHADO: Omissão de stopwords conversacionais básicas (`voce`, `meu`, `minha`, `dar`) inflaciona ruído com scores de até 3.792, superando o teto de ruído publicado
+EVIDÊNCIA: `docs/phase-5a-v5.md:329-343` e execução contra o corpus real.
+O plano expandiu as stopwords em §4.2, mas deixou de fora palavras estruturantes de qualquer diálogo falado em português: `voce`, `meu`, `minha`, `dar`.
+No corpus de Virtologia (10 trechos), `voce` aparece em apenas 1 trecho (`5. Limites e Diretrizes Negativas`, `df = 1`). Por isso, seu IDF é desproporcionalmente alto (1.992).
+Ao testar perguntas realistas de ruído que um usuário faria ao assistente:
+```javascript
+retriever.retrieve("virtologia", "Você pode me dar um conselho sobre o meu casamento?");
+// Saída: score = 3.792 -> "5. Limites e Diretrizes Negativas" (casou "voce" e "conselho")
+```
+O score atingido (**3.792**) é superior ao teto máximo de ruído alegado em §3 (`max=3.587`).
+Em uma bateria de 15 perguntas realistas de ruído fora do corpus (ex.: "Como lidar com a ansiedade no trabalho?", "Como vencer a tentação e o pecado?", "Posso me divorciar segundo a Bíblia?"), **80% (12/15) sofreram injeção de trecho espúrio**, desmentindo a representatividade da amostra da Seção 3.
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Incluir imediatamente no conjunto `STOPWORDS`: `voce`, `voces`, `meu`, `meus`, `minha`, `minhas`, `mim`, `comigo`, `nosso`, `nossa`, `nossos`, `nossas`, `dar`, `deu`.
+
+---
+
+ACHADO: Fatiamento arbitrário por contagem de caracteres em `hardSplit` mutila palavras ao meio, corrompendo a tokenização BPE e o system prompt
+EVIDÊNCIA: `docs/phase-5a-v5.md:234-238`.
+```ts
+const head = sentence.slice(0, KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS);
+sentence = sentence.slice(KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS);
+```
+O método `slice(0, 1200)` corta a string estritamente no caractere 1200, sem buscar fronteira de palavra (`\s`).
+Se o caractere 1200 cair no meio de uma palavra (ex.: "desenvolvimento" partido em "desen" e "volvimento"):
+1. O trecho injetado no system prompt termina com meia palavra e o próximo trecho começa com a outra metade sem espaço.
+2. No tokenizador BPE do Qwen 2.5 4B, fragmentos sem espaço inicial geram tokens anômalos fora de contexto, induzindo degradação sintática e alucinações.
+3. No índice BM25, `normalize` indexará a subpalavra espúria ("volvimento"), que nunca coincidirá com uma busca por "desenvolvimento", corrompendo o vocabulário do índice.
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Em frases gigantes que excedem 1.200 caracteres, realizar o corte recuando até o último espaço em branco antes do limite (`paragraph.lastIndexOf(' ', MAX_CHUNK_CHARS)`).
+
+---
+
+ACHADO: Omissão de `import` em `sessionManager.ts` e `voiceRuntime.ts` quebra a compilação do TypeScript estrito (`tsconfig.server.json`)
+EVIDÊNCIA: `docs/phase-5a-v5.md:488-549` (§6.4) e `docs/phase-5a-v5.md:565-571` (§6.6).
+O pseudocódigo especifica a adição do campo `retriever: KnowledgeRetriever | null`, chamadas a `buildKnowledgeBlock`, tipagem com `RetrievedChunk`, e em `voiceRuntime.ts` a chamada `loadKnowledgeCorpus(rootDir)` e `new KnowledgeRetriever(...)`.
+No entanto, nem §6.4 nem §6.6 fornecem ou mencionam as instruções de `import`.
+Atualmente, [`src/backend/voice/sessionManager.ts:1-10`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L1-L10) e [`src/backend/voice/voiceRuntime.ts:1-10`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L1-L10) não importam esses símbolos.
+Ao aplicar o plano literalmente, `npm test` falha na compilação do TypeScript com erros `TS2304: Cannot find name 'KnowledgeRetriever'`, `TS2304: Cannot find name 'buildKnowledgeBlock'` e `TS2304: Cannot find name 'loadKnowledgeCorpus'`.
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Especificar formalmente em §6.4 e §6.6 os imports necessários:
+- Em `sessionManager.ts`: `import { KnowledgeRetriever, buildKnowledgeBlock } from '../knowledge/index.js';` e `import type { RetrievedChunk } from '../knowledge/index.js';`
+- Em `voiceRuntime.ts`: `import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';`
+
+---
+
+ACHADO: Tabela de apelidos (ALIAS_FAMILIES) ainda omite flexões de gênero e plural para adjetivos técnicos essenciais
+EVIDÊNCIA: `docs/phase-5a-v5.md:346-369`.
+O plano corrigiu flexões em 4 famílias (como `escatologia` e `hermeneutica`), mas a própria tabela continua com lacunas morfológicas evidentes:
+- `soteriologia`: lista `soteriologico` e `soteriologica`, mas **omite** `soteriologicos` e `soteriologicas`.
+- `eclesiologia`: lista `eclesiologico` e `eclesiologica`, mas **omite** `eclesiologicos` e `eclesiologicas`.
+- `booleano`: lista `booleano`, `booleana`, `booleanos`, mas **omite** `booleanas`.
+- `virtude`: lista `virtuoso`, `virtuosa`, mas **omite** `virtuosos` e `virtuosas`.
+- `pregacao`: lista `homiletico`, `homiletica`, mas **omite** `homileticos` e `homileticas`.
+Consultas técnicas legítimas no plural (ex.: *"Quais são os modelos eclesiológicos abordados?"*) sofrem falso silêncio ou casamento espúrio em trechos errados.
+O critério F3 do plano é tautológico: ao testar apenas as variantes cadastradas contra si mesmas, não detecta formas regulares ausentes.
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Completar o fechamento morfológico para todas as 22 famílias, adicionando explicitamente `soteriologicos`, `soteriologicas`, `eclesiologicos`, `eclesiologicas`, `booleanas`, `virtuosos`, `virtuosas`, `homileticos`, `homileticas`.
+
+---
+
+ACHADO: Discrepância na estatística publicada de crescimento de prompt (§5)
+EVIDÊNCIA: `docs/phase-5a-v5.md:182` vs. cálculo estatístico exato.
+O plano afirma:
+`prompt montado (len real, 14 consultas): mín +42,2% | mediana +53,9% | máx +71,1%`
+Executando a medição com os 14 casos de sinal que geram as métricas de score da Seção 3:
+Percentuais ordenados: `42.2%, 43.1%, 47.6%, 50.0%, 50.9%, 51.2%, 52.3%, 52.3%, 53.9%, 60.3%, 62.6%, 62.6%, 65.5%, 71.1%`.
+A mediana matemática para N=14 (média dos elementos nos índices 6 e 7) é **+52,3%**. O valor de `+53,9%` corresponde ao 9º elemento (índice 8).
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Corrigir o texto de §5 para refletir a mediana exata (+52,3%), mantendo o registro auditável dos percentuais ordenados.
+
+---
+
+ACHADO: Critério de aceite F1 estabelece asserção matematicamente incongruente e incompatível com o descarte de seções curtas
+EVIDÊNCIA: `docs/phase-5a-v5.md:674`:
+`nenhum conteúdo perdido (soma dos corpos ≥ corpo original menos separadores)`
+1. O uso da desigualdade `>=` é incongruente: a soma do tamanho dos corpos dos chunks nunca pode ser maior que o corpo original, a menos que texto seja duplicado ou inventado.
+2. Em `chunkMarkdown:285`, qualquer parágrafo ou seção isolada que possua menos de 80 caracteres (`MIN_CHUNK_CHARS`) é descartado silenciosamente (`if (piece.length >= KNOWLEDGE_LIMITS.MIN_CHUNK_CHARS)`). Exemplo: `## Nota\nTexto curto com cinquenta caracteres.` gera zero chunks. O conteúdo dessa seção é descartado por design, tornando a asserção "nenhum conteúdo perdido" irrealizável como escrita.
+3. A expressão "menos separadores" não possui definição algorítmica exata em código de teste.
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Redefinir F1 com uma especificação precisa: para seções com corpo `>= MIN_CHUNK_CHARS`, verificar que todas as palavras normalizadas do texto fonte estão presentes no conjunto unificado de chunks gerados (`tokens(source) ⊆ tokens(chunks)`).
+
+---
+
+ACHADO: Divergência de identificador de caso de teste entre §3 e §8
+EVIDÊNCIA: `docs/phase-5a-v5.md:70` cita `"caso F9.9 da matriz de áudio real"`, enquanto em `docs/phase-5a-v5.md:688-705`, o critério automatizado é **F9** e a matriz de áudio real é **F10** (onde o caso citado figura como item 9 de F10, ou `F10.9`, como citado em §11 linha 735).
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Unificar a menção em §3 para `F10 caso 9` ou `F10.9`.
+
+---
+
+### Respostas aos Pontos Específicos Auditados
+
+- **a) Representatividade da amostra de ruído (§3):** A amostra de 14 perguntas de ruído da §3 foi facilitada. Perguntas como "Concílio de Niceia" não contêm termos coincidentes com o corpus de Teologia e geram score zero com facilidade. Quando submetemos perguntas teológicas e terapêuticas reais e comuns que um usuário faria a estes especialistas (ex.: *"Qual é o fruto do Espírito em Gálatas?"*, *"Como vencer a tentação e o pecado?"*, *"Posso me divorciar segundo a Bíblia?"*, *"Como lidar com a ansiedade no trabalho?"*, *"Você pode me dar um conselho sobre o meu casamento?"*), a taxa de silenciamento despenca de 43% (6/14) para apenas **20% (3/15)**, e scores atingem **3.792** — demonstrando que no mundo real o recuperador injetará trechos desconexos em 80% das perguntas fora do corpus.
+- **b) Testabilidade da hipótese do preâmbulo em F10.9:** Não é testável. O caso F10.9 ("Concílio de Niceia") devolve vazio (`score = 0.000`), logo o bloco de conhecimento não é gerado e o LLM recebe o prompt sem trecho. É um falso teste de hipótese. Além disso, testar a resiliência de um modelo pequeno de 4B parâmetros a distrações contextuais com amostra de N=1 é estatisticamente inválido.
+- **c) Defensabilidade de injetar sempre que `score > 0`:** É indefensável em um corpus de apenas 10 a 29 trechos. O plano caiu na falácia de "tudo ou nada": como não encontrou um limiar único perfeito entre 2.162 e 3.587, abriu mão de qualquer filtro. O plano não considerou:
+  1. Exigir margem mínima entre o 1º e o 2º colocado (`score1 / score2 > 1.3` ou `score1 - score2 > delta`).
+  2. Exigir casamento obrigatório em termo do título (`headingPath`), onde a intencionalidade da seção é expressa.
+  3. Exigir ao menos 2 termos distintos casados quando nenhum estiver no título.
+- **d) Efeito de `hardSplit` fatiar palavras ao meio:** Cortar arbitrariamente no índice de caractere 1200 sem respeitar limites de palavras (`\s`) quebra tokens no tokenizador BPE do Qwen 2.5 4B, polui o system prompt com fragmentos anômalos e inviabiliza o casamento léxico no índice BM25 para as palavras mutiladas.
+- **e) Extrapolação de `MAX_CHUNK_CHARS` em `splitByParagraph`:** Confirmado por execução. A fusão da sobra curta na linha 263 faz o chunk final atingir **1.242 caracteres** (estouro de 42 caracteres além do teto). Em conjunto, a linha 236 de `hardSplit` produz chunks de até **1.702 caracteres**.
+- **f) Substituição delimitada em `sessionManager.ts` (§6.4):** As linhas delimitadoras (`const agent = selectAgentForLabel(label, this.agents);` na 258 e `this.emit(session, { type: 'routing', turnId: turn.turnId, label, handled });` na 265) existem e são únicas em [`src/backend/voice/sessionManager.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts). A delimitação é precisa, mas o trecho omite os imports necessários no topo do arquivo.
+- **g) Carregamento do corpus em `voiceRuntime.ts` (§6.6):** O ponto de inserção existe (imediatamente antes de instanciar `new SessionManager` na linha 73 de [`src/backend/voice/voiceRuntime.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts)) e respeita a checagem de runtime ativo. No entanto, o plano omitiu a declaração dos imports de `loadKnowledgeCorpus` e `KnowledgeRetriever`.
+- **h) Verificabilidade da asserção de conservação em F1:** Não é verificável como escrita. A expressão `soma dos corpos ≥ corpo original menos separadores` contém uma contradição lógica no operador `>=` (a soma não pode ser maior sem duplicar conteúdo) e não considera que seções isoladas com menos de 80 caracteres são descartadas intencionalmente pelo filtro `MIN_CHUNK_CHARS`.
+- **i) Quebra de testes existentes fora da lista de §7:** Nenhum teste existente fora dos já mapeados (`extensions.test.ts`, `sessionManager.ts`, `voice.test.ts`) é quebrado, pois os testes atuais de sessão instanciam `SessionManager` sem o 5º parâmetro opcional (`retriever = null`), mantendo o comportamento prévio. A quebra observada decorre estritamente da ausência dos novos imports na compilação do TypeScript estrito.
+
+---
+
+VEREDITO: REJEITADO — O plano viola estruturalmente o limite de tamanho de trechos (`MAX_CHUNK_CHARS` estourado em até 1.702 chars em `hardSplit` e 1.242 chars em `splitByParagraph`), apoia-se em um caso manual de teste (F10.9) que devolve vazio e não testa a injeção de trecho irrelevante, e omite stopwords conversacionais essenciais (`voce`, `meu`) que disparam falso casamento em 80% das perguntas cotidianas fora do corpus com scores de até 3.792.
+=====AGY_EXIT=0=====

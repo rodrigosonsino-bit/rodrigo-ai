@@ -15,7 +15,7 @@ describe('Pontos de Extensão e Registro Modular (Fase 1)', () => {
     const registry = ExtensionRegistry.getInstance();
     const statuses = registry.getModuleStatuses();
 
-    assert.equal(statuses.length, 4);
+    assert.equal(statuses.length, 5);
 
     const foundation = statuses.find((s) => s.id === 'foundation');
     assert.equal(foundation?.available, true);
@@ -32,5 +32,10 @@ describe('Pontos de Extensão e Registro Modular (Fase 1)', () => {
     const tools = statuses.find((s) => s.id === 'tools');
     assert.equal(tools?.available, false);
     assert.equal(tools?.phase, 5);
+
+    // Fase 5a: sem corpus registrado, o módulo de conhecimento se declara indisponível.
+    const knowledge = statuses.find((s) => s.id === 'knowledge');
+    assert.equal(knowledge?.available, false);
+    assert.equal(knowledge?.phase, 5);
   });
 });

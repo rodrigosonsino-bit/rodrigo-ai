@@ -1,0 +1,228 @@
+### Verificação por Execução (Números da Seção 5 contra o Corpus Real)
+
+O pseudocódigo das seções 7.2 e 7.3 (`chunkMarkdown`, `splitByParagraph`, `normalize` com `ALIASES`, `KnowledgeRetriever`, `buildKnowledgeBlock`) foi transcrito para script e executado diretamente contra `docs/research/teologia-profile-source.md` e `docs/research/virtologia-profile-source.md`.
+
+**Resultado da medição:**
+- **Contagem de trechos:** 39 trechos no total (Teologia: 29 / Virtologia: 10). **[CONFIRMADO]**
+- **Maior corpo de trecho:** 1.157 caracteres (seção `3. CONVICÇÕES DOUTRINÁRIAS > 3.4 Eclesiologia`). **[CONFIRMADO]**
+- **Ranking e pontuações dos 7 casos:**
+  1. `[virtologia] Explique a Aceitação dentro da Virtologia` => score **2.376** (`4. Exemplo Central: o Conceito de Aceitação`) [985 chars] **[CONFIRMADO]**
+  2. `[teologia] Faça uma análise exegética de Hebreus cinco` => score **3.616** (`4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.2 Sequência obrigatória da análise`) [1073 chars] **[CONFIRMADO]**
+  3. `[teologia] Qual é a sua posição sobre o batismo?` => score **3.192** (`3. CONVICÇÕES DOUTRINÁRIAS > 3.6 Temas doutrinários ainda abertos`) [577 chars] **[CONFIRMADO]**
+  4. `[virtologia] Como perdoar na Virtologia?` => score **2.286** (`5. Limites e Diretrizes Negativas (o que a Virtologia NÃO é)...`) [578 chars] **[CONFIRMADO]**
+  5. `[virtologia] O que são as Faixas de Evolução?` => score **3.701** (`2. Estrutura Central: Virtudes, Faixas de Evolução... > B. As Faixas de Evolução...`) [1088 chars] **[CONFIRMADO]**
+  6. `[virtologia] O que é o medo na Virtologia?` => score **2.139** (`4. Exemplo Central: o Conceito de Aceitação`) [985 chars] **[CONFIRMADO]**
+  7. `[teologia] Qual a receita de bolo de cenoura?` => **VAZIO** **[CONFIRMADO]**
+- **Caso anafórico isolado:**
+  - `"E qual a diferença entre a segunda e a terceira?"` => **VAZIO** **[CONFIRMADO]**
+- **Crescimento do system prompt (`len()` da string montada):**
+  - Prompt base Teologia (identidade 1.274 + safety 965 + `\n\n`): 2.241 chars
+  - Prompt base Virtologia (identidade 1.257 + safety 965 + `\n\n`): 2.224 chars
+  - Aceitação: bloco=1.391, total=3.617 (+62,6%)
+  - Exegese: bloco=1.509, total=3.752 (+67,4%)
+  - Batismo: bloco=1.005, total=3.248 (+44,9%)
+  - Perdão: bloco=1.056, total=3.282 (+47,6%)
+  - Faixas: bloco=1.580, total=3.806 (+71,1%)
+  - Medo: bloco=1.391, total=3.617 (+62,6%)
+  - Bolo: sem trecho => 2.241 chars (+0,0%)
+  - Estatísticas: **mín +44,9% / mediana +62,6% / máx +71,1%** **[CONFIRMADO]**
+
+Embora a aritmética da Seção 5 corresponda estritamente ao corpus estático atual, a auditoria adversarial identificou falhas estruturais críticas no desenho e na especificação do código.
+
+---
+
+### Achados da Auditoria
+
+ACHADO: `splitByParagraph` não subdivide parágrafos longos (> MAX_CHUNK_CHARS) e descarta silenciosamente parágrafos finais curtos (< MIN_CHUNK_CHARS)
+EVIDÊNCIA: `docs/phase-5a-v4.md:264-280`:
+```ts
+function splitByParagraph(body: string): string[] {
+  const paragraphs = body.split('\n\n').filter((p) => p.trim().length > 0);
+  const out: string[] = [];
+  let current = '';
+  for (const p of paragraphs) {
+    if (current.length === 0) {
+      current = p;
+    } else if (current.length + 2 + p.length <= KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS) {
+      current = `${current}\n\n${p}`;
+    } else {
+      out.push(current);
+      current = p;
+    }
+  }
+  if (current.length > 0) out.push(current);
+  return out.filter((c) => c.length >= KNOWLEDGE_LIMITS.MIN_CHUNK_CHARS);
+}
+```
+Execução com parágrafo longo:
+```javascript
+splitByParagraph("X".repeat(5000));
+// Saída: [ 'X'.repeat(5000) ] — tamanho 5000, NÃO dividido!
+```
+Execução com parágrafo final curto:
+```javascript
+const p1 = "A".repeat(1150);
+const p2 = "Conclusão: Rodrigo condena esta prática."; // 40 chars
+splitByParagraph(`${p1}\n\n${p2}`);
+// Saída: [ p1 ] — p2 foi sumariamente eliminado do índice!
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: 
+1. `splitByParagraph` só agrupa blocos separados por `\n\n`. Se um parágrafo único (ou lista de markdown sem linha em branco dupla) exceder `MAX_CHUNK_CHARS`, ele deve ser fatiado respeitando quebras de linha ou frases, sob pena de violar a garantia de §4.4 ("nenhum trecho maior que 1200 chars").
+2. Remover o descarte cego `out.filter(c => c.length >= MIN_CHUNK_CHARS)` no final da função. O filtro `MIN_CHUNK_CHARS` só pode ser aplicado ao corpo integral da seção antes do split, nunca a fragmentos residuais resultantes da divisão de uma seção legítima.
+
+---
+
+ACHADO: Remoção de limiar numérico (`score > 0`) combinada com stopword omitida (`sem`) e termos coloquiais no corpus (`sei`) causa sequestro de tópico ("topic hijacking")
+EVIDÊNCIA: `docs/phase-5a-v4.md:341-352` (STOPWORDS não contém `sem`), `docs/phase-5a-v4.md:469` (`if (score <= 0) break;`) e execução contra o corpus real:
+```javascript
+// Caso 1: Usuário pergunta sobre perdão com introdução coloquial "Não sei se..."
+retriever.retrieve("virtologia", "Não sei se consigo perdoar meu chefe");
+// Saída:
+// Query terms: [ 'sei', 'consigo', 'perdao', 'meu', 'chefe' ]
+// score=1.622 -> "2. Estrutura Central ... > B. As Faixas de Evolução" (casou "sei")
+// score=1.581 -> "3. Método e Abordagem Terapêutica > C. Manejo clínico" (casou "perdao")
+// score=1.571 -> "5. Limites e Diretrizes Negativas" (casou "perdao")
+```
+Como `sei` aparece em apenas 1 trecho (`df=1`, trecho de Faixas: *"já sei o que devo fazer..."*), seu IDF é maior que o de `perdao` (`df=2`). Como `MAX_CHUNKS = 1`, o trecho correto sobre Perdão é descartado e o modelo recebe orientações sobre a "Faixa Primitiva".
+```javascript
+// Caso 2: Pergunta pastoral com a preposição "sem" (omitida das stopwords)
+retriever.retrieve("teologia", "Posso orar sem jejuar?");
+// Saída:
+// Query terms: [ 'orar', 'sem', 'jejuar' ]
+// score=2.037 -> "12. RESUMO OPERACIONAL" (onde "sem" aparece 5 vezes)
+```
+```javascript
+// Caso 3: Perguntas de continuação anafóricas naturais não devolvem vazio
+retriever.retrieve("teologia", "E qual o versículo principal?");
+// score=4.171 -> "6. PREGAÇÃO E PRODUÇÃO HOMILÉTICA > 6.2 Três modalidades de sermão"
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA:
+1. Incluir imediatamente `sem` no conjunto `STOPWORDS` (aparece 18 vezes em Teologia e 7 em Virtologia, atuando como atrator espúrio).
+2. Adicionar palavras coloquiais comuns presentes em citações do corpus (como `sei`) ao `STOPWORDS`.
+3. Reavaliar a premissa de §4.5: um casamento fraco de uma única palavra de apoio desvia o trecho único (`MAX_CHUNKS: 1`) para longe da real intenção do usuário. Estabelecer um piso mínimo ou exigir que o termo casador não seja unicamente um verbo/adjetivo de suporte.
+
+---
+
+ACHADO: Tabela de apelidos (ALIASES) omite flexões gramaticais básicas de gênero e número para adjetivos técnicos essenciais, gerando falso silêncio e roteamento incorreto
+EVIDÊNCIA: `docs/phase-5a-v4.md:358-377`. A tabela lista 18 famílias técnicas (embora §4.2 mencione incorretamente "10 famílias"). Para termos técnicos chave, foram incluídas formas masculinas singulares e esquecidas formas femininas e plurais:
+```javascript
+retriever.retrieve("teologia", "Quais são as regras hermenêuticas?");
+// => VAZIO (ALIASES tem apenas 'hermeneutico'; falta 'hermeneuticas' e 'hermeneuticos')
+
+retriever.retrieve("teologia", "Qual a visão soteriológica?");
+// => VAZIO (ALIASES tem apenas 'soteriologico'; falta 'soteriologica')
+
+retriever.retrieve("teologia", "Quais são as visões escatológicas?");
+// => VAZIO (ALIASES tem 'escatologico' e 'escatologica'; faltam 'escatologicos' e 'escatologicas')
+
+retriever.retrieve("teologia", "Qual a estrutura eclesiológica da igreja?");
+// => score=1.859 -> "4.2 Sequência obrigatória da análise" (Exegese)
+// ('eclesiologica' não casa por falta de flexão feminina; 'igreja' casa trecho errado de Exegese em vez de Eclesiologia)
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Completar a tabela fechada de `ALIASES` com o fechamento morfológico sistemático de todas as flexões de gênero e número (singular/plural, masculino/feminino: `-o`, `-a`, `-os`, `-as`) para cada família adjetiva técnica (`hermeneutico/a/os/as`, `escatologico/a/os/as`, `soteriologico/a/os/as`, `eclesiologico/a/os/as`, `evolutivo/a/os/as`, etc.).
+
+---
+
+ACHADO: Justificativa técnica falsa para a precedência de `###` sobre `##` em `chunkMarkdown`
+EVIDÊNCIA: `docs/phase-5a-v4.md:330-333`:
+> *"**Nota de ordem:** a checagem de `###` vem antes da de `##`, porque a regex de `##` também casa uma linha `### x` (o `\s+` aceita `# x`). Invertendo, todo H3 seria tratado como H2 e o `headingPath` composto nunca se formaria."*
+
+Execução no Node.js testando a regex:
+```javascript
+const reH2 = /^##\s+(.+?)(?:\s+#+)?\s*$/;
+console.log(reH2.exec("### Título H3")); // null
+```
+Executando o parse do corpus real com as duas ordens:
+- Ordem H3 antes de H2 vs. H2 antes de H3: saída rigorosamente idêntica (`Teol identical: true`, `Virt identical: true`).
+`\s` casa apenas espaços e caracteres em branco, nunca `#`. O terceiro `#` de `### x` impede categoricamente qualquer casamento pela regex de H2.
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Corrigir o texto explicativo da seção 7.2. A precedência de H3 sobre H2 é indiferente com as expressões regulares exatas propostas (`^##\s+` vs `^###\s+`).
+
+---
+
+ACHADO: Especificação de substituição de linhas em `sessionManager.ts` causa duplicação na emissão do evento SSE `routing`
+EVIDÊNCIA: `docs/phase-5a-v4.md:510-540` vs. [`src/backend/voice/sessionManager.ts:258-266`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L258-L266).
+O plano instrui: *"Em runTurn, substituindo as linhas 258-264 atuais:"*.
+Contudo, o bloco proposto no plano termina com:
+```ts
+      const handled = label !== 'AMBIGUO';
+      this.emit(session, { type: 'routing', turnId: turn.turnId, label, handled });
+```
+No arquivo atual, a linha 265 é exatamente:
+```ts
+265:  this.emit(session, { type: 'routing', turnId: turn.turnId, label, handled });
+```
+Substituir o intervalo 258-264 pelo snippet proposto preserva a linha 265 original logo abaixo, resultando em duas chamadas idênticas consecutivas a `this.emit(session, { type: 'routing', ... })`.
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Corrigir a instrução de substituição para abranger as linhas 258-265, ou remover a emissão duplicada do final do snippet do plano.
+
+---
+
+ACHADO: Omissão de pseudocódigo para `voiceRuntime.ts`, `knowledge/index.ts` e campos de classe de `SessionManager`
+EVIDÊNCIA: §6 lista `src/backend/voice/voiceRuntime.ts` como modificado e `src/backend/knowledge/index.ts` como novo.
+Contudo, na seção 7 ("Pseudocódigo completo"):
+1. Não há pseudocódigo para `voiceRuntime.ts` (onde `loadKnowledgeCorpus`, `registerKnowledge` e a instanciação do `KnowledgeRetriever` devem ocorrer).
+2. Não há pseudocódigo nem definição de exportações para `src/backend/knowledge/index.ts`.
+3. Em `SessionManager` (§7.4), o pseudocódigo mostra o construtor atribuindo `this.retriever = retriever`, mas não declara o campo privado `private readonly retriever: KnowledgeRetriever | null;` no topo da classe, o que quebra a compilação do TypeScript em modo estrito (`tsconfig.server.json`).
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Incluir a subseção de pseudocódigo de `voiceRuntime.ts`, o arquivo barrel `knowledge/index.ts` e a declaração de campo privado em `SessionManager`.
+
+---
+
+ACHADO: Perguntas de benchmark de Teologia e Virtologia deixadas como comentários vazios e quebra de referência no `README.md`
+EVIDÊNCIA: `docs/phase-5a-v4.md:582-587`:
+```js
+const QUESTION_SETS = {
+  geral: [ /* as 10 perguntas atuais, inalteradas */ ],
+  teologia: [ /* 10 perguntas de Teologia, a primeira sendo descartada como aquecimento */ ],
+  virtologia: [ /* 10 perguntas de Virtologia, idem */ ]
+};
+```
+O plano exige medição comparativa automatizada (critério E10), mas delega ao implementador redigir as 10 perguntas de cada domínio especialista.
+Além disso, o plano altera o arquivo de saída para `voice-benchmark-<set>.json`. No entanto, [`README.md:193`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/README.md#L193) documenta:
+`...benchmark real em docs/audits/voice-benchmark-latest.json após npm run bench:voice.`
+Ao salvar em `voice-benchmark-geral.json`, o arquivo `latest.json` torna-se obsoleto ou ausente.
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA:
+1. Declarar expressamente as 10 perguntas de Teologia e as 10 perguntas de Virtologia no pseudocódigo de `bench-voice.mjs`.
+2. Fazer `bench-voice.mjs` salvar tanto em `voice-benchmark-<set>.json` quanto atualizar `voice-benchmark-latest.json` (ou atualizar a documentação em `README.md`).
+
+---
+
+ACHADO: Quebra de parágrafos vulnerável a quebras de linha Windows CRLF (`\r\n`)
+EVIDÊNCIA: `docs/phase-5a-v4.md:265`:
+```ts
+const paragraphs = body.split('\n\n').filter((p) => p.trim().length > 0);
+```
+Se um dos arquivos em `docs/research/*.md` for salvo com terminação CRLF (`\r\n\r\n`), `body.split('\n\n')` falha em segmentar os parágrafos, fazendo com que o texto todo seja tratado como um único bloco.
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Utilizar regex flexível para split de parágrafos: `body.split(/\r?\n\r?\n/)`.
+
+---
+
+### Respostas aos Pontos Específicos Auditados
+
+- **a) Tabela de APELIDOS (§4.2, §7.3):** A suposição de domínio fechado é falha em sua aplicação concreta. A tabela cobriu substantivos ou formas masculinas singulares, mas esqueceu formas femininas e plurais regulares de seus próprios adjetivos (`hermenêuticas`, `soteriológica`, `escatológicas`, `eclesiológica`). Isso gera falso silêncio em perguntas diretas ou casamento em trechos espúrios por palavras residuais comuns.
+- **b) Ausência de limiar (`score > 0`):** Provoca sequestro de tópico ("topic hijacking"). O filler coloquial `sei` ("já sei o que devo fazer...") tem IDF mais alto que `perdao` e desvia consultas como "Não sei se consigo perdoar meu chefe" para Faixas de Evolução. A preposição `sem` (faltante em `STOPWORDS`) atrai consultas como "Posso orar sem jejuar?" para resumos homiléticos. A afirmação de que consultas de continuação devolvem "vazio, não lixo" é falsa para perguntas com termos como "versículo" ou "prática".
+- **c) `splitByParagraph` (§7.2, §7.4):** Parágrafos individuais maiores que 1200 chars passam inteiros sem divisão (ex.: 5000 chars passam com 5000 chars), quebrando o critério E1 e a garantia de §4.4. Além disso, blocos finais curtos (< 80 chars) são sumariamente eliminados do corpus.
+- **d) Ordem `###` antes de `##`:** A justificativa técnica alegando que `\s+` aceitaria `# x` é falsa. A ordem é indiferente para regexes bem ancoradas como as propostas.
+- **e) `resetForTesting()` (§7.5):** O esvaziamento in-place das listas e contadores é seguro para a suíte atual, mas o plano não fornece getter para `knowledgeChunkCount`, exigindo inspeção indireta via `getModuleStatuses()`.
+- **f) Consistência do corte do evento SSE:** O corte do campo `knowledge` do evento SSE foi mantido de forma consistente em todo o documento; nenhum teste ou critério de aceite restante depende dele.
+- **g) `bench-voice.mjs` (§7.6):** Preserva a comparabilidade histórica de `geral`, mas o pseudocódigo omite as 10 perguntas de Teologia e Virtologia, e a divisão de arquivos quebra o caminho de benchmark documentado em `README.md`.
+- **h) Quebra de testes existentes:** A lista de arquivos modificados em §6 omitiu que `sessionManager.ts` precisa de declaração de campo privado do TypeScript, e a substituição das linhas 258-264 duplica o evento SSE `routing` no runtime.
+
+---
+
+VEREDITO: REJEITADO — O plano possui três achados de gravidade alta (não-divisão e descarte indevido em `splitByParagraph`, sequestro de tópicos legítimos por falta de limiar e stopword essencial, e incompletude morfológica na tabela de apelidos que quebra perguntas técnicas naturais), além de inconsistências de compilação e emissão duplicada de SSE.
+=====AGY_EXIT=0=====

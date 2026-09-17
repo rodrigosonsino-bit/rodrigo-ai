@@ -1,0 +1,180 @@
+# Relatório de Auditoria Adversarial: Plano Fase 5a (v1)
+
+**Documento Auditado:** [`docs/phase-5a-v1.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md)  
+**Base do Repositório:** `Rodrigo AI v0.3.0` (commit `cc9d9d7`)  
+**Data da Auditoria:** 2026-09-16  
+
+---
+
+### ACHADO 1: O benchmark de voz (`bench:voice`) não exercita o caminho de conhecimento e mascara o risco central de latência (D10)
+EVIDÊNCIA: [`scripts/bench-voice.mjs:9-20`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/bench-voice.mjs#L9-L20) vs [`docs/phase-5a-v1.md:23`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L23) e [`docs/phase-5a-v1.md:556-559`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L556-L559):
+> `scripts/bench-voice.mjs:9-20`:
+> ```javascript
+> const QUESTIONS = [
+>   'Quanto é dois mais dois?',
+>   'Que horas são agora?',
+>   'Qual é a capital do Brasil?',
+>   'Me diga um número entre um e dez.',
+>   'Como você está?',
+>   'Qual é o seu nome?',
+>   'Quanto é dez vezes cinco?',
+>   'Explique o que é uma maçã.',
+>   'Qual é o dia da semana hoje?',
+>   'Diga olá em uma frase curta.'
+> ];
+> ```
+> `docs/phase-5a-v1.md:23`:
+> "3. **GERAL e AMBIGUO não recuperam nada** — prompt idêntico ao da Fase 4, byte a byte."
+> `docs/phase-5a-v1.md:556`:
+> "- **D10** `npm run bench:voice` rodado **antes e depois**, na mesma máquina e sessão, com os números dos dois registrados lado a lado no relatório. Aprovação exige mediana ≤4s e p95 ≤8s **depois**..."
+
+GRAVIDADE: ALTA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: O critério D10 é uma ilusão metrológica: todas as 10 perguntas do benchmark existente caem no rótulo `GERAL`, onde a recuperação é ignorada e o prompt gerado é 100% idêntico ao da Fase 4. O benchmark nunca medirá o impacto de latência da recuperação nem o prompt expandido de Teologia/Virtologia. O plano deve incluir a modificação ou parametrização de [`scripts/bench-voice.mjs`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/bench-voice.mjs) para incluir perguntas de `TEOLOGIA` e `VIRTOLOGIA` (ex.: as perguntas de D9), avaliando o delta par-a-par especificamente nesses domínios.
+
+---
+
+### ACHADO 2: O algoritmo BM25 proposto falha no caso de teste D9.1 devido a stopwords incompletas e distorção por IDF
+EVIDÊNCIA: [`docs/phase-5a-v1.md:298-306`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L298-L306) e [`docs/phase-5a-v1.md:550`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L550):
+> `docs/phase-5a-v1.md:550`:
+> `| 1 | "Explique a Aceitação dentro da Virtologia" | VIRTOLOGIA; recupera a seção 4 (Exemplo Central: Aceitação) |`
+
+GRAVIDADE: ALTA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: Ao executar o código exato da seção 6.3 contra o corpus real de [`docs/research/virtologia-profile-source.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/research/virtologia-profile-source.md), a query normalizada é `['explique', 'aceitacao', 'dentro', 'virtologia']`. A palavra "dentro" não consta na lista de stopwords e aparece em apenas 1 trecho do corpus (Seção 1: *"praticante/formador dentro dela"*), conferindo-lhe um IDF inflado de `1.992` (muito superior a "aceitação", cujo IDF é `1.145`). Somado às 3 ocorrências da palavra "virtologia", a Seção 1 atinge score `2.802`, enquanto a Seção 4 ("Aceitação") atinge apenas `1.848`, ficando em 4º lugar no ranking e sendo descartada. O trecho de Aceitação NÃO é recuperado. Expandir a lista de stopwords com conectivos comuns do português (incluindo "dentro", "sobre", "explicar/explique", etc.) ou aplicar ponderação de campo/título, e validar experimentalmente a recuperação antes de fechar o plano.
+
+---
+
+### ACHADO 3: O módulo `knowledge` em `ExtensionRegistry` não compila e não possui mecanismo de injeção de estado
+EVIDÊNCIA: [`docs/phase-5a-v1.md:501-511`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L501-L511) vs [`src/shared/extensions/registry.ts:55-92`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/extensions/registry.ts#L55-L92):
+> `docs/phase-5a-v1.md:506-507`:
+> ```ts
+> available: knowledgeAvailable, // true somente se o corpus carregou com ao menos 1 trecho
+> description: knowledgeAvailable
+> ```
+
+GRAVIDADE: ALTA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: `ExtensionRegistry.getModuleStatuses()` é um método sem parâmetros. A variável `knowledgeAvailable` não existe no escopo da classe, e o plano não define nenhum campo interno nem método de registro (como `registerKnowledge()` ou `registerRetriever()`). O código proposto causa erro de compilação TypeScript (`Cannot find name 'knowledgeAvailable'`). O plano deve especificar como o `ExtensionRegistry` (que é um singleton) recebe ou consulta o estado do corpus de conhecimento e como isso é isolado entre testes.
+
+---
+
+### ACHADO 4: O evento `routing` com `knowledge` não chega ao frontend por omissão de `src/frontend/voice.ts`
+EVIDÊNCIA: [`docs/phase-5a-v1.md:162-171`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L162-L171), [`docs/phase-5a-v1.md:513-518`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L513-L518) vs [`src/frontend/voice.ts:59`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L59) e [`src/frontend/voice.ts:118-120`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L118-L120):
+> `src/frontend/voice.ts:59`:
+> `private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void`
+> `src/frontend/voice.ts:118-120`:
+> ```ts
+> case 'routing':
+>   this.onRouting(event.turnId, event.label, event.handled);
+>   break;
+> ```
+
+GRAVIDADE: ALTA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: O plano lista [`src/frontend/main.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/main.ts) como modificado, mas `main.ts` não consome o `EventSource` diretamente; ele depende da classe `VoiceController` em [`src/frontend/voice.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts). Como o callback `onRouting` de `VoiceController` só repassa `(turnId, label, handled)`, o campo `knowledge` é descartado na camada intermediária e nunca chega a `main.ts`. Incluir [`src/frontend/voice.ts`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts) nos arquivos modificados e atualizar a assinatura e o repasse de `onRouting` para aceitar `knowledge: string[]`.
+
+---
+
+### ACHADO 5: `MAX_CHARS: 1400` ignora o preâmbulo e cabeçalhos, subestimando o impacto no system prompt em quase 600 caracteres
+EVIDÊNCIA: [`docs/phase-5a-v1.md:76-79`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L76-L79), [`docs/phase-5a-v1.md:413`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L413) e [`docs/phase-5a-v1.md:426-438`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L426-L438):
+> `docs/phase-5a-v1.md:76-77`:
+> "Consequência direta: o system prompt de Teologia hoje é 1.274 + 965 = 2.239 chars. Injetar duas seções de tamanho mediano (~1.260 chars) o leva a ~3.500 chars, um aumento de ~56%."
+> `docs/phase-5a-v1.md:413`:
+> `if (chars + indexed.chunk.body.length > KNOWLEDGE_LIMITS.MAX_CHARS) continue;`
+
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 95%  
+AÇÃO RECOMENDADA: O filtro em `retrieve()` acumula apenas `indexed.chunk.body.length`. Porém, `buildKnowledgeBlock()` injeta uma instrução fixa de 390 caracteres mais o formato `[headingPath]\n` e separadores (até ~200 caracteres para 2 trechos). Com isso, o bloco de conhecimento real atinge até ~1.990 caracteres. Somado ao prompt base de Teologia (2.239 chars), o prompt total atinge **~4.230 caracteres** (aumento de **~89%**, e não 56%). Ajustar o cálculo de `MAX_CHARS` para considerar a string final montada ou reduzir `MAX_CHARS` (ex.: para 1000) a fim de conter o impacto de contexto dentro dos 3.500 chars planejados.
+
+---
+
+### ACHADO 6: Afirmação factual falsa sobre a opcionalidade de `IVoiceProvider` no construtor de `SessionManager`
+EVIDÊNCIA: [`docs/phase-5a-v1.md:489-491`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L489-L491) vs [`src/backend/voice/sessionManager.ts:90`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L90):
+> `docs/phase-5a-v1.md:489-491`:
+> "O `SessionManager` recebe o retriever como dependência opcional no construtor (`private readonly retriever: KnowledgeRetriever | null`), igual ao padrão já usado para o provider de TTS. `null` = comportamento idêntico ao da Fase 4."
+> `src/backend/voice/sessionManager.ts:90`:
+> `constructor(engine: VoiceEngine, ttsProvider: IVoiceProvider, audioStore: AudioStore, agents: readonly IAgent[])`
+
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: O provider de TTS nunca foi opcional ou nulo no `SessionManager`; ele é obrigatório e tipado como `IVoiceProvider`. Se o plano adicionar `retriever?: KnowledgeRetriever | null` como 5º argumento com valor padrão `= null`, deve explicitá-lo como opcional com default para não quebrar instanciações existentes em testes ([`src/backend/__tests__/voice.test.ts:76`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts#L76)).
+
+---
+
+### ACHADO 7: Contagem incorreta de seções e volume do corpus devido a descarte de cabeçalhos vazios
+EVIDÊNCIA: [`docs/phase-5a-v1.md:70-71`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L70-L71), [`docs/phase-5a-v1.md:89`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L89) vs Execução de `chunkMarkdown`:
+> `docs/phase-5a-v1.md:70-71`:
+> `Corpus Teologia | 33 seções, 20.104 chars`
+> `Corpus Virtologia | 12 seções, 7.357 chars`
+> `docs/phase-5a-v1.md:89`:
+> "o corpus inteiro tem 27.461 chars em 45 seções."
+
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: O autor contou todos os cabeçalhos H2 e H3 nos arquivos Markdown brutos (33 e 12), mas esqueceu que 6 deles são cabeçalhos-pai com 0 caracteres de corpo intermediário que a função `chunkMarkdown` descarta por `MIN_CHUNK_CHARS = 80`. O corpus real resultante contém **29 seções (19.981 chars) em Teologia** e **10 seções (7.314 chars) em Virtologia**, totalizando **39 seções (27.295 chars)** e não 45 seções. Corrigir as tabelas das seções 3 e 4.1 para refletir a saída real do próprio chunker proposto.
+
+---
+
+### ACHADO 8: Risco de conflito de prompt e quebra de regras de saída de voz por meta-instruções presentes no corpus
+EVIDÊNCIA: [`docs/research/teologia-profile-source.md:160`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/research/teologia-profile-source.md#L160) vs [`src/backend/voice/sessionManager.ts:20-25`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L20-L25):
+> `docs/research/teologia-profile-source.md:160`:
+> "Sempre que possível, forneça link para publicação original, DOI, página da editora ou periódico."
+> `src/backend/voice/sessionManager.ts:21-23`:
+> "Suas respostas são sempre faladas em voz alta por um sintetizador de voz — nunca lidas como texto. Por isso: nunca use markdown (sem **negrito**, *itálico*, `código`, listas com marcadores ou links)..."
+
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 90%  
+AÇÃO RECOMENDADA: Os arquivos em `docs/research/` foram extraídos de prompts de canvas do ChatGPT e contêm instruções imperativas direcionadas ao modelo (ex.: mandar links, DOIs, adotar certos tons). Ao injetar esses trechos sob a alegação de que são "notas de referência do Rodrigo", o LLM recebe ordens diretas que colidem frontalmente com as restrições estritas de fala do `VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS`. O preâmbulo de `buildKnowledgeBlock()` precisa instruir explicitamente o modelo de que diretrizes operacionais presentes nos trechos não sobrepõem as regras de sintetização de voz, ou o corpus precisa ser higienizado previamente.
+
+---
+
+### ACHADO 9: Falha no desempate determinístico por comparação estrita (`!==`) de números de ponto flutuante
+EVIDÊNCIA: [`docs/phase-5a-v1.md:403-406`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L403-L406):
+> ```ts
+> scored.sort((a, b2) => {
+>   if (b2.score !== a.score) return b2.score - a.score;
+>   return a.indexed.chunk.headingPath.localeCompare(b2.indexed.chunk.headingPath);
+> });
+> ```
+
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 95%  
+AÇÃO RECOMENDADA: Em JavaScript, pontuações calculadas via somas sucessivas de `Math.log` e produtos IEEE 754 podem diferir por ruído na ordem de `1e-16`. A verificação `b2.score !== a.score` falhará em acionar o desempate alfabético prometido por `headingPath`, gerando ordenação arbitrária em trechos com relevância idêntica. Utilizar uma margem de tolerância: `if (Math.abs(b2.score - a.score) > 1e-6) return b2.score - a.score;`.
+
+---
+
+### ACHADO 10: Inviabilidade de atendimento a perguntas anafóricas/de continuação na conversa por voz
+EVIDÊNCIA: [`docs/phase-5a-v1.md:493-497`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L493-L497):
+> "Observação deliberada sobre a query: a recuperação usa `transcript` (a fala do turno atual), não o histórico. Usar o histórico traria contexto de turnos anteriores e diluiria os termos da pergunta corrente..."
+
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 90%  
+AÇÃO RECOMENDADA: Em interação por voz, perguntas como *"E qual a diferença entre a segunda e a terceira?"*, *"Como aplico isso?"* ou *"Explique melhor"* são naturais e frequentes. Ao usar unicamente o `transcript` do turno atual, as palavras normalizadas serão puramente genéricas (`['diferenca', 'segunda', 'terceira']`), resultando em pontuação 0 no BM25 e retorno vazio (`[]`). O sistema perde o contexto especializado exatamente quando o usuário aprofunda o diálogo. O plano deve prever uma estratégia de enriquecimento da query para turnos com poucos termos informativos (por exemplo, concatenar termos substantivos da última fala do usuário ou manter o contexto do turno anterior se a pontuação da query crua for nula).
+
+---
+
+### ACHADO 11: `MIN_SCORE: 1.0` é uma constante rígida sem ancoragem estatística em corpus pequenos
+EVIDÊNCIA: [`docs/phase-5a-v1.md:196`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L196) e [`docs/phase-5a-v1.md:396-398`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L396-L398):
+> `MIN_SCORE: 1.0`
+
+GRAVIDADE: BAIXA  
+CONFIANÇA: 85%  
+AÇÃO RECOMENDADA: Com N = 10 (Virtologia), termos que ocorrem em 4 seções têm `IDF = 0.893`. Mesmo com casamento exato no corpo, se o termo for único, a pontuação máxima normalizada será `< 1.0`, descartando o trecho como irrelevante. Por outro lado, para perguntas com 3 ou 4 termos cotidianos que escapam das stopwords, o score ultrapassa `2.0` por mero ruído. Um threshold estático absoluto de 1.0 é arbitrário; o corte deve ser relativo à pontuação máxima ou admitir scores menores para consultas monotermo.
+
+---
+
+### ACHADO 12: Fragilidade do parser `chunkMarkdown` diante de blocos de código ou marcadores de fechamento
+EVIDÊNCIA: [`docs/phase-5a-v1.md:251-252`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5a-v1.md#L251-L252):
+> ```ts
+> const h2 = /^##\s+(.+?)\s*$/.exec(line);
+> const h3 = /^###\s+(.+?)\s*$/.exec(line);
+> ```
+
+GRAVIDADE: BAIXA  
+CONFIANÇA: 85%  
+AÇÃO RECOMENDADA: O parser de linha não rastreia blocos de código com cercas (fenced code blocks com ```` ``` ````). Se um bloco de exemplo contiver `#` ou `##`, o chunk será quebrado indevidamente. Além disso, a regex não descarta fechamentos de estilo atx (ex.: `## Título ##`), capturando `Título ##` no `headingPath`. Ajustar as expressões regulares para `^##\s+(.+?)(?:\s+#+)?$` e ignorar linhas dentro de blocos de código.
+
+---
+
+VEREDITO: REJEITADO — O plano possui falhas arquiteturais impeditivas de compilação e integração, uma falha matemática no BM25 que quebra o principal caso de teste (D9.1), e uma ilusão metrológica no benchmark que torna cega a medição do seu risco central.

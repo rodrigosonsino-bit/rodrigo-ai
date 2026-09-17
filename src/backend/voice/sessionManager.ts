@@ -7,6 +7,8 @@ import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { AudioStore } from './audioStore.js';
 import type { VoiceEngine } from './engine.js';
+import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
+import type { RetrievedChunk } from '../knowledge/index.js';
 
 /**
  * Restrições universais de saída de voz + segurança (Fase 4) — aplicadas a QUALQUER
@@ -82,16 +84,25 @@ export class SessionManager {
   private readonly ttsProvider: IVoiceProvider;
   private readonly audioStore: AudioStore;
   private readonly agents: readonly IAgent[];
+  /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
+  private readonly retriever: KnowledgeRetriever | null;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
   private creationLock: Promise<unknown> = Promise.resolve();
 
-  constructor(engine: VoiceEngine, ttsProvider: IVoiceProvider, audioStore: AudioStore, agents: readonly IAgent[]) {
+  constructor(
+    engine: VoiceEngine,
+    ttsProvider: IVoiceProvider,
+    audioStore: AudioStore,
+    agents: readonly IAgent[],
+    retriever: KnowledgeRetriever | null = null
+  ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
     this.audioStore = audioStore;
     this.agents = agents;
+    this.retriever = retriever;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -256,7 +267,30 @@ export class SessionManager {
       // forma idempotente em voiceRuntime.ts), o turno cai direto no catch externo sem
       // ter anunciado uma transição de estado que não vai se cumprir.
       const agent = selectAgentForLabel(label, this.agents);
-      const systemPrompt = `${agent.getSystemPrompt()}\n\n${VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS}`;
+
+      // Fase 5a: recupera ANTES de emitir routing, pela mesma razão que a Fase 4 resolve o agente
+      // antes — nada é anunciado antes de estar decidido. Síncrono e em memória; nunca lança para
+      // fora, porque perder a consulta não deve custar a resposta.
+      let retrieved: RetrievedChunk[] = [];
+      if (this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA')) {
+        try {
+          retrieved = this.retriever.retrieve(agent.id, transcript);
+        } catch (err) {
+          retrieved = [];
+          console.error('[knowledge] recuperação falhou, seguindo sem trecho:', err);
+        }
+      }
+      if (retrieved.length > 0) {
+        console.log(
+          `[knowledge] turno=${turn.turnId} agente=${agent.id} ` +
+            `trecho="${retrieved[0].headingPath}" score=${retrieved[0].score.toFixed(3)}`
+        );
+      }
+
+      const knowledgeBlock = buildKnowledgeBlock(retrieved);
+      const systemPrompt = knowledgeBlock
+        ? `${agent.getSystemPrompt()}\n\n${knowledgeBlock}\n\n${VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS}`
+        : `${agent.getSystemPrompt()}\n\n${VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS}`;
 
       // Só AMBIGUO continua sem especialista dedicado (cai no Geral por decisão de
       // projeto, mitigada pela salvaguarda universal acima) — GERAL/TEOLOGIA/VIRTOLOGIA

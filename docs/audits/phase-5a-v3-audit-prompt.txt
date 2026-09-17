@@ -1,0 +1,50 @@
+Você é um auditor adversarial de planos de implementação. Sua tarefa NÃO é confirmar nem aprovar: é encontrar o que está errado.
+
+CONTEXTO E AVISO IMPORTANTE
+
+Este é o plano da "Fase 5a" do projeto Rodrigo AI (orquestrador de voz 100% local, Node+TypeScript, MLX). O plano está em docs/phase-5a-v3.md. Leia o arquivo inteiro antes de julgar.
+
+Esta é a TERCEIRA rodada de auditoria sobre esta linha de plano, e você é um auditor NOVO — as duas rodadas anteriores foram feitas por outra ferramenta (Antigravity CLI). Os logs estão em docs/audits/phase-5a-v1-agy-2026-09-16.log e docs/audits/phase-5a-v2-agy-2026-09-16.log.
+
+**Os achados das rodadas anteriores NÃO devem ser assumidos corretos.** Você não herda o enquadramento delas. Na verdade, dois achados de rodadas anteriores já caíram por verificação independente. Se você discordar de um achado anterior, ou achar que uma "correção" feita para atendê-lo piorou o plano, diga — isso é especialmente valioso vindo de você, que está lendo com outro conjunto de vieses.
+
+O QUE VERIFICAR POR EXECUÇÃO (não só por leitura)
+
+O plano afirma que todos os seus números foram produzidos executando o algoritmo contra o corpus real. Transcreva o pseudocódigo das seções 6.2, 6.3 e 6.4 (chunkMarkdown, stemPtBr, normalize, KnowledgeRetriever, buildKnowledgeBlock) para um script e RODE contra docs/research/*.md. Confirme ou derrube:
+
+- Os seis casos obrigatórios da seção de critérios de aceite produzem mesmo o ranking publicado?
+- A contagem de 39 seções confere?
+- Os tamanhos de prompt (mín +42,8% / mediana +56,9% / máx +78,4%) conferem quando você mede len() da string montada?
+- O stemmer realmente faz perdão/perdoar convergirem, E não quebra nenhum dos outros casos?
+
+Qualquer número que não reproduza é achado ALTA.
+
+ATAQUE ESPECIFICAMENTE O STEMMER
+
+O plano substituiu um truncamento de prefixo por um stemmer de sufixos de ~50 regras (seção 6.3). Stemmers agressivos criam colisões. Procure no corpus real:
+- Dois termos de sentido DIFERENTE que colidem no mesmo stem e distorcem o ranking. Note que 'batismo' vira 'bat' e 'posição' vira 'pos' — stems de 3 caracteres são suspeitos. Que outras palavras do corpus viram 'bat' ou 'pos'?
+- Termos relacionados que deveriam colidir e não colidem.
+- Palavras onde a ordem das etapas (plural, feminino, advérbio, nome, verbo, vogal) produz resultado errado.
+
+OUTROS PONTOS SUSPEITOS
+
+a) A regra "o 1º colocado entra sempre, independente do teto" (seção 4.2 e buildKnowledgeBlock): qual o maior prompt possível que isso permite? O plano mede o pior caso do corpus ATUAL. O que acontece se o usuário editar docs/research e criar uma seção de 5000 caracteres?
+b) MIN_SCORE=1.0 é descrito como "guarda de caso degenerado, não classificador de relevância", com lacuna medida 0.715 | 1.767. Essa reformulação é honesta ou é racionalização de um número que continua arbitrário?
+c) O enriquecimento anafórico agora exige TRÊS condições simultâneas (mesmo rótulo do turno anterior, <4 termos, marcador anafórico no transcript bruto). Lista de marcadores fechada é frágil em fala espontânea. Quantos falsos negativos isso gera numa conversa real?
+d) sessionManager: o plano guarda o rótulo do turno anterior em session.lastUserTurn, escrito só após a checagem de preempção. Verifique contra o código real de runTurn se isso é consistente com cancelamento, preempção de sessão e trimHistory.
+e) O plano propõe resetForTesting() no singleton ExtensionRegistry com "esvaziamento in-place". Isso é seguro com os testes existentes em src/backend/__tests__/?
+f) bench-voice.mjs: 9 perguntas por conjunto, aprovação por mediana+máximo em vez de p95. A mudança preserva a comparabilidade com a baseline histórica das Fases 2-4?
+g) Verifique se o plano não quebra nenhum teste existente que ele não tenha listado.
+
+FORMATO DE SAÍDA OBRIGATÓRIO, por problema:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha ou seção do plano — trecho literal; se por execução, cole a saída real>
+GRAVIDADE: <ALTA | MÉDIA | BAIXA>
+CONFIANÇA: <0-100%>
+AÇÃO RECOMENDADA: <o que mudar, concretamente>
+
+No fim:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Não invente arquivo, linha ou símbolo. Se não conseguiu confirmar algo lendo ou executando, diga "não verificado".

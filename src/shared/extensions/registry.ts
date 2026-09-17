@@ -14,6 +14,8 @@ export class ExtensionRegistry {
   private readonly voiceProviders: IVoiceProvider[] = [];
   private readonly agents: IAgent[] = [];
   private readonly tools: ITool[] = [];
+  /** Fase 5a: nº de trechos de referência carregados. 0 = corpus ausente => módulo indisponível. */
+  private knowledgeChunkCount = 0;
 
   private constructor() {}
 
@@ -52,6 +54,19 @@ export class ExtensionRegistry {
     return this.tools;
   }
 
+  /** Fase 5a: registra quantos trechos de referência foram carregados. */
+  public registerKnowledge(chunkCount: number): void {
+    this.knowledgeChunkCount = chunkCount;
+  }
+
+  /** Só para teste: zera o estado do singleton in-place, sem substituir a instância. */
+  public resetForTesting(): void {
+    this.voiceProviders.length = 0;
+    this.agents.length = 0;
+    this.tools.length = 0;
+    this.knowledgeChunkCount = 0;
+  }
+
   public getModuleStatuses(): readonly ModuleStatus[] {
     return [
       {
@@ -87,6 +102,16 @@ export class ExtensionRegistry {
         phase: 5,
         available: false,
         description: 'Integrações e ferramentas operacionais não habilitadas nesta fase (previsto para Fase 5).'
+      }
+      ,{
+        id: 'knowledge',
+        name: 'Conhecimento especializado',
+        phase: 5,
+        available: this.knowledgeChunkCount > 0,
+        description:
+          this.knowledgeChunkCount > 0
+            ? `Consulta léxica local sobre ${this.knowledgeChunkCount} trechos de referência de Teologia e Virtologia.`
+            : 'Material de referência não encontrado em docs/research — agentes respondem sem consulta.'
       }
     ];
   }

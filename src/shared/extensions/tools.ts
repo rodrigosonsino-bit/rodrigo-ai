@@ -1,5 +1,5 @@
 /**
- * Ponto de extensão para ferramentas do sistema (Fase 4).
+ * Ponto de extensão para ferramentas do sistema (Fase 5b).
  * Não implementado na Fase 1.
  */
 export interface ITool {

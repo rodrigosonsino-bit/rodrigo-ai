@@ -1,0 +1,279 @@
+# Auditoria Adversarial: Plano de Implementação da Fase 5a (v2)
+
+Esta auditoria analisou o plano `docs/phase-5a-v2.md` confrontando cada afirmação, pseudocódigo e tabela contra o código real de `cc9d9d7` (`Rodrigo AI v0.3.0`) e contra o corpus real em `docs/research/` (`teologia-profile-source.md` e `virtologia-profile-source.md`).
+
+O pseudocódigo das seções 6.1, 6.2 e 6.3 foi integralmente transcrito e executado via script Node.js diretamente contra os arquivos reais do repositório.
+
+---
+
+## 1. Verificação por Execução das Saídas Publicadas nas Seções 3, 4.2 e 4.3
+
+A execução direta do algoritmo proposto produziu os seguintes resultados empíricos:
+
+| Item Verificado | Afirmação na v2 | Execução Real | Veredito da Medição |
+|---|---|---|---|
+| **Contagem do corpus (§3)** | 29 teo / 10 virt / 39 total (19.981 / 7.314 / 27.295 chars) | **29 teo / 10 virt / 39 total (19.981 / 7.314 / 27.295 chars)** | **CONFIRMADO** (números exatos) |
+| **Score D9.1 ("Aceitação")** | 1º lugar com score **2.374** | **1º lugar com score 2.374** | **CONFIRMADO** |
+| **Score D9.2 ("Hebreus cinco")** | 1º lugar com score **3.495** | **1º lugar no `retrieve()` com 3.495**, mas **DESCARTADO pelo `buildKnowledgeBlock`** | **DERRUBADO NO BLOCO** (trecho nunca chega ao prompt) |
+| **Score D9.7 ("Bolo de cenoura")** | Score **0.000** em todos os trechos | **Score 0.000** em todos os 29 trechos | **CONFIRMADO** |
+| **Enriquecimento §4.3 (Faixas)** | 1º lugar com score **3.943** rotulado "2. Estrutura Central [...]" | 1º lugar é **`Modelo CHA` (3.943)**; o trecho real das Faixas fica em 2º (3.922) e **é descartado pelo teto de bloco** | **DERRUBADO** (conteúdo omitido e descartado) |
+| **Tamanho do prompt (§3 e §4.4)** | "Medido: 3.743 chars (Teologia) e 3.726 (Virtologia)" | Teologia real = **3.056 chars** (+36.4%); Virtologia real = **3.630 chars** (+63.2%) | **DERRUBADO** (número fabricado por soma teórica, não medido) |
+
+---
+
+## 2. Achados da Auditoria Adversarial (v2)
+
+### ACHADO: `buildKnowledgeBlock()` descarta silenciosamente o trecho-alvo de D9.2 ("4.2 Sequência obrigatória da análise") e seções centrais do corpus por estouro de `MAX_BLOCK_CHARS = 1500`, injetando trecho inferior
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:493-498`:
+```ts
+  for (const c of chunks) {
+    const piece = `\n\n[${c.headingPath}]\n${c.body}`;
+    if (block.length + piece.length > KNOWLEDGE_LIMITS.MAX_BLOCK_CHARS) continue;
+    block += piece;
+    used += 1;
+  }
+```
+Execução do script contra o corpus real:
+- O `PREAMBLE` possui 371 caracteres.
+- O trecho 1 ranqueado em D9.2 (`4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.2 Sequência obrigatória da análise`) tem 1.073 caracteres de corpo e 74 de cabeçalho (`piece` = 1.152 caracteres).
+- `block.length + piece.length` = 371 + 1.152 = **1.523 caracteres**, que é maior que `MAX_BLOCK_CHARS = 1500`.
+- O `continue` descarta o trecho 1! Em seguida, avalia o trecho 2 (`4.1 Método predominante`, 377 chars de corpo), que cabe (371 + 442 = 813 <= 1.500) e é injetado sozinho.
+
+Saída real da execução:
+```
+retrieved: [
+  { h: '4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.2 Sequência obrigatória da análise', len: 1073, score: 3.495 },
+  { h: '4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.1 Método predominante', len: 377, score: 3.210 }
+]
+block contains chunk 1? false
+block contains chunk 2? true
+```
+Além disso, um varredura no corpus revelou que **4 seções excedem 1.500 caracteres isoladas com o preâmbulo** e JAMAIS poderão ser injetadas sob a v2:
+1. `[teologia] 3. CONVICÇÕES DOUTRINÁRIAS > 3.4 Eclesiologia` (1.578 chars)
+2. `[teologia] 4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.2 Sequência obrigatória da análise` (1.522 chars) — **ALVO D9.2**
+3. `[virtologia] 1. Definição, Origem e Objetivo Geral` (1.510 chars)
+4. `[virtologia] 2. Estrutura Central [...] > B. As Faixas de Evolução (macro-mapa da consciência)` (1.593 chars)
+GRAVIDADE: **ALTA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O teto `MAX_BLOCK_CHARS = 1500` é matematicamente incompatível com as seções do próprio material de Rodrigo. O maior trecho isolado tem 1.161 caracteres + ~80 de cabeçalho + 371 de preâmbulo = 1.612 caracteres. Redefinir `MAX_BLOCK_CHARS` para pelo menos 1.800–2.000 caracteres (ou permitir que o top-1 sempre entre integralmente), e trocar o `continue` por uma estratégia que nunca descarte o top-1 ranqueado em favor de um top-2 inferior.
+
+---
+
+### ACHADO: Fabricação de "resultados medidos" de tamanho de prompt nas seções 3 e 4.4
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:164-165`:
+> *"Resultado medido: system prompt total de **3.743 chars** (Teologia) e **3.726** (Virtologia), **+67%** sobre a Fase 4."*
+
+Verificação aritmética contra `src/backend/agents/specialistAgents.ts:8,26` e `sessionManager.ts:20`:
+- Prompt base Teologia: `TEOLOGIA_PROMPT` (1.274) + `\n\n` (2) + `VOICE_SAFETY` (965) = 2.241 chars.
+- Prompt base Virtologia: `VIRTOLOGIA_PROMPT` (1.257) + `\n\n` (2) + `VOICE_SAFETY` (965) = 2.224 chars.
+- 3.743 - 2.241 = **1.502 chars**.
+- 3.726 - 2.224 = **1.502 chars**.
+O autor não mediu a execução: somou `MAX_BLOCK_CHARS` (1.500) + 2 caracteres de quebra de linha.
+
+Na execução real dos casos de teste de §4.2:
+- Teologia ("Hebreus cinco"): o bloco montado tem 813 chars, resultando em system prompt de **3.056 chars (+36.4%)**, pois o trecho principal foi descartado.
+- Virtologia ("Aceitação"): o bloco montado tem 1.404 chars, resultando em system prompt de **3.630 chars (+63.2%)**.
+GRAVIDADE: **ALTA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Substituir as somas teóricas por medições reais computadas ponta a ponta na geração do prompt, registrando o impacto real de cada caso de teste.
+
+---
+
+### ACHADO: Dessincronização entre o evento `routing` (SSE/UI) e os trechos realmente injetados no LLM
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:556-562`:
+```ts
+      this.emit(session, {
+        type: 'routing',
+        turnId: turn.turnId,
+        label,
+        handled,
+        knowledge: retrieved.map((c) => c.headingPath)
+      });
+```
+`docs/phase-5a-v2.md:622-623`:
+> *"main.ts passa a receber o 4º argumento e, quando não-vazio, renderiza sob o indicador de rótulo: `Consultou: <headingPath>` (dois separados por `; `)."*
+
+O evento `routing` emite os cabeçalhos de `retrieved` (saída de `retrieve()`). No entanto, `buildKnowledgeBlock(retrieved)` filtra os trechos que cabem no teto de caracteres. Quando um trecho é descartado pelo teto (como ocorre no ALVO D9.2), o evento emite para a interface:
+`knowledge: ['4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.2 Sequência obrigatória da análise', '4. MÉTODO HERMENÊUTICO E EXEGÉTICO > 4.1 Método predominante']`
+A interface do usuário exibe que consultou o trecho 4.2, mas o LLM recebeu **apenas** o trecho 4.1.
+GRAVIDADE: **ALTA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Fazer `buildKnowledgeBlock()` retornar tanto o texto montado quanto a lista dos trechos que **efetivamente couberam** no bloco (`usedChunks: KnowledgeChunk[]`), e emitir exclusivamente esses caminhos no evento `routing`.
+
+---
+
+### ACHADO: Truncamento morfológico `STEM_PREFIX = 6` silencia consultas teológicas e virtológicas legítimas e introduz colisões semânticas
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:370`:
+```ts
+.map((t) => t.slice(0, KNOWLEDGE_LIMITS.STEM_PREFIX)); // 6
+```
+Execução de casos de consulta reais no retriever:
+1. **`perdão` (`perdao`) vs `perdoar` (`perdoa`):**
+   - Query: `"Como perdoar na Virtologia?"`
+   - Termos resultantes: `['perdoa', 'virtol']` (`como` e `na` são stopwords).
+   - No corpus, a palavra grafada é `perdão` (`perdao`).
+   - Saída real da execução: `retrieved: []` (**score 0.046 < MIN_SCORE 1.0 — nenhum trecho injetado!**).
+2. **`batismo` (`batism`) vs `batizar` (`batiza`):**
+   - Query: `"Quem pode batizar?"`
+   - Termos resultantes: `['batiza']` (`quem` e `pode` são stopwords).
+   - No corpus, o termo é `batismo` (`batism`).
+   - Saída real da execução: `retrieved: []` (**retorna vazio!**).
+3. **Colisões distorcidas identificadas no corpus:**
+   - `contro`: `controvérsias` (doutrinárias) colide com `controle` (emocional/psíquico).
+   - `confor`: `conformismo` (conceito central na Virtologia) colide com `conforme`.
+   - `person`: `persona` (conceito junguiano da Virtologia) colide com `personalidade`.
+   - `psiqui`: `psíquica` (faixas de evolução) colide com `psiquiatria` (limite clínico).
+GRAVIDADE: **ALTA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Abandonar o truncamento cego de 6 caracteres. Usar um stemmer algorítmico leve e determinístico para português (como uma versão compacta do stemmer de Porter/RSLP para sufixos verbais e nominais em ~40 linhas de código sem dependências pesadas), garantindo que flexões verbais (`batizar`, `perdoar`) convirjam para seus substantivos (`batismo`, `perdão`).
+
+---
+
+### ACHADO: O caso de teste de enriquecimento de query anafórica (§4.3) falha em entregar o conteúdo das Faixas de Evolução ao LLM
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:144-145`:
+> *`1. score= 3.943  2. Estrutura Central: Virtudes, Faixas de Evolução e Inconsciente Booleano  <-- correto`*
+
+Execução real do enriquecimento em §4.3:
+- Pergunta anterior: `"Explique as Faixas de Evolução da Virtologia"`
+- Pergunta atual: `"E qual a diferença entre a segunda e a terceira?"`
+- Query enriquecida: `"E qual a diferença entre a segunda e a terceira? Explique as Faixas de Evolução da Virtologia"`
+Resultados reais no ranqueador:
+1. `score= 3.943` — `... > A. Virtudes como Competências Neurais (Modelo CHA)`
+2. `score= 3.922` — `... > B. As Faixas de Evolução (macro-mapa da consciência)`
+
+O autor omitiu o subtítulo `> A. Virtudes como Competências Neurais` no documento e afirmou que estava "correto". No entanto, o trecho A descreve o Modelo CHA (Ego vs Superego) e **não contém as faixas**! O trecho B (que define a 2ª faixa - Sensação e 3ª faixa - Moral) ficou em 2º lugar.
+Pior: ao passar para o `buildKnowledgeBlock()`, o trecho A (660 chars) é injetado, mas o trecho B (1.088 chars) estoura o teto restante (371 + 790 + 1.221 = 2.382 > 1.500) e **é descartado**!
+O modelo é chamado a responder sobre a 2ª e a 3ª faixas sem receber o texto das Faixas de Evolução.
+GRAVIDADE: **ALTA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Ajustar o ranqueador para que termos do cabeçalho de nível 3 (`H3`) tenham peso próprio diferenciado em relação ao `H2` pai, e garantir que o bloco de conhecimento acomode trechos de continuidade anafórica.
+
+---
+
+### ACHADO: `bench-voice.mjs` descarta as perguntas-alvo como aquecimento e opera com N=2 estatisticamente inválido
+EVIDÊNCIA:
+`scripts/bench-voice.mjs:128-132`:
+```js
+console.log('[bench] Aquecendo (1ª pergunta, ignorada nas métricas — pode levar até 2min)...');
+await runOneTurn(sessionId, token, wavPaths[0], sse);
+...
+for (let i = 1; i < wavPaths.length; i += 1) {
+  ...
+  results.push(r);
+}
+```
+`docs/phase-5a-v2.md:633-642`:
+```js
+  teologia: [
+    'Faça uma análise exegética de Hebreus cinco.',
+    'Qual é a sua posição sobre o batismo?',
+    'Como você entende a relação entre Antigo e Novo Testamento?'
+  ],
+  virtologia: [
+    'Explique a Aceitação dentro da Virtologia.',
+    'O que são as Faixas de Evolução?',
+    'Como a Virtologia trata o perdão?'
+  ]
+```
+A primeira pergunta (`wavPaths[0]`) é **sempre** descartada das métricas como aquecimento do motor de geração.
+Em `teologia`: `wavPaths[0]` é `"Faça uma análise exegética de Hebreus cinco"` (o alvo D9.2!).
+Em `virtologia`: `wavPaths[0]` é `"Explique a Aceitação dentro da Virtologia"` (o alvo D9.1!).
+Consequências verificadas:
+1. As perguntas centrais que ativam o retriever são eliminadas das métricas de latência.
+2. Sobram apenas 2 perguntas medidas (`results.length === 2`). Calcular mediana e percentil 95 sobre 2 medições não possui qualquer significado estatístico.
+3. `bench-voice.mjs:166` grava sempre em `docs/audits/voice-benchmark-latest.json`, sobrescrevendo o arquivo a cada execução e destruindo os dados do conjunto anterior.
+GRAVIDADE: **ALTA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Definir uma pergunta neutra de aquecimento explícita em cada conjunto (ou uma pergunta de warmup fixa antes de iterar sobre o conjunto); expandir os conjuntos para pelo menos 5 a 10 perguntas; e parametrizar o arquivo de saída do benchmark (ex.: `voice-benchmark-${set}-latest.json`).
+
+---
+
+### ACHADO: A lista expandida de stopwords destrói termos técnicos essenciais presentes no próprio material-fonte
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:357-358`:
+```ts
+'aos','nem','ora','vez','vezes','coisa','coisas','forma',
+'modo','maneira','caso','casos','ponto','pontos','parte','partes'
+```
+No arquivo real `docs/research/teologia-profile-source.md:88`, lê-se textualmente:
+> *"sacramentologia, incluindo **modo** e sujeitos do batismo"*
+
+Ao classificar `modo`, `forma`, `pontos` e `partes` como "substantivos vazios" (§4.2), o retriever destrói termos técnicos históricos:
+- `"Qual o modo do batismo?"` perde `modo`, restando apenas `batism`.
+- `"Quais são os cinco pontos do calvinismo?"` perde `pontos`.
+- `"Quais são as três partes da alma?"` perde `partes`.
+- `"Estamos sob a lei ou sob a graça?"` perde `sob`.
+GRAVIDADE: **MÉDIA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Remover da lista de stopwords palavras de valor semântico/estrutural em teologia e psicologia (`modo`, `pontos`, `parte`, `sob`, `caso`). O IDF do BM25 já penaliza termos com alta dispersão sem necessidade de listas agressivas que mutilam perguntas válidas.
+
+---
+
+### ACHADO: Enriquecimento cego por contagem de termos (`MIN_QUERY_TERMS < 4`) contamina trocas de assunto e não possui barreira entre domínios
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:427-432`:
+```ts
+  static buildQuery(currentTranscript: string, previousUserTranscript: string | null): string {
+    const distinct = new Set(normalize(currentTranscript));
+    if (distinct.size < KNOWLEDGE_LIMITS.MIN_QUERY_TERMS && previousUserTranscript) {
+      return `${currentTranscript} ${previousUserTranscript}`;
+    }
+    return currentTranscript;
+  }
+```
+Comportamento verificado por execução:
+- Turno 1: usuário pergunta `"Explique a Aceitação dentro da Virtologia"`.
+- Turno 2: usuário muda de assunto: `"E o sono?"`.
+- `distinct.size` é 1 (< 4). A query gerada é `"E o sono? Explique a Aceitação dentro da Virtologia"`.
+- O retriever recupera o trecho de Aceitação com score 2.374 para responder sobre o sono.
+- Além disso, em `sessionManager.ts:538`, `userTurns` pega o penúltimo turno do histórico independentemente do `label`. Se o Turno 1 foi TEOLOGIA e o Turno 2 é classificado como VIRTOLOGIA, a query em Virtologia é contaminada com termos teológicos anteriores.
+GRAVIDADE: **MÉDIA**
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O enriquecimento deve: (1) checar se o turno anterior foi roteado para o mesmo domínio; (2) detectar marcadores reais de anáfora/continuação ("isso", "aquilo", "disso", "segunda", "terceira", "dele", "dela") em vez de disparar cegamente por tamanho da sentença.
+
+---
+
+### ACHADO: Falta de método de `reset()` no singleton `ExtensionRegistry` gera dependência indefinida no plano
+EVIDÊNCIA:
+`docs/phase-5a-v2.md:600-604`:
+> *"Isolamento entre testes: por ser singleton, knowledgeChunkCount vaza entre casos. O teste usa o reset() já existente do registry se houver; se não houver, esta fase acrescenta registerKnowledge(0) no beforeEach do teste — verificar qual dos dois na implementação e registrar no relatório de aceite qual foi usado."*
+
+Ao inspecionar `src/shared/extensions/registry.ts:1-94`:
+- Construtor é privado (`private constructor() {}`).
+- Instância é estática (`private static instance: ExtensionRegistry`).
+- **Não existe nenhum método `reset()` no arquivo.**
+Delegar decisões de ciclo de vida e isolamento de estado compartilhado com "se houver... verificar na implementação" é um vício de especificação que compromete a reprodutibilidade dos testes unitários.
+GRAVIDADE: **MÉDIA**
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: Especificar formalmente no plano o método `ExtensionRegistry.resetForTesting()` limpando todas as instâncias e arrays internos, garantindo isolamento hermético entre suítes de teste.
+
+---
+
+## 3. Status dos 12 Achados da v1
+
+| # | Achado da v1 | Status na v2 | Justificativa Verificada |
+|---|---|---|---|
+| 1 | `bench-voice` só tem perguntas GERAL | **PARCIAL** | Adicionou conjuntos por domínio, mas o script descarta as perguntas-alvo como aquecimento e deixa N=2 medidos. |
+| 2 | BM25 falha em D9.1 ("Aceitação") | **REGREDIU** | "Aceitação" subiu para 1º, mas D9.2 ("Hebreus cinco") é descartado pelo `buildKnowledgeBlock`, e `STEM_PREFIX=6` quebrou "perdoar" e "batizar". |
+| 3 | `knowledgeAvailable` fora de escopo | **PARCIAL** | Adicionou `registerKnowledge()`, mas deixou a limpeza do singleton indefinida para testes ("verificar na implementação"). |
+| 4 | `knowledge` morre em `voice.ts` | **PARCIAL** | Atualizou `voice.ts`, mas a UI exibe trechos brutos de `retrieve()` que foram descartados pelo `buildKnowledgeBlock()`. |
+| 5 | `MAX_CHARS` conta só corpos | **REGREDIU** | O teto de 1.500 sobre o bloco montado descarta sumariamente 4 seções inteiras do corpus (incluindo o alvo D9.2). |
+| 6 | "Padrão de dependência opcional" | **RESOLVIDO** | O 5º parâmetro do construtor foi declarado opcional com default `null`, preservando chamadas existentes. |
+| 7 | Contagem errada de corpus | **RESOLVIDO** | As contagens de 29/10/39 seções e 19.981/7.314/27.295 caracteres foram confirmadas com precisão exata. |
+| 8 | Corpus com instruções imperativas | **RESOLVIDO** | O preâmbulo neutraliza comandos operacionais e o bloco de segurança universal continua por último. |
+| 9 | Desempate por `!==` em float | **RESOLVIDO** | Implementou desempate com tolerância `SCORE_EPSILON = 1e-9`. |
+| 10 | Query anafórica perde contexto | **REGREDIU** | A query concatenada não entrega o trecho das Faixas de Evolução (descartado pelo teto) e contamina trocas de assunto. |
+| 11 | `MIN_SCORE: 1.0` sem ancoragem | **PARCIAL** | Ancorou nos 4 casos felizes, mas consultas legítimas com flexão verbal (`perdoar`, `batizar`) caem abaixo de 1.0 devido ao stemmer. |
+| 12 | Parser quebra com fence/atx | **RESOLVIDO** | `chunkMarkdown` agora rastreia code fences e expressões atx fechadas sem quebras. |
+
+---
+
+## 4. Veredito
+
+**VEREDITO: REJEITADO** — A versão 2 introduziu regressões críticas onde o trecho-alvo de Teologia (D9.2) é silenciosamente descartado do prompt pelo teto de bloco montado, as saídas de tamanho de prompt foram computadas por soma teórica em vez de medição real, o benchmark descarta as perguntas-alvo no aquecimento com amostragem estatisticamente inválida (N=2), e o truncamento morfológico de 6 caracteres quebra consultas elementares em português como "Como perdoar na Virtologia?".
+=====AGY_EXIT=0=====

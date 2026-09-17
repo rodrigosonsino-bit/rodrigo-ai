@@ -6,18 +6,51 @@ import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
 
-const QUESTIONS = [
-  'Quanto é dois mais dois?',
-  'Que horas são agora?',
-  'Qual é a capital do Brasil?',
-  'Me diga um número entre um e dez.',
-  'Como você está?',
-  'Qual é o seu nome?',
-  'Quanto é dez vezes cinco?',
-  'Explique o que é uma maçã.',
-  'Qual é o dia da semana hoje?',
-  'Diga olá em uma frase curta.'
-];
+const QUESTION_SETS = {
+  // Conjunto histórico das Fases 2-4 — mantido byte a byte para preservar a comparabilidade.
+  geral: [
+    'Quanto é dois mais dois?',
+    'Que horas são agora?',
+    'Qual é a capital do Brasil?',
+    'Me diga um número entre um e dez.',
+    'Como você está?',
+    'Qual é o seu nome?',
+    'Quanto é dez vezes cinco?',
+    'Explique o que é uma maçã.',
+    'Qual é o dia da semana hoje?',
+    'Diga olá em uma frase curta.'
+  ],
+  // Fase 5a: a primeira de cada conjunto é o aquecimento e é descartada das métricas,
+  // então os três conjuntos têm o mesmo N medido (9).
+  teologia: [
+    'Como você aborda um texto bíblico?',
+    'Faça uma análise exegética de Hebreus cinco.',
+    'Qual é a sua posição sobre o batismo?',
+    'Como você entende a relação entre Antigo e Novo Testamento?',
+    'O que é a metanarrativa bíblica?',
+    'Qual é a sua escatologia?',
+    'Você usa as línguas originais na exegese?',
+    'Como você estrutura uma pregação?',
+    'Que fontes você considera confiáveis?',
+    'O que é cristocentrismo responsável?'
+  ],
+  virtologia: [
+    'O que é a Virtologia?',
+    'Explique a Aceitação dentro da Virtologia.',
+    'O que são as Faixas de Evolução?',
+    'O que é o medo na Virtologia?',
+    'Como perdoar na Virtologia?',
+    'O que é o inconsciente booleano?',
+    'Qual é o tripé terapêutico?',
+    'O que é uma virtude como competência neural?',
+    'Como a Virtologia trata a autorresponsabilidade?',
+    'O que a Virtologia não é?'
+  ]
+};
+
+const BENCH_SET = process.env.BENCH_SET || 'geral';
+const QUESTIONS = QUESTION_SETS[BENCH_SET] || QUESTION_SETS.geral;
+const BENCH_TAG = process.env.BENCH_TAG || BENCH_SET;
 
 const BASE_URL = process.env.RODRIGO_BENCH_URL || 'http://127.0.0.1:3000';
 
@@ -163,8 +196,9 @@ async function main() {
   console.log(`  Veredito: ${report.passed ? 'DENTRO DA META' : 'FORA DA META — ver candidatas de otimização no adendo do plano'}`);
 
   fs.mkdirSync('docs/audits', { recursive: true });
-  fs.writeFileSync('docs/audits/voice-benchmark-latest.json', JSON.stringify(report, null, 2));
-  console.log('[bench] Relatório salvo em docs/audits/voice-benchmark-latest.json');
+  const outPath = `docs/audits/voice-benchmark-${BENCH_TAG}.json`;
+  fs.writeFileSync(outPath, JSON.stringify({ set: BENCH_SET, tag: BENCH_TAG, ...report }, null, 2));
+  console.log(`[bench] Relatório salvo em ${outPath}`);
 }
 
 main().catch((err) => {

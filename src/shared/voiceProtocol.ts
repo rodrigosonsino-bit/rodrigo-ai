@@ -94,3 +94,18 @@ export const VOICE_LIMITS = {
   IDLE_TIMEOUT_MS: 10 * 60_000,
   WORKER_SHUTDOWN_GRACE_MS: 3_000
 } as const;
+
+/** Fase 5a — consulta léxica local ao material de referência (docs/research). */
+export const KNOWLEDGE_LIMITS = {
+  /** Um trecho por turno. Com um só, o melhor colocado sempre entra e não há descarte silencioso. */
+  MAX_CHUNKS: 1,
+  /** Teto aplicado na CONSTRUÇÃO do índice: nenhum caminho posterior pode injetar mais que isso. */
+  MAX_CHUNK_CHARS: 1200,
+  MIN_CHUNK_CHARS: 80,
+  /** Termo que casa no cabeçalho conta como N ocorrências. */
+  HEADING_WEIGHT: 3,
+  BM25_K1: 1.2,
+  BM25_B: 0.75,
+  /** Tolerância de igualdade de score em ponto flutuante (scores são somas de logs). */
+  SCORE_EPSILON: 1e-9
+} as const;

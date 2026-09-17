@@ -1,0 +1,51 @@
+Você é um auditor adversarial de planos de implementação. Sua tarefa NÃO é confirmar nem aprovar: é encontrar o que está errado. Se você terminar sem achados, isso é um resultado suspeito, não um bom resultado — procure de novo nos pontos que você examinou mais rápido.
+
+CONTEXTO
+
+Projeto: "Rodrigo AI", um orquestrador de voz pessoal 100% local (sem API paga, sem inferência em nuvem, loopback-only). Node + TypeScript (ESM), sem framework. Voz local via MLX (LLM Qwen3-4B-Instruct-2507-4bit + Whisper + TTS do macOS). Fases 1 a 4 já implementadas, testadas e aceitas com voz real.
+
+O plano a auditar está em: docs/phase-5a-v1.md (leia o arquivo inteiro antes de qualquer julgamento).
+
+POSIÇÃO DO AGENTE IMPLEMENTADOR (declarada, para você atacar)
+
+Eu escrevi esse plano e defendo estas decisões:
+1. BM25 léxico em TypeScript no processo Node é suficiente para um corpus de 45 seções / 27.461 caracteres — embeddings seriam over-engineering e custariam latência e memória que não sobram.
+2. Recuperar dentro de sessionManager.runTurn(), de forma síncrona, é seguro e não precisa de caminho de cancelamento novo.
+3. Injetar o trecho ENTRE o prompt do agente e o bloco VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS preserva a propriedade de precedência de instrução que a Fase 4 estabeleceu.
+4. Um teto em caracteres (MAX_CHARS 1400) é mitigação suficiente para o fato de que MAX_CONTEXT_TOKENS nunca é aplicado no código.
+5. Usar só o transcript do turno corrente como query (ignorando o histórico) é a escolha certa.
+6. A degradação honesta (corpus ausente => módulo indisponível, sistema funciona como na Fase 4) está corretamente desenhada.
+
+O QUE VERIFICAR CONTRA O CÓDIGO REAL (não confie no que o plano afirma sobre o código)
+
+Leia os arquivos e confirme ou derrube cada afirmação factual do plano. Em particular:
+- src/backend/voice/sessionManager.ts — o trecho reproduzido na seção 6.4 do plano corresponde mesmo ao código atual? A inserção proposta quebra alguma invariante de cancelamento, preempção, ordem de eventos SSE ou consistência do histórico?
+- src/shared/voiceProtocol.ts — tornar `knowledge` obrigatório em RoutingEvent quebra algum produtor/consumidor existente que o plano não listou? Procure TODOS os lugares que constroem um RoutingEvent, inclusive testes.
+- src/backend/__tests__/ — quais testes existentes quebram com essas mudanças? O plano lista apenas extensions.test.ts. Está completo? Verifique voice.test.ts e health.test.ts também.
+- src/shared/extensions/registry.ts — como `available` é determinado hoje, e o desenho proposto para o módulo 'knowledge' é coerente com esse mecanismo?
+- src/backend/voice/voiceRuntime.ts — o ponto de carga do corpus proposto é compatível com o ciclo de vida real do runtime? O plano diz que o SessionManager recebe o retriever "igual ao padrão já usado para o provider de TTS" — verifique se esse padrão existe mesmo como descrito.
+- docs/research/*.md — a segmentação por ## e ### proposta funciona na estrutura REAL desses arquivos? Procure casos que quebrem o parser proposto (blocos de código com #, listas, cabeçalho de nível 1, linhas de tabela, frontmatter).
+
+PONTOS QUE EU SUSPEITO QUE ESTÃO FRACOS (ataque primeiro, mas não só)
+
+a) O pseudocódigo do BM25 em 6.3: a matemática está correta? O cálculo de IDF, a normalização por comprimento, o critério de corte por MIN_SCORE 1.0 (esse valor é defensável em termos absolutos, ou é um número inventado que não significa nada numa escala BM25 que varia com o corpus?).
+b) O `break` no loop de seleção quando score < MIN_SCORE combinado com o `continue` quando estoura MAX_CHARS — essa combinação produz o comportamento descrito em D4?
+c) Determinismo: a ordenação por score com desempate por headingPath é realmente determinística dado que score é ponto flutuante?
+d) A query usar só o transcript: qual o custo real disso em conversa por voz, onde perguntas de continuação são a norma?
+e) Segurança: o corpus é material do usuário, mas o texto recuperado entra no system prompt. Existe algum caminho em que conteúdo do corpus altere o comportamento de forma indesejada (por exemplo, uma seção do corpus que contenha instruções imperativas)?
+f) A medição de latência proposta (D10) é suficiente para detectar regressão, dado que bench-voice usa perguntas curtas que historicamente NÃO exercitam o caminho de Teologia/Virtologia?
+
+FORMATO DE SAÍDA OBRIGATÓRIO
+
+Para cada problema encontrado, exatamente este formato:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha ou seção do plano — cite o trecho literal>
+GRAVIDADE: <ALTA | MÉDIA | BAIXA>
+CONFIANÇA: <0-100%>
+AÇÃO RECOMENDADA: <o que mudar, concretamente>
+
+No fim, uma linha:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Regras: não reescreva o plano inteiro. Não invente arquivo, linha ou símbolo — se não conseguiu confirmar algo lendo o código, diga "não verificado" em vez de afirmar. Achado de gravidade ALTA exige que você tenha lido o arquivo citado.

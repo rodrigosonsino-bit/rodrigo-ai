@@ -6,6 +6,7 @@ import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { SessionManager } from './sessionManager.js';
 import { selectVoiceProvider } from './ttsProviders.js';
+import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 
 export interface VoiceRuntime {
@@ -69,8 +70,15 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     ExtensionRegistry.getInstance().registerAgent(agent);
   }
 
+  // Fase 5a: o corpus é carregado SOMENTE neste caminho — ou seja, só quando a voz está de fato
+  // disponível. Mesma regra de honestidade que a Fase 4 aplica ao registro dos agentes: nada é
+  // reportado como disponível antes de existir.
+  const knowledgeChunks = loadKnowledgeCorpus(rootDir);
+  const retriever = knowledgeChunks.length > 0 ? new KnowledgeRetriever(knowledgeChunks) : null;
+  ExtensionRegistry.getInstance().registerKnowledge(knowledgeChunks.length);
+
   const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
-  const sessionManager = new SessionManager(engine, ttsProvider, audioStore, agents);
+  const sessionManager = new SessionManager(engine, ttsProvider, audioStore, agents, retriever);
 
   return {
     available: true,

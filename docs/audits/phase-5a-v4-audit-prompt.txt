@@ -1,0 +1,46 @@
+Você é um auditor adversarial de planos de implementação. Sua tarefa NÃO é confirmar nem aprovar: é encontrar o que está errado.
+
+CONTEXTO
+
+Projeto "Rodrigo AI": orquestrador de voz 100% local (Node + TypeScript ESM, sem framework, zero dependências de runtime, MLX para LLM/STT). Fases 1-4 aceitas e em uso real. O plano a auditar é docs/phase-5a-v4.md — leia o arquivo inteiro antes de julgar.
+
+HISTÓRICO E AVISO DE ROTAÇÃO
+
+Esta é a QUARTA rodada. As anteriores: v1 e v2 auditadas por você (Antigravity CLI), v3 auditada pelo Codex CLI. Logs em docs/audits/.
+
+A v4 NÃO é uma correção incremental da v3: é um redesenho com escopo deliberadamente reduzido, decidido pelo usuário depois de três rejeições seguidas. Foram CORTADOS: o stemmer, o enriquecimento anafórico de query, o segundo trecho, o limiar numérico e o campo novo no evento SSE. Você nunca viu este desenho.
+
+**Não assuma que seus próprios achados das rodadas 1 e 2 continuam válidos** — a maior parte deles era sobre mecanismos que não existem mais. E não assuma que os achados do Codex na rodada 3 estavam certos; dois achados de rodadas anteriores já caíram por verificação independente nesta linha de trabalho.
+
+VERIFICAÇÃO POR EXECUÇÃO (obrigatória, não basta ler)
+
+O plano afirma que todo número dele saiu de execução contra o corpus real. Transcreva o pseudocódigo das seções 7.2 e 7.3 (chunkMarkdown, splitByParagraph, normalize com ALIASES, KnowledgeRetriever, buildKnowledgeBlock) para um script e RODE contra docs/research/*.md. Confirme ou derrube, um a um, os números da seção 5:
+- Os 7 casos produzem o ranking publicado? (Aceitação 2.376 / Exegese 3.616 / Batismo 3.192 / Perdão 2.286 / Faixas 3.701 / Medo 2.139 / Bolo VAZIO)
+- 39 trechos, maior corpo 1.157 chars?
+- Os tamanhos de prompt (mín +44,9% / mediana +62,6% / máx +71,1%) conferem medindo len() da string montada?
+- A anafórica devolve mesmo VAZIO?
+Qualquer divergência é achado ALTA.
+
+ATAQUE ESPECIFICAMENTE ESTES PONTOS
+
+a) A tabela de APELIDOS (§4.2, §7.3) substitui morfologia algorítmica por domínio fechado. Procure no corpus real termos técnicos IMPORTANTES cuja flexão comum NÃO está na tabela e que por isso não vão casar em perguntas naturais. Quantifique: quantas perguntas plausíveis falham por isso? O plano assume essa limitação — a assunção é honesta ou esconde um buraco grande demais para ser chamado de limitação?
+b) Remover o limiar numérico (§4.5, `score > 0`) é mais frouxo de propósito. Construa consultas reais onde um único termo comum casa e injeta um trecho irrelevante. Isso é só custo de contexto, como o plano afirma, ou pode piorar a resposta?
+c) `splitByParagraph` (§7.4, §7.2): o que acontece com um parágrafo ÚNICO maior que MAX_CHUNK_CHARS? Ele é dividido ou passa inteiro? Verifique no código proposto e no corpus real.
+d) A ordem `###` antes de `##` em chunkMarkdown vem com uma justificativa explícita no plano. Ela está correta? Teste as duas ordens.
+e) `resetForTesting()` com esvaziamento in-place (§7.5): é seguro com os testes existentes em src/backend/__tests__/? Verifique quais testes dependem do estado do singleton.
+f) O plano NÃO altera o evento SSE e assume isso como dívida (§4.6). Verifique se alguma outra parte do plano depende do campo que foi cortado (testes, log, critérios de aceite) — ou seja, se o corte foi feito de forma consistente.
+g) bench-voice.mjs (§7.6): a mudança preserva a comparabilidade histórica do conjunto 'geral'? O arquivo de saída por conjunto resolve mesmo a sobrescrita?
+h) Verifique se o plano quebra algum teste existente que ele NÃO listou em §6.
+
+FORMATO OBRIGATÓRIO, por problema:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha ou seção do plano — trecho literal; se por execução, cole a saída real>
+GRAVIDADE: <ALTA | MÉDIA | BAIXA>
+CONFIANÇA: <0-100%>
+AÇÃO RECOMENDADA: <o que mudar, concretamente>
+
+No fim:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Não invente arquivo, linha ou símbolo. Se não conseguiu confirmar algo lendo ou executando, diga "não verificado". Achado ALTA exige que você tenha lido ou executado o que cita.

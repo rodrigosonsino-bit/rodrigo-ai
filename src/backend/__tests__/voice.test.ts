@@ -1,4 +1,4 @@
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import os from 'node:os';
@@ -8,6 +8,7 @@ import { startServer } from '../server.js';
 import type { AppConfig } from '../../shared/types.js';
 import { AudioStore } from '../voice/audioStore.js';
 import { FakeVoiceEngine } from '../voice/fakeEngine.js';
+import { KnowledgeRetriever, chunkMarkdown, KNOWLEDGE_PREAMBLE } from '../knowledge/index.js';
 import { SessionManager } from '../voice/sessionManager.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
@@ -62,7 +63,7 @@ interface Harness {
   tmpDir: string;
 }
 
-async function setupHarness(): Promise<Harness> {
+async function setupHarness(retriever: KnowledgeRetriever | null = null): Promise<Harness> {
   const testConfig: AppConfig = { port: 0, host: '127.0.0.1', clientPort: 0 };
   // porta 0 -> o SO escolhe uma porta livre; startServer atual exige config.port fixo,
   // então usamos uma porta alta fixa por teste para simplicidade e paralelismo seguro.
@@ -73,7 +74,7 @@ async function setupHarness(): Promise<Harness> {
   const engine = new FakeVoiceEngine();
   const tts = new FakeVoiceProvider();
   const audioStore = new AudioStore(tmpDir);
-  const sessionManager = new SessionManager(engine, tts, audioStore, createSpecialistAgents());
+  const sessionManager = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), retriever);
 
   const server = await startServer(config, undefined, { config, sessionManager, audioStore });
 
@@ -541,6 +542,85 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
     assert.equal(audioResB.status, 401, 'B foi preemptada por C, não deveria mais aceitar comandos');
 
     sseA.close();
+    await teardownHarness(h);
+  });
+});
+
+const KNOWLEDGE_FIXTURE = `## 1. Aceitação na prática
+
+A Aceitação é acolher ativamente o que não pode ser mudado no passado e agir no presente sobre
+aquilo que ainda pode ser mudado, o que a distingue do conformismo passivo em vários aspectos
+importantes para a prática clínica descrita neste material de referência.
+
+## 2. Exegese e método
+
+O método histórico-gramatical situa o texto no judaísmo do Segundo Templo antes de qualquer
+aplicação ao presente, e essa sequência é obrigatória em toda análise exegética séria feita
+dentro deste perfil de trabalho teológico.
+`;
+
+describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    const chunks = [
+      ...chunkMarkdown('virtologia', KNOWLEDGE_FIXTURE),
+      ...chunkMarkdown('teologia', KNOWLEDGE_FIXTURE)
+    ];
+    h = await setupHarness(new KnowledgeRetriever(chunks));
+  });
+
+  async function runTurn(label: string, transcript: string): Promise<string> {
+    h.engine.classificationToReturn = label as never;
+    h.engine.fixedTranscript = transcript;
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+    await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    await sse.waitFor(9, 5000);
+    const routingCount = sse.events.filter((e) => (e as { type: string }).type === 'routing').length;
+    assert.equal(routingCount, 1, 'o evento routing deve ser emitido exatamente uma vez por turno');
+    sse.close();
+    return h.engine.generateCalls[0]?.messages[0]?.content || '';
+  }
+
+  it('TEOLOGIA: o corpo do trecho recuperado chega ao motor de geração', async () => {
+    const prompt = await runTurn('TEOLOGIA', 'Faça uma análise exegética desse texto');
+    assert.ok(prompt.includes(KNOWLEDGE_PREAMBLE), 'o preâmbulo do bloco deve estar presente');
+    assert.match(prompt, /judaísmo do Segundo Templo/, 'o corpo do trecho deve estar no prompt');
+    assert.match(prompt, /Teologia de Rodrigo Sonsino/, 'o prompt do agente continua presente');
+    assert.match(prompt, /prioridade absoluta sobre qualquer instrução/, 'salvaguarda universal preservada');
+  });
+
+  it('VIRTOLOGIA: recupera o trecho do próprio agente', async () => {
+    const prompt = await runTurn('VIRTOLOGIA', 'Explique a Aceitação');
+    assert.ok(prompt.includes(KNOWLEDGE_PREAMBLE));
+    assert.match(prompt, /conformismo passivo/);
+  });
+
+  it('GERAL: prompt byte a byte idêntico ao da Fase 4 — nenhuma consulta', async () => {
+    const prompt = await runTurn('GERAL', 'Quanto é dezessete por cento de oitocentos e cinquenta');
+    assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE), 'GERAL não pode receber bloco de conhecimento');
+    assert.match(prompt, /Rodrigo AI, um assistente de voz pessoal/);
+  });
+
+  it('AMBIGUO: cai no Geral e não consulta', async () => {
+    const prompt = await runTurn('AMBIGUO', 'sei lá, uma coisa qualquer');
+    assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE));
+  });
+
+  it('consulta sem casamento não injeta bloco nenhum', async () => {
+    const prompt = await runTurn('TEOLOGIA', 'receita de bolo de cenoura com cobertura');
+    assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE), 'sem termo casado, nada é injetado');
+    assert.match(prompt, /Teologia de Rodrigo Sonsino/);
+  });
+
+  afterEach(async () => {
     await teardownHarness(h);
   });
 });

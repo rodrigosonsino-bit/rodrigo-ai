@@ -1,0 +1,60 @@
+{
+  "set": "virtologia",
+  "tag": "virtologia-depois",
+  "date": "2026-09-17T10:13:53.428Z",
+  "turns": 9,
+  "firstAudioMedianMs": 3008.1705,
+  "firstAudioP95Ms": 3459.6396660000028,
+  "target": {
+    "medianMs": 4000,
+    "p95Ms": 8000
+  },
+  "passed": true,
+  "raw": [
+    {
+      "sttMs": 168.0227079999986,
+      "firstAudioMs": 3091.8296249999985,
+      "totalMs": 5262.345458
+    },
+    {
+      "sttMs": 192.9091249999983,
+      "firstAudioMs": 3050.446666,
+      "totalMs": 4735.347833
+    },
+    {
+      "sttMs": 267.2311669999981,
+      "firstAudioMs": 3008.1705,
+      "totalMs": 5521.1628329999985
+    },
+    {
+      "sttMs": 219.82849999999962,
+      "firstAudioMs": 2516.4427499999983,
+      "totalMs": 5412.258667000002
+    },
+    {
+      "sttMs": 205.4249159999963,
+      "firstAudioMs": 2259.1619999999966,
+      "totalMs": 4784.618666000002
+    },
+    {
+      "sttMs": 191.1267499999958,
+      "firstAudioMs": 2392.476416999998,
+      "totalMs": 4356.417458999997
+    },
+    {
+      "sttMs": 210.02779100000043,
+      "firstAudioMs": 3459.6396660000028,
+      "totalMs": 5526.194000000003
+    },
+    {
+      "sttMs": 244.4048330000005,
+      "firstAudioMs": 3090.32675,
+      "totalMs": 5479.180458000003
+    },
+    {
+      "sttMs": 192.8275829999984,
+      "firstAudioMs": 2059.911,
+      "totalMs": 4892.623541999994
+    }
+  ]
+}
