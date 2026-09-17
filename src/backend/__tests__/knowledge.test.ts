@@ -57,6 +57,7 @@ describe('Conhecimento (Fase 5a) — segmentação', () => {
   // --- entradas que os exemplos escolhidos à mão não cobriam.
   it('PROPRIEDADE: nenhum trecho excede MAX_CHUNK_CHARS, em entrada aleatória', () => {
     let seed = 12345;
+    let grandes = 0; // guarda anti-vacuidade: o teste precisa PROVAR que exercitou o caso difícil
     const rnd = (n: number): number => {
       seed = (seed * 1103515245 + 12345) % 2147483648;
       return seed % n;
@@ -65,12 +66,26 @@ describe('Conhecimento (Fase 5a) — segmentação', () => {
       const paras: string[] = [];
       for (let p = 0; p <= rnd(5); p += 1) {
         const size = [10, 50, 200, 900, 1199, 1200, 1201, 2500, 4000][rnd(9)];
-        const sentences: string[] = [];
-        for (let sIdx = 0; sIdx <= rnd(4); sIdx += 1) {
-          sentences.push('x'.repeat(1 + rnd(300)));
+        // O gerador anterior juntava frases de até 300 chars e cortava em `size`; o join
+        // quase nunca alcançava `size`, então NENHUM parágrafo passava de 1200 e o caminho
+        // de hardSplit nunca era exercitado — a propriedade passava por vacuidade (achado
+        // ALTA da auditoria de código, 2026-09-17). Agora o parágrafo tem `size` de verdade:
+        // metade das vezes com pontuação (exercita a divisão por frase), metade sem
+        // (força a fatia dura).
+        let para = '';
+        if (rnd(2) === 0) {
+          const sentences: string[] = [];
+          while (para.length < size) {
+            sentences.push('x'.repeat(1 + rnd(300)));
+            para = sentences.join('. ');
+          }
+          para = para.slice(0, size);
+        } else {
+          para = 'x'.repeat(size);
         }
-        paras.push(sentences.join('. ').slice(0, size) || 'x'.repeat(size));
+        paras.push(para);
       }
+      if (paras.some((p) => p.length > KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS)) grandes += 1;
       const md = `## Seção\n\n${paras.join('\n\n')}\n`;
       for (const chunk of chunkMarkdown('t', md)) {
         assert.ok(
@@ -79,6 +94,12 @@ describe('Conhecimento (Fase 5a) — segmentação', () => {
         );
       }
     }
+    // Sem isto, a propriedade acima passa mesmo que o gerador nunca produza o caso que
+    // hardSplit existe para tratar — que foi exatamente o defeito encontrado.
+    assert.ok(
+      grandes >= 20,
+      `o gerador produziu apenas ${grandes} iterações com parágrafo acima do teto — teste vácuo`
+    );
   });
 
   it('PROPRIEDADE: não perde conteúdo — parágrafo curto no fim vira trecho em vez de sumir', () => {
@@ -86,8 +107,13 @@ describe('Conhecimento (Fase 5a) — segmentação', () => {
     const chunks = chunkMarkdown('t', `## S\n\n${body}\n`);
     const joined = chunks.map((c) => c.body).join('');
     assert.ok(joined.includes('A'.repeat(1190)), 'o parágrafo grande foi preservado');
-    // A sobra de 40 chars não cabe no anterior (1190 + 2 + 40 > 1200), então vira trecho próprio
-    // e é descartada só pelo MIN_CHUNK_CHARS — nunca por fusão que estouraria o teto.
+    // A sobra de 40 chars não cabe no anterior (1190 + 2 + 40 > 1200) e fica abaixo de
+    // MIN_CHUNK_CHARS. A versão anterior deste teste asseria só o parágrafo grande, e por isso
+    // passava enquanto o código PERDIA a sobra (achado ALTA da auditoria de código).
+    assert.ok(
+      joined.includes('B'.repeat(40)),
+      'a sobra curta tem de sobreviver — preservar conteúdo vale mais que o tamanho mínimo'
+    );
     for (const c of chunks) {
       assert.ok(c.body.length <= KNOWLEDGE_LIMITS.MAX_CHUNK_CHARS);
     }

@@ -111,10 +111,15 @@ export function chunkMarkdown(agentId: string, markdown: string): KnowledgeChunk
     const body = buffer.join('\n').trim();
     buffer = [];
     if (body.length === 0) return;
-    for (const piece of splitByParagraph(body)) {
-      if (piece.length >= KNOWLEDGE_LIMITS.MIN_CHUNK_CHARS) {
-        chunks.push({ agentId, headingPath: currentHeading, body: piece });
-      }
+    const pieces = splitByParagraph(body);
+    // MIN_CHUNK_CHARS existe para descartar cabeçalho-pai sem texto próprio — uma seção
+    // INTEIRA curta demais. Aplicá-lo a cada pedaço descartava a sobra final de uma seção
+    // longa, perdendo conteúdo (achado ALTA da auditoria de código, 2026-09-17: um parágrafo
+    // de 40 chars após um de 1190 sumia). O filtro passa a valer só para o caso que ele foi
+    // escrito para cobrir: seção com um único pedaço, curto.
+    if (pieces.length === 1 && pieces[0].length < KNOWLEDGE_LIMITS.MIN_CHUNK_CHARS) return;
+    for (const piece of pieces) {
+      chunks.push({ agentId, headingPath: currentHeading, body: piece });
     }
   };
 

@@ -55,10 +55,19 @@ de uma rodada nessas condições não é equivalente a uma com auditor independe
 Os testes novos travam exatamente o que as auditorias 4 e 5 encontraram — e como **propriedades**,
 não exemplos, porque foram exemplos escolhidos à mão que deixaram os defeitos passar:
 
-- **Propriedade:** nenhum trecho excede `MAX_CHUNK_CHARS`, verificada em 500 entradas geradas
-  (parágrafos de 10 a 4.000 chars, com e sem pontuação). Antes de escrever o código, a mesma
-  propriedade foi verificada em 3.000 entradas — 0 violações.
-- **Propriedade:** nenhum conteúdo é descartado pela segmentação.
+- **Propriedade:** nenhum trecho excede `MAX_CHUNK_CHARS`, verificada em 500 entradas geradas.
+  **Correção de 2026-09-17:** a primeira versão deste teste era **vácua** — o gerador juntava
+  frases e cortava, e produzia no máximo 436 chars, então `hardSplit` nunca era exercitado
+  (achado ALTA da auditoria de código: 1.214 parágrafos gerados, 0 acima do teto). O mesmo vale
+  para o teste em Python que rodei antes de implementar e citei como "3.000 entradas, 0
+  violações": era vácuo pelo mesmo motivo. O gerador foi corrigido e o teste agora carrega uma
+  **guarda anti-vacuidade** que falha se o caso difícil não for produzido.
+- **Propriedade:** nenhum conteúdo é descartado pela segmentação. **Correção de 2026-09-17:** o
+  código PERDIA conteúdo — a sobra final curta de uma seção longa era criada por
+  `splitByParagraph` e depois descartada por `chunkMarkdown` via `MIN_CHUNK_CHARS`. O teste
+  original asseria apenas que o parágrafo grande sobrevivia, e por isso passava. Corrigido:
+  `MIN_CHUNK_CHARS` só descarta seção inteira curta (o caso de cabeçalho-pai sem texto), nunca
+  continuação; e o teste agora assere que a sobra sobrevive.
 - **Regressão específica:** texto que precede uma fatia dura não é concatenado nela (o estouro real
   de 1.213 chars com teto de 1.200 que a 5ª auditoria achou).
 - **Exaustivo:** toda variante da tabela de apelidos normaliza para a canônica — possível porque o
@@ -107,7 +116,7 @@ Conceito de Aceitação (2.384)**.
 A seção "5. PESQUISA, FONTES E RIGOR" contém literalmente *"Sempre que possível, forneça link para
 publicação original, DOI, página da editora ou periódico"* — uma ordem direta ao modelo que colide
 com "nunca use links" do bloco de voz. Com o trecho injetado, a resposta falada **não leu nenhuma URL
-nem DOI**. A neutralização do preâmbulo funcionou no caso real que a motivou.
+nem DOI**. A neutralização do preâmbulo **provavelmente** funcionou no caso real que a motivou. **Ressalva (achado da auditoria de código):** é UM caso, sem comparação controlada com e sem preâmbulo, e há explicações alternativas (o `cleanTextForSpeech` remove markdown; o modelo pode simplesmente não ter lido a URL). A conclusão não está estabelecida.
 
 ---
 

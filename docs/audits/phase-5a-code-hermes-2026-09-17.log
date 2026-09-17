@@ -1,0 +1,167 @@
+Agora vou consolidar o parecer final com todas as evidências coletadas.
+
+---
+
+## PARECER ADVERSÁRIO — FASE 5a
+
+**Auditor:** Hermes Agent (primeira auditoria de código)
+**Material:** `/workspace/rodrigo-5a-audit`
+**Data:** 2026-09-17
+
+---
+
+### ACHADO 1: Teste de propriedade é VÁCUO — nunca testa parágrafos > 1200 chars
+
+**EVIDÊNCIA:** `/workspace/audit-scratch/test-generator-final.js`
+```
+Total de parágrafos: 1214
+Parágrafos > 1200: 0
+hardSplit seria acionado: 0 vezes
+```
+
+O gerador em `knowledge.test.ts:59-63` produz frases de até 300 chars, junta até 5 com `". "`, e corta com `slice(0, size)`. O máximo teórico é ~1508 chars, mas na prática o join raramente ultrapassa 1200. Em 500 iterações (1214 parágrafos), **NENHUM** parágrafo > 1200 é gerado. O caminho de `hardSplit` para parágrafos grandes **NUNCA** é acionado.
+
+A propriedade "nenhum trecho excede MAX_CHUNK_CHARS" é verdadeira por **vacuidade**, não por robustez do código. O teste passa porque nunca testa o caso difícil.
+
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 100%
+**AÇÃO RECOMENDADA:** Corrigir o gerador para produzir frases únicas de tamanho real (ex: `'x'.repeat(size)` sem join), ou adicionar casos explícitos de parágrafos > 1200 chars.
+
+---
+
+### ACHADO 2: Perda de conteúdo real — sobra < MIN_CHUNK_CHARS é descartada
+
+**EVIDÊNCIA:** `/workspace/audit-scratch/test11-loss.js`
+```
+Caso 4: A*1190 + B*40 - chunkMarkdown descarta?
+  chunkMarkdown: 1 trechos
+  Contém B*40? NAO - PERDEU!
+```
+
+Quando a sobra final é < `MIN_CHUNK_CHARS` (80) e **NÃO cabe** no pedaço anterior, `splitByParagraph` a cria como pedaço próprio. Mas `chunkMarkdown` a **descarta** porque `piece.length < MIN_CHUNK_CHARS` (`corpus.ts:115`).
+
+Cenário real: seção com parágrafo de 1190 chars seguido de parágrafo de 40 chars. O parágrafo de 40 chars é criado por `splitByParagraph` mas descartado por `chunkMarkdown`.
+
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 100%
+**AÇÃO RECOMENDADA:** Remover o filtro `piece.length >= MIN_CHUNK_CHARS` em `chunkMarkdown`, ou fundir a sobra no pedaço anterior mesmo que exija ajuste. O relatório afirma que "preservar conteúdo vale mais que respeitar o tamanho mínimo", mas o código não implementa isso.
+
+---
+
+### ACHADO 3: Teste "byte a byte idêntico" NÃO prova identidade
+
+**EVIDÊNCIA:** `voice.test.ts:606-610`
+```typescript
+it('GERAL: prompt byte a byte idêntico ao da Fase 4 — nenhuma consulta', async () => {
+  const prompt = await runTurn('GERAL', 'Quanto é dezessete por cento de oitocentos e cinquenta');
+  assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE), 'GERAL não pode receber bloco de conhecimento');
+  assert.match(prompt, /Rodrigo AI, um assistente de voz pessoal/);
+});
+```
+
+O teste verifica apenas:
+1. Ausência do preâmbulo
+2. Presença da substring "Rodrigo AI..."
+
+**NÃO** compara o prompt com uma referência da Fase 4. Qualquer alteração no prompt do agente Geral (adição de parágrafos, reordenação, mudança de formatação) passaria no teste.
+
+**GRAVIDADE:** MÉDIA
+**CONFIANÇA:** 100%
+**AÇÃO RECOMENDADA:** Armazenar o prompt da Fase 4 como fixture e comparar com `assert.equal(prompt, phase4Prompt)`.
+
+---
+
+### ACHADO 4: retrieve() injeta trecho irrelevante com consultas plausíveis
+
+**EVIDÊNCIA:** `/workspace/audit-scratch/test4-retrieve.js`
+```
+Agente: virtologia | Query: "virtude do bom preço"
+  Relevância esperada: BAIXA - virtude como qualidade de negócio
+  >>> INJETOU: "2. Estrutura Central: Virtudes, Faixas de Evolução" (score: 1.162)
+
+Agente: teologia | Query: "batismo de fogo no sentido figurado"
+  Relevância esperada: BAIXA - expressão idiomática
+  >>> INJETOU: "3. CONVICÇÕES DOUTRINÁRIAS > 3.6 Temas abertos" (score: 1.691)
+
+Agente: virtologia | Query: "inconsciente na psicanálise freudiana"
+  Relevância esperada: BAIXA - contexto psicanálise não é Virtologia
+  >>> INJETOU: "2. Estrutura Central: Virtudes, Faixas de Evolução" (score: 0.677)
+```
+
+O `retrieve()` injeta trecho se **qualquer** termo casar, sem limiar numérico. Consultas plausíveis que contêm termos técnicos do corpus (mesmo em contexto não-relacionado) injetam trechos irrelevantes. O preâmbulo diz "ignore-o se não responder à pergunta", mas isso depende do modelo obedecer.
+
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 95%
+**AÇÃO RECOMENDADA:** Implementar limiar numérico calibrado, ou exigir múltiplos termos casados, ou usar similaridade semântica. O relatório reconhece que "não existe limiar que separe as duas populações", mas não implementa alternativa.
+
+---
+
+### ACHADO 5: Alegação §4.3 excede a evidência (N=1)
+
+**EVIDÊNCIA:** `implementation-phase-5a.md:105-110`
+> "Com o trecho injetado, a resposta falada **não leu nenhuma URL nem DOI**. A neutralização do preâmbulo funcionou no caso real que a motivou."
+
+A conclusão é baseada em **um único caso observado**. O modelo pode ter ignorado URL/DOI por outras razões (TTS filtra URLs, `cleanTextForSpeech` remove markdown, modelo decidiu não ler). Não há comparação controlada (com vs sem preâmbulo).
+
+**GRAVIDADE:** MÉDIA
+**CONFIANÇA:** 85%
+**AÇÃO RECOMENDADA:** Reescrever a conclusão como "o preâmbulo PROVAVELMENTE neutralizou a instrução, mas são necessários mais casos para confirmar".
+
+---
+
+### ACHADO 6: Alegação §5.2 excede a evidência (N=6, efetivo N=2)
+
+**EVIDÊNCIA:** `implementation-phase-5a.md:133-151`
+> "Zero de seis injetaram qualquer trecho. O risco prático de injeção irrelevante é **substancialmente menor** do que o plano afirmou."
+
+Das 6 perguntas, só 2 chegaram ao retriever. N efetivo = 2. O relatório reconhece que "seis amostras são poucas", mas conclui "substancialmente menor" mesmo assim. O risco condicional (dado que chegou ao retriever) **não foi medido**.
+
+**GRAVIDADE:** MÉDIA
+**CONFIANÇA:** 90%
+**AÇÃO RECOMENDADA:** Reescrever a conclusão como "a população que alcança o recuperador é menor que a modelada, mas o risco condicional permanece desconhecido".
+
+---
+
+### ACHADO 7: Integração sem timeout e sem AbortSignal
+
+**EVIDÊNCIA:** `sessionManager.ts:274-281`
+```typescript
+let retrieved: RetrievedChunk[] = [];
+if (this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA')) {
+  try {
+    retrieved = this.retriever.retrieve(agent.id, transcript);
+  } catch (err) {
+    retrieved = [];
+    console.error('[knowledge] recuperação falhou, seguindo sem trecho:', err);
+  }
+}
+```
+
+`retrieve()` é chamado sem timeout e sem `AbortSignal`. Se o corpus for grande ou houver algum problema de performance, o turno fica bloqueado até `retrieve()` retornar. O cancelamento de turno (`cancelTurn`) não interrompe `retrieve()`.
+
+**GRAVIDADE:** BAIXA
+**CONFIANÇA:** 80%
+**AÇÃO RECOMENDADA:** Adicionar timeout (ex: 500ms) e usar `AbortSignal` para permitir cancelamento.
+
+---
+
+### ACHADO 8: Teste de contagem de routing NÃO testa concorrência
+
+**EVIDÊNCIA:** `voice.test.ts:586-587`
+```typescript
+const routingCount = sse.events.filter((e) => (e as { type: string }).type === 'routing').length;
+assert.equal(routingCount, 1, 'o evento routing deve ser emitido exatamente uma vez por turno');
+```
+
+O teste valida que não há emit duplicado **dentro do mesmo runTurn()**. Mas não testa cenários de concorrência (ex: 2 `submitAudio()` antes do cancelamento do primeiro). Se `runTurn()` for chamado 2x para o mesmo turn (bug), o teste não pegaria.
+
+**GRAVIDADE:** BAIXA
+**CONFIANÇA:** 70%
+**AÇÃO RECOMENDADA:** Adicionar teste de concorrência com 2 submits rápidos.
+
+---
+
+## VEREDITO
+
+**REJEITADO** — O código tem defeitos reais (perda de conteúdo, injeção irrelevante, testes vacuosos) que os testes não detectam, e as alegações do relatório excedem a evidência coletada.
+=====HERMES_EXIT=0=====
