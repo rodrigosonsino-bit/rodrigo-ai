@@ -123,25 +123,37 @@ então o efeito audível é atenuado, mas a estrutura da resposta ainda é de li
 **Não foi medido** quanto isso piora em relação à Fase 4, nem se ocorre com outros trechos. Precisa
 de comparação par-a-par própria.
 
-### 5.2 A hipótese central da §3 do plano continua **não testada**
+### 5.2 A hipótese central da §3 do plano — **medida, e o plano estava errado** (RESOLVIDA)
 
-O plano declara que a recuperação não distingue "o corpus cobre" de "não cobre", e que o custo disso
-é orçamento de contexto e não resposta errada. O caso eleito para testar isso falhou duas vezes:
+O plano v5 declarou, na §3, que a recuperação não distingue "o corpus cobre" de "não cobre", e
+publicou uma calibração indicando que **8 de 14** perguntas fora do corpus injetariam um trecho
+vagamente relacionado. Essa calibração foi feita contra uma população que eu **supus** alcançar o
+recuperador, em vez de medir.
 
-- "Em que ano foi o Concílio de Niceia?" → não injeta nada (apontado pela 5ª auditoria).
-- "Quem foi Policarpo de Esmirna?" → rotulado TEOLOGIA, mas **não injetou**.
-- "Quantos capítulos tem o livro de Isaías?" → **rotulado GERAL pelo classificador real**, nunca
-  chegou ao recuperador.
+Medição real, com o classificador MLX e áudio sintetizado (6 perguntas fora do corpus):
 
-**Descoberta que corrige o próprio plano:** a população de ruído que de fato alcança o recuperador é
-definida pelo **classificador real**, e eu a modelei por suposição em vez de medir. Duas das três
-sondas fora do corpus não chegaram lá. Isso significa que a sobreposição declarada na §3 do plano
-está medida contra uma população que **não é** a entrada real do componente — o mesmo erro que a
-observação 25 descreve, cometido pela terceira vez nesta linha de trabalho, agora em sentido inverso
-(superestimando o ruído em vez de subestimá-lo).
+| Pergunta | Rótulo real | Chegou ao recuperador? | Injetou? |
+|---|---|---|---|
+| Em que ano foi o Concílio de Niceia? | AMBIGUO | não | não |
+| O que é o Talmude babilônico? | TEOLOGIA | sim | **não** |
+| Quem foi Policarpo de Esmirna? | TEOLOGIA | sim | **não** |
+| Quanto custa a formação em Virtologia? | AMBIGUO | não | não |
+| Onde fica a sede da Virtologia? | AMBIGUO | não | não |
+| A Virtologia tem registro no conselho de psicologia? | AMBIGUO | não | não |
 
-Fechar isso exige medir quais rótulos o classificador real atribui a um conjunto de perguntas fora do
-corpus, e só então recalibrar. **Não foi feito.**
+**Zero de seis injetaram qualquer trecho.** Dois efeitos se somam, e o plano não previu nenhum dos
+dois: (a) o orquestrador manda a maioria dessas perguntas para AMBIGUO, que cai no Geral e nunca
+chama o recuperador; (b) das que chegam, nenhuma casou termo depois da transcrição real.
+
+**Correção do plano:** a sobreposição declarada na §3 da v5 foi medida contra uma população fictícia
+— o mesmo erro que a observação 25 do log de skills descreve, cometido pela terceira vez nesta linha
+de trabalho, agora superestimando o ruído em vez de subestimá-lo. O risco prático de injeção
+irrelevante é **substancialmente menor** do que o plano afirmou.
+
+**Ressalva que não pode ser omitida:** seis amostras são poucas, e a medição anterior mostrou que
+algumas consultas fora do corpus *pontuam* quando chegam ao recuperador. A conclusão sustentada pela
+evidência é "a população que alcança o recuperador é bem menor que a modelada", **não** "nenhuma
+pergunta fora do corpus jamais injeta". Fechar isso com confiança exigiria uma amostra maior.
 
 ### 5.3 Dívida declarada: a consulta não aparece na interface
 
@@ -161,9 +173,13 @@ estabeleceu. **É dívida a resgatar, não simplificação neutra.**
 
 ## 6. Estado da fase
 
-**Implementada, testada e verificada com voz real**, com três pendências abertas e registradas
-(§5.1, §5.2, §5.3). O Gate 1 foi substituído deliberadamente por travas em teste, com aprovação
-explícita do usuário e o motivo registrado em §2.
+**Implementada, testada e verificada com voz real.** A pendência que impedia o fechamento (§5.2)
+foi medida e resolvida — com a correção de que o próprio plano estava errado sobre ela, e a ressalva
+de amostra pequena registrada.
 
-Não é correto chamar esta fase de "fechada" enquanto a §5.2 não for medida: a afirmação central do
-plano sobre o comportamento fora do corpus continua sem evidência.
+Permanecem abertas duas pendências menores, nenhuma bloqueante: §5.1 (trecho injetado induz
+formatação em lista, não medido contra a Fase 4) e §5.3 (a consulta não aparece na interface —
+dívida declarada). Mais a rodada de auditoria independente devida (§2).
+
+O Gate 1 foi substituído deliberadamente por travas em teste, com aprovação explícita do usuário e o
+motivo registrado em §2.

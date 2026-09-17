@@ -1,12 +1,47 @@
 {
-  "date": "2026-09-17T10:20:35.718Z",
+  "date": "2026-09-17T10:23:27.116Z",
   "results": [
     {
-      "text": "Quantos capítulos tem o livro de Isaías?",
-      "transcript": "Quantos capítulos tem o livro de Isaías?",
-      "routingLabel": "GERAL",
+      "text": "Em que ano foi o Concílio de Niceia?",
+      "transcript": "E que ano foi o concílio de Inicia?",
+      "routingLabel": "AMBIGUO",
+      "handled": false,
+      "response": "O concílio de Inicia não existiu. Provavelmente houve um erro no nome. O Concílio Vaticano I aconteceu em 1869, mas o mais conhecido é o Concílio Vaticano II, que ocorreu entre 1962 e 1965. Se você quis dizer outro evento ou data específica, pode me esclarecer?"
+    },
+    {
+      "text": "O que é o Talmude babilônico?",
+      "transcript": "O que é o talmude babilônico?",
+      "routingLabel": "TEOLOGIA",
       "handled": true,
-      "response": "O livro de Isaías tem vinte e sete capítulos."
+      "response": "O Talmude Babilônico é a versão mais completa e influente do Talmud, um compendio de leis judaicas, discussões rabínica e tradições orais que se desenvolveu no período entre o século I e II d.C. Esse texto foi compilado principalmente por rabinos na região da Babel (atual Irã), em grande parte durante os séculos III e IV. É considerado uma das fontes centrais para a interpretação tradicional do Judaísmo contemporâneo — especialmente nas comunidades orientais como as da Europa central e norte antes do século XIX, bem como nos dias atuais. O Talmude babilônico tem estrutura dividida em \""
+    },
+    {
+      "text": "Quem foi Policarpo de Esmirna?",
+      "transcript": "e foi policarpo de Esmirna?",
+      "routingLabel": "TEOLOGIA",
+      "handled": true,
+      "response": "Não, Policarpo de Ésmirna não foi o autor do Talmude Babilônico. Foi um bispo e cristão da primeira época – viveu no século I d.C., a cerca de 135–180 — conhecido por sua fé firme diante das perseguições romanas. Ele é mencionado em Atos dos Apóstolos (24:9) como um exemplo de santidade na igreja primitiva. O Talmude babilônico nasceu séculos depois, com produção rabínica entre os séc.II e IV d.C. Não tem relação direta com ele nem com as tradições judaicas que foram posteriormente organizadas nesse"
+    },
+    {
+      "text": "Quanto custa a formação em Virtologia?",
+      "transcript": "quanto custa a formação e a virtologia?",
+      "routingLabel": "AMBIGUO",
+      "handled": false,
+      "response": "\"Formação e virtologia\"? Essa combinação não é uma área acadêmica ou profissional reconhecida no Brasil. Se você quis dizer algo como formação religiosa, ética ou em outro contexto — por favor esclareça melhor?"
+    },
+    {
+      "text": "Onde fica a sede da Virtologia?",
+      "transcript": "onde fica a sede da Virtologia?",
+      "routingLabel": "AMBIGUO",
+      "handled": false,
+      "response": "A \"virtologia\" não é um movimento, instituição ou organização com sede definida. É uma palavra usada em contextos acadêmicos e contemporâneos — muitas vezes ligado à psicologia e ao desenvolvimento humano — mas ainda está no início de sua trajetória. Nenhum órgão oficial tem como nome “Virtologia” nem sedes conhecidas nesse campo específico."
+    },
+    {
+      "text": "A Virtologia tem registro no conselho de psicologia?",
+      "transcript": "A Virtologia tem registro no Conselho de Psicologia?",
+      "routingLabel": "AMBIGUO",
+      "handled": false,
+      "response": "Não, a \"virtologia\" não tem registro como prática ou área específica no Conselho de Psicologia do Brasil."
     }
   ]
 }
