@@ -164,6 +164,55 @@ algumas consultas fora do corpus *pontuam* quando chegam ao recuperador. A concl
 evidência é "a população que alcança o recuperador é bem menor que a modelada", **não** "nenhuma
 pergunta fora do corpus jamais injeta". Fechar isso com confiança exigiria uma amostra maior.
 
+### 5.4 Injeção de trecho irrelevante — MEDIDA em 2026-09-21, e o risco é menor que o relatado
+
+A auditoria de código (Hermes, achado 3, gravidade ALTA) mostrou consultas plausíveis injetando
+trecho irrelevante, chamando `retrieve()` **diretamente**: "batismo de fogo no sentido figurado" →
+3.171, "inconsciente na psicanálise freudiana" → 2.230, "virtude do bom preço" → 1.030. O achado é
+correto como propriedade do recuperador isolado.
+
+**No pipeline completo, ele é substancialmente menor, por dois filtros que o teste isolado
+contorna:**
+
+1. **O rótulo precisa ser especialista.** O classificador real mandou "batismo de fogo" para GERAL
+   e outras duas sondas para AMBIGUO — nenhuma chega ao recuperador.
+2. **O termo precisa estar no corpus DAQUELE agente.** "inconsciente na psicanálise freudiana" foi
+   classificado como TEOLOGIA; o termo existe no corpus de Virtologia, não no de Teologia. Nada
+   casou. O teste isolado havia chamado `retrieve('virtologia', ...)`, uma ligação agente-consulta
+   que o pipeline nunca produz.
+
+Medido com áudio real: de **6 sondas adversariais, 2 injetaram** — as duas que nomeiam "Virtologia"
+explicitamente e usam vocabulário do domínio em sentido deslocado.
+
+**Comparação controlada (A/B, mesma pergunta, com e sem corpus):**
+
+| Pergunta | COM injeção | SEM injeção (Fase 4) |
+|---|---|---|
+| "virtude de esperar o preço baixar" | nega a premissa e usa "fase primitiva das **Faixas de Evolução**" — vocabulário real | nega a premissa e **inventa**: "lobo amígdala" (amígdala não é lobo) e "faixa de reatividade emocional" (Faixa inexistente) |
+| "medo de altura x evolução biológica" | sistema límbico + Faixas de Evolução | sistema límbico + lobo pré-frontal — também correto |
+
+Em nenhum dos dois a injeção piorou a resposta; no primeiro ela **evitou duas invenções**, ancorando
+o modelo no vocabulário real da metodologia. A explicação é coerente com o mecanismo: as injeções
+que sobrevivem aos dois filtros são justamente as de consultas que nomeiam o domínio, e nessas o
+trecho é topicamente próximo mesmo quando o sentido da pergunta é outro.
+
+**Ressalva de tamanho de amostra, que não pode ser omitida:** são **2 perguntas, 1 geração cada**,
+num modelo com `temp=0.7`. Isso não estabelece nada estatisticamente. O que a medição faz é inverter
+o ônus: a hipótese de que a injeção irrelevante piora a resposta **não se confirmou na primeira
+comparação controlada**, e a hipótese oposta ganhou um caso concreto. Para firmar, seriam necessárias
+várias gerações por condição.
+
+### 5.5 Caminho de saída fixo do `matrix-c6.mjs` sobrescreveu evidência de fase aceita (corrigido)
+
+O script gravava sempre em `docs/audits/phase-4-c6-matrix-result.json`. As execuções ad-hoc desta
+investigação **sobrescreveram a evidência de aceite da Fase 4**, cinco vezes, e isso só apareceu num
+`git status`. Arquivo restaurado do git; caminho agora é parametrizado (`RODRIGO_MATRIX_TAG`, ou tag
+`ad-hoc-<timestamp>` automática quando `RODRIGO_CASES` está presente), preservando o nome histórico
+no uso padrão.
+
+É o **mesmo defeito** que a 3ª auditoria encontrou em `scripts/bench-voice.mjs` ("o arquivo de saída
+sobrescreve a medição anterior"). Foi corrigido lá e o irmão de forma idêntica ficou para trás.
+
 ### 5.3 Dívida declarada: a consulta não aparece na interface
 
 O evento SSE `routing` não ganhou campo `knowledge` (decisão de redução de escopo). O trecho

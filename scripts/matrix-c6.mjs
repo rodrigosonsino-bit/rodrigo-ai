@@ -26,6 +26,19 @@ import path from 'node:path';
 const execFileAsync = promisify(execFile);
 const BASE_URL = process.env.RODRIGO_BENCH_URL || 'http://127.0.0.1:3000';
 
+/**
+ * Caminho de saída parametrizado (2026-09-21). O caminho fixo fazia QUALQUER execução com casos
+ * customizados sobrescrever a evidência de aceite da Fase 4 — aconteceu de verdade nesta data,
+ * cinco vezes, e só foi notado por um `git status`. É o MESMO defeito que a 3ª auditoria achou em
+ * `bench-voice.mjs` ("o arquivo de saída sobrescreve a medição anterior"): corrigido lá, e o irmão
+ * de forma idêntica ficou para trás. Sem RODRIGO_CASES o nome histórico é preservado; com casos
+ * customizados o arquivo sai com tag própria e nunca colide com a evidência de uma fase aceita.
+ */
+const MATRIX_TAG =
+  process.env.RODRIGO_MATRIX_TAG ||
+  (process.env.RODRIGO_CASES ? `ad-hoc-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}` : 'phase-4-c6');
+const OUT_PATH = `docs/audits/${MATRIX_TAG}-matrix-result.json`;
+
 // Fase 4 C6 — matriz ampliada de verificação com áudio real + teste exploratório de
 // instrução adversarial (docs/phase-4-v2.md).
 const DEFAULT_CASES = [
@@ -149,10 +162,10 @@ async function main() {
   }).catch(() => {});
 
   fs.writeFileSync(
-    path.join(process.cwd(), 'docs/audits/phase-4-c6-matrix-result.json'),
-    JSON.stringify({ date: new Date().toISOString(), results }, null, 2)
+    path.join(process.cwd(), OUT_PATH),
+    JSON.stringify({ date: new Date().toISOString(), tag: MATRIX_TAG, results }, null, 2)
   );
-  console.log('\n[matrix-c6] Resultado salvo em docs/audits/phase-4-c6-matrix-result.json');
+  console.log(`\n[matrix-c6] Resultado salvo em ${OUT_PATH}`);
 }
 
 main().catch((err) => {
