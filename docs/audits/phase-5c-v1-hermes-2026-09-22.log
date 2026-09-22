@@ -1,0 +1,162 @@
+Agora tenho toda a informação necessária. Vou consolidar a auditoria.
+
+---
+
+# Auditoria Adversarial — Fase 5c v1
+
+## ACHADO: Barge-in entre gravação de `pendingMutation` e síntese da pergunta de confirmação deixa estado órfão
+
+EVIDÊNCIA: Plano §4.3, passos 1–2. Código real `sessionManager.ts:217-221` (submitAudio cancela turno ativo) e `sessionManager.ts:253,269,315,375` (checks de `session.activeTurn !== turn`).
+
+O plano descreve:
+1. Turno N grava `session.pendingMutation`, sintetiza pergunta, encerra.
+2. Turno N+1 vê `pendingMutation` e trata fala do usuário como resposta de confirmação.
+
+Mas entre o passo 1 e o passo 2, há uma janela crítica: se o usuário fizer barge-in (enviar novo áudio) APÓS o LLM detectar a mutação mas ANTES da pergunta ser sintetizada/falada, o seguinte acontece:
+
+- `submitAudio` chama `this.engine.cancel(session.activeTurn.turnId)` e `session.activeTurn = null` (linhas 218-220).
+- O turno N é abortado via `AbortController` (linha 219).
+- MAS `session.pendingMutation` já foi gravado e NÃO é limpo — não há nenhum ponto no plano que o limpe.
+- O turno N+1 começa na MESMA sessão (barge-in não cria nova sessão). O primeiro checagem em `runTurn` vê `pendingMutation != null` e chama `detect_confirmation`.
+
+O usuário nunca ouviu a pergunta de confirmação, mas o sistema trata qualquer coisa que ele disser como resposta a ela. Se o usuário disser qualquer coisa que o modelo interprete como "sim" (ex.: "sim, pode continuar" dito como preenchimento antes de começar a próxima frase), a mutação executa sem confirmação real.
+
+GRAVIDADE: ALTA
+CONFIANÇA: 90%
+ACAO RECOMENDADA: O plano precisa de uma das seguintes soluções:
+(a) Só gravar `pendingMutation` APENAS se a síntese da pergunta de confirmação foi completada com sucesso (i.e., gravar `pendingMutation` DEPOIS de `Promise.allSettled(turn.pendingSynthesis)` e do check `session.activeTurn === turn`).
+(b) Adicionar um flag `questionAsked: boolean` ao `PendingMutation` que só é setado após a síntese completa, e o turno N+1 só procede se `questionAsped === true`.
+(c) No início do turno N+1, verificar se `pendingMutation.askedAtTurnId` corresponde a um turno que de fato completou (mas isso exige rastrear turnos completados, mais complexo).
+
+A solução (a) é a mais simples e alinhada com o espírito do plano: o estado só é gravado quando a pergunta foi de fato falada.
+
+---
+
+## ACHADO: `detectConfirmation` como chamada MLX inteira sem justificativa de cobertura
+
+EVIDÊNCIA: Plano §4.3, passo 2. `docs/implementation-phase-5b.md` §4 (H11 = 15/20 = 75%, abaixo da meta de 80%).
+
+O plano propõe `detectConfirmation` como uma chamada MLX inteira para decidir SIM/NAO, com "mesmo padrão de três camadas". A Fase 5b estabeleceu que `detect_tool` (3 categorias fechadas) atingiu 75% de cobertura após 6 rodadas de auditoria — abaixo da meta de 80%, com H11 pendente e não bloqueante por decisão explícita do usuário.
+
+O plano da 5c não apresenta nenhum motivo técnico para acreditar que `detectConfirmation` (2 categorias, SIM/NAO) terá cobertura maior que `detect_tool`. Na verdade, a variação coloquial para confirmação/negação em português é extremamente rica ("sim", "pode", "vai", "ok", "beleza", "certamente", "com certeza", "não", "nunca", "jamais", "nem pense", "claro que não", "sai fora", etc.), e o modelo Qwen3-4B-Instruct-2507-4B já demonstrou alucinar respostas quando não reconhece a intenção (5b #6, #8).
+
+Se o padrão de três camadas foi estabelecido na 5b e atingiu 75%, a 5c está reusando confiança que a 5b não estabeleceu. O plano deveria explicitamente reconhecer esse risco e definir um critério de aceite para H-equivalente de cobertura de confirmação.
+
+GRAVIDADE: MÉDIA
+CONFIANÇA: 80%
+ACAO RECOMENDADA:
+(a) Reconhecer explicitamente no plano que `detectConfirmation` é no mínimo tão difícil quanto `detect_tool`, e que a cobertura pode ser similar ou menor.
+(b) Definir critério de aceite numérico para a cobertura de confirmação (ex.: >= 80% em amostra selada, mesmo protocolo de congelamento).
+(c) Considerar se justifica usar `detect_confirmation` como chamada MLX ou se uma abordagem baseada em palavras-chave (como o filtro permissivo) seria suficiente para o caso SIM/NAO, dado que o gate já é a existência do pending.
+
+---
+
+## ACHADO: Parser `AÇÃO|conteúdo` não especificado para `|` dentro do conteúdo
+
+EVIDÊNCIA: Plano §4.1. Formato de saída: `AÇÃO|conteúdo`. O plano diz "Parsing é função pura (mesmo padrão de `parse_tool_output`)" mas não mostra o código.
+
+O `parse_tool_output` da 5b usa um conjunto fechado (`TOOL_NAMES`) e retorna `NENHUMA` se não reconhecer. Aqui, o conteúdo é texto livre, e `|` é um caractere perfeitamente válido em português (ex.: "comprar leite | anotar que o leite acabou").
+
+Se o parser fizer `split('|')` ingênuo, um conteúdo com `|` será truncado. Se fizer `split('|', 1)` (dividir apenas na primeira ocorrência), funciona corretamente.
+
+GRAVIDADE: MÉDIA
+CONFIANÇA: 85%
+ACAO RECOMENDADA: Especificar explicitamente que o parser deve dividir no PRIMEIRO `|` apenas (ex.: `const idx = raw.indexOf('|'); const action = idx === -1 ? raw : raw.slice(0, idx); const content = idx === -1 ? null : raw.slice(idx + 1)`), e que conteúdo vazio ou ausente degrada para `NENHUMA`.
+
+---
+
+## ACHADO: Sem limite de tamanho para `content` extraído pelo LLM
+
+EVIDÊNCIA: Plano §4.1 e §6.1 (`preview(content: string | null): string`).
+
+O plano exemplifica: "Quer que eu crie o lembrete: comprar leite amanhã?" Mas não define nenhum limite para `content`. Se o LLM extrair algo muito longo (ex.: o usuário falou por 20 segundos e o LLM extraiu tudo), a pergunta de confirmação será absurdamente longa para TTS.
+
+Comparando com `VOICE_LIMITS.MAX_TEXT_CHARS = 2000` que existe para geração, não há equivalente para o conteúdo extraído. O plano deveria definir um limite razoável (ex.: 200-300 caracteres) e especificar o que fazer se exceder (truncar? degradar para `NENHUMA`?).
+
+GRAVIDADE: MÉDIA
+CONFIANÇA: 75%
+ACAO RECOMENDADA: Definir `MAX_MUTATION_CONTENT_CHARS` (ex.: 200) em `voiceProtocol.ts`, e no parser ou no `preview()`, truncar ou degradar para `NENHUMA` se exceder.
+
+---
+
+## ACHADO: `selectMutatingToolByAction` citada no pseudocódigo mas nunca definida
+
+EVIDÊNCIA: Plano §6.3: `const tool = selectMutatingToolByAction(mutation.kind, this.mutatingTools);`
+
+Esta função é chamada mas nunca definida. Ela precisa mapear:
+- `LEMBRETE_CRIAR` → instância de `LembreteTool`
+- `LEMBRETE_APAGAR` → instância de `LembreteTool` (MESMA instância, pois tem os dois métodos)
+- `NOTA_CRIAR` → instância de `NotaTool`
+- `NOTA_APAGAR` → instância de `NotaTool` (MESMA instância)
+
+Ou seja, a função precisa extrair o prefixo (`LEMBRETE` ou `NOTA`) da ação e encontrar a ferramenta correspondente. O plano não define isso.
+
+Mesma classe de achado que a rodada 5 da 5b encontrou 6 vezes (pseudocódigo incompleto).
+
+GRAVIDADE: MÉDIA
+CONFIANÇA: 90%
+ACAO RECOMENDADA: Adicionar pseudocódigo para `selectMutatingToolByAction` (ou `selectMutatingToolByKind`), mostrando como mapeia a ação para a ferramenta correta.
+
+---
+
+## ACHADO: Timeout de `detect_confirmation` e `detect_mutation` não especificados em valor nem tratamento
+
+EVIDÊNCIA: Plano §5 menciona `CONFIRMATION_TIMEOUT_MS` e `DETECT_MUTATION_TIMEOUT_MS` em `voiceProtocol.ts`, mas não define valores nem especifica o tratamento de timeout.
+
+Na 5b, o timeout de `detect_tool` foi tema de achado ALTA (matava o worker com SIGKILL). A correção foi: timeout rejeita a Promise sem matar o processo. O plano da 5c deveria seguir explicitamente o mesmo padrão para ambos os novos timeouts.
+
+GRAVIDADE: MÉDIA
+CONFIANÇA: 80%
+ACAO RECOMENDADA:
+(a) Definir valores (ex.: 10_000ms, igual a `DETECT_TOOL_TIMEOUT_MS`).
+(b) Especificar explicitamente que seguem o mesmo padrão de `detect_tool`: rejeição sem SIGKILL.
+(c) Adicionar pseudocódigo em `mlxWorkerEngine.ts` para `detectMutation()` e `detectConfirmation()`.
+
+---
+
+## ACHADO: Ordem de gravação de `pendingMutation` vs síntese da pergunta não especificada
+
+EVIDÊNCIA: Plano §4.3, passo 1: "grava `session.pendingMutation`, sintetiza a pergunta de confirmação".
+
+O plano não especifica se `pendingMutation` é gravado ANTES ou DEPOIS da síntese. Se for ANTES, e a síntese falhar ou o turno for cancelado durante a síntese, o `pendingMutation` fica órfão (relacionado ao ACHADO 1, mas é uma questão de desenho separada).
+
+Se for DEPOIS (após `Promise.allSettled(turn.pendingSynthesis)` e o check `session.activeTurn === turn`), o problema do ACHADO 1 é mitigado.
+
+GRAVIDADE: ALTA
+CONFIANÇA: 85%
+ACAO RECOMENDADA: Especificar explicitamente que `pendingMutation` só é gravado APÓS a síntese da pergunta de confirmação ser completada com sucesso E o turno ainda ser o ativo.
+
+---
+
+## ACHADO: `pendingMutation` não inicializado no construtor de `Session`
+
+EVIDÊNCIA: Plano §4.3 define o campo `PendingMutation`. Código real `sessionManager.ts:160-170` cria o objeto `Session` sem `pendingMutation`.
+
+Se `pendingMutation` for adicionado à interface `Session`, precisa ser inicializado como `null` no construtor. O plano não mostra isso.
+
+GRAVIDADE: BAIXA
+CONFIANÇA: 95%
+ACAO RECOMENDADA: Adicionar `pendingMutation: null` na inicialização do objeto `Session` em `createSession`.
+
+---
+
+## ACHADO: `parse_confirmation_output` mencionado mas sem pseudocódigo
+
+EVIDÊNCIA: Plano §5 menciona `parse_confirmation_output` mas não mostra o pseudocódigo (diferente de `parse_mutation_output` que é mencionado em §4.1 mas também sem código completo).
+
+O plano diz que "formato inesperado degrada para `NAO`" (fail closed), o que é correto. Mas o parser deveria ser especificado para garantir que:
+- "sim", "SIM", "pode", "vai", "ok" → SIM
+- "não", "NAO", "nunca", "cancela" → NAO
+- Formato inesperado → NAO
+
+GRAVIDADE: BAIXA
+CONFIANÇA: 85%
+ACAO RECOMENDADA: Adicionar pseudocódigo para `parse_confirmation_output`, mostrando o fail closed para `NAO`.
+
+---
+
+## Veredito
+
+**REJEITADO**
+
+O plano tem um desenho de arquitetura sólido (três camadas, confirmação de dois turnos, escrita atômica), mas o ACHADO 1 (barge-in órfão de `pendingMutation`) é um defeito de desenho ALTA que pode resultar em mutação executada sem confirmação real — exatamente o que a fase inteira existe para prevenir. Este defeito, se não corrigido agora, se propagará por todas as versões seguintes. Os demais achados (2-9) são de gravidade MÉDIA ou BAIXA e devem ser corrigidos na v2, mas o ACHADO 1 exige reescrita do §4.3 e §6.3 antes de qualquer implementação.
