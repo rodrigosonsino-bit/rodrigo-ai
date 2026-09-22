@@ -1,0 +1,186 @@
+# Auditoria Adversarial — Fase 5c v4
+
+## PARTE A — Verificação da correção central (reuso de `markPlayed()`)
+
+### 1. Extensão de `markPlayed()` herda proteção contra barge-in? **SIM, com ressalva**
+
+**EVIDÊNCIA:** `sessionManager.ts:413-425` (código real atual):
+```ts
+markPlayed(sessionId, token, turnId, text): boolean {
+  const session = this.getAuthorized(sessionId, token);
+  if (!session) return false;
+  this.touch(session);
+  if (turnId !== session.lastTurnId) return false; // ← GUARDA ÚNICA, ANTES de tudo
+  session.history.push({ role: 'assistant', content: text });
+  this.trimHistory(session);
+  return true;
+}
+```
+
+A v4 propõe adicionar **depois** do `return true`? Não — adiciona **antes**, após `this.trimHistory(session)` e antes do `return true`:
+```ts
+  this.trimHistory(session);
+  // BLOCO NOVO:
+  if (session.armedMutation && session.armedMutation.turnId === turnId) {
+    session.pendingMutation = { ... };
+    session.armedMutation = null;
+  }
+  return true;
+```
+
+**Análise do ataque proposto:** O caminho `turnId !== session.lastTurnId` retorna `false` **imediatamente**, antes de tocar em `armedMutation`. `lastTurnId` é atualizado em `submitAudio()` (linha 235) sempre que um novo turno começa — ou seja, no barge-in, já é o turno N+1 antes mesmo da pergunta ser sintetizada. A checagem falha, a promoção nunca acontece. **Proteção herdada corretamente.**
+
+**Ataque: `/played` duplicado (retry de rede)?** Após a primeira chamada, `armedMutation` é setado para `null`. A segunda chamada avalia `session.armedMutation && ...` → `null && ...` → `false`. Não promove novamente. **Seguro.**
+
+**Ataque: cliente reproduz frase diferente do mesmo turno?** A v4 garante turnos de mutação com exatamente uma frase (`sentenceIndex: 0`, ver §6.3). O cliente recebe um único `sentence_audio_ready` com esse `sentenceIndex`, e chama `/played` com o `turnId` do turno inteiro. Não existe "frase diferente do mesmo turno" — é sempre a frase 0. **Seguro.**
+
+**Conclusão:** A correção central está conceitualmente sólida. O achado 1 da rodada 3 está **fechado**.
+
+---
+
+### 2. Quando o cliente real chama `/played` — existe caminho sem reprodução real? **NÃO**
+
+**EVIDÊNCIA:** `src/frontend/voice.ts:328-349` (código real):
+```ts
+await new Promise<void>((resolve) => {
+  const source = this.audioContext!.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(this.audioContext!.destination);
+  this.currentSource = source;
+  source.onended = () => {       // ← resolve SÓ no fim da reprodução
+    this.currentSource = null;
+    resolve();
+  };
+  source.start();
+});
+// ↓↓↓ SÓ executa após onended ↓↓↓
+this.onAssistantText(chunk.text);
+void fetch('/api/voice/session/played', { ... });
+```
+
+O `await` bloqueia até `onended` (fim da reprodução). `/played` é chamado **depois**. Não há `.catch` nem retry no `void fetch` — falha de rede significa que `/played` simplesmente não chega, e `armedMutation` fica órfão (nunca promovido). **Seguro**: achado 1 totalmente fechado.
+
+---
+
+### 3. Turnos de mutação sempre têm exatamente UMA frase? **SIM**
+
+**EVIDÊNCIA:** §6.3, linha 264:
+```ts
+turn.expectedSentences.add(0);
+turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanTextForSpeech(question), 0));
+```
+
+Uma única adição ao `expectedSentences`, uma única síntese, `sentenceIndex: 0`. O TTS gera um arquivo de áudio único. O cliente recebe um único `sentence_audio_ready`. **Sempre uma frase.** Seguro.
+
+---
+
+### 4. `JsonStore.read()` — execução da lógica
+
+**EVIDÊNCIA:** §6.6. Rodando mentalmente contra os 4 casos:
+
+| Entrada | Caminho | Resultado |
+|---|---|---|
+| Arquivo ausente | `readFileSync` lança `ENOENT` | `{items: []}` ✓ |
+| JSON inválido (`{x:}`) | `readFileSync` OK, `JSON.parse` lança | Lança `Error("corrompido (JSON inválido)")` ✓ |
+| JSON válido, sem `items` (`{"foo":1}`) | `JSON.parse` OK, `typeof==object`, `!Array.isArray(items)` | Lança `Error("corrompido (formato inesperado)")` ✓ |
+| Leitura normal | Tudo OK | `{items: [...]} ✓` |
+
+**Conclusão:** Apenas `ENOENT` retorna vazio. JSON inválido e formato inesperado lançam. Achado 2 da rodada 3 **corrigido**.
+
+---
+
+### 5. TTL com `performance.now()` e `>=`
+
+**EVIDÊNCIA:** §6.3, linhas 318-319:
+```ts
+const expired = performance.now() - session.pendingMutation.askedAt >= PENDING_MUTATION_TTL_MS;
+```
+
+- `performance.now()` está disponível em Node.js ≥16 e é monotônico por especificação (imune a ajuste NTP/manual). O projeto roda em Node (TypeScript backend). **Disponível e correto.**
+- `>=` fecha a fronteira: 60.000ms → `60000 >= 60000` → `true` → expirado. O achado 6 da rodada 3 (que apontou ambiguidade do `>`) está **corrigido**.
+
+---
+
+## PARTE B — Auditoria adversarial abrangente
+
+---
+
+**ACHADO: Interface `IMutatingTool` contradiz o pseudocódigo de chamada em §6.3**
+**EVIDÊNCIA:** §6.1 (interface, declarada inalterada):
+```ts
+interface IMutatingTool {
+  preview(content: string | null): string;
+  execute(content: string | null): string;
+```
+§6.3, linha 257:
+```ts
+const question = tool.preview(action, content); // ← 2 argumentos
+```
+§6.3, consumo de `pendingMutation` (não mostrado explicitamente mas implícito em "igual à v3"):
+```ts
+tool.execute(mutation.kind, mutation.content); // ← 2 argumentos
+```
+**GRAVIDADE:** ALTA  
+**CONFIANÇA:** 98%  
+**AÇÃO RECOMENDADA:** Atualizar `IMutatingTool` para `preview(kind: MutationName, content: string | null): string` e `execute(kind: MutationName, content: string | null): string`, e ajustar todas as declarações. Este achado é uma reincidência do achado 3 da rodada 2 (já apontado), declarado "corrigido" na v3 mas não efetivamente corrigido na interface.
+
+---
+
+**ACHADO: `mightHerMutation` declarado "inalterado" mas continua sem especificação**
+**EVIDÊNCIA:** §4.1–4.2: "inalteradas, ver v1/v2/v3". Código real `sessionManager.ts:260` usa `mightBeTemporal` (Fase 5b), não `mightBeMutation`. A v4 introduz um gate novo sem pseudocódigo, regex, normalização ou testes. §7 não menciona `mightBeMutation`.
+**GRAVIDADE:** MÉDIA  
+**CONFIANÇA:** 90%  
+**AÇÃO RECOMENDADA:** Fornecer o algoritmo de `mightBeMutation` (análogo a `mightBeTemporal` em `systemTools.ts`), a lista de palavras/raízes, e testes automatizados em §7. Este achado é reincidência do achado 2 da rodada 2.
+
+---
+
+**ACHADO: Prompt `DETECT_CONFIRMATION_SYSTEM_PROMPT` é autocontraditório**
+**EVIDÊNCIA:** §6.2:
+```
+"Responda em UMA PALAVRA: SIM se a resposta confirma a ação, NAO se nega..."
+"Isso mesmo, pode confirmar -> SIM"  // ← 4 palavras
+"Perfeito, é isso -> SIM"            // ← 3 palavras
+"Na verdade eu quis dizer outra coisa -> NAO" // ← 6 palavras
+```
+O prompt exige "UMA PALAVRA" mas exemplifica com frases de 3–6 palavras. O comportamento do modelo é imprevisível: pode responder "SIM", pode repetir "Isso mesmo, pode confirmar". O `parse_confirmation_output` (referenciado como "inalterado, ver v3 §6.2") não está visível para confirmar que degrada corretamente respostas multi-palavra para `NAO`.
+**GRAVIDADE:** MÉDIA  
+**CONFIANÇA:** 75%  
+**AÇÃO RECOMENDADA:** Reescrever o prompt para pedir "Responda apenas: SIM ou NAO" sem exemplos multi-palavra, ou garantir que `parse_confirmation_output` faz correspondência parcial/semântica (ex.: contém "SIM" → SIM, contém "NAO" → NAO, caso contrário → NAO fail-closed). Mostrar o parser completo.
+
+---
+
+**ACHADO: Mitigação barata para achado 5 (duplicatas por feedback não ouvido) foi rejeitada sem consideração plena**
+**EVIDÊNCIA:** §8: "Decisão: aceitar o risco... fora do escopo combinado... pediria rastrear identidade de pedido entre turnos (deduplicação), uma capacidade nova."
+**GRAVIDADE:** BAIXA  
+**CONFIANÇA:** 70%  
+**AÇÃO RECOMENDADA:** A mitigação rejeitada **não** precisa de "rastreamento entre turnos". Uma verificação trivial no `execute()` da ferramenta — `if (this.lastItem?.content === content) return "já está salvo"` — resolve o pior caso (duplicata idêntica) sem nova arquitetura. Apenas rejeitar conteúdo idêntico ao último item criado/apagado é uma mudança de 3 linhas. Documentar que foi considerado e explicitamente rejeitado (ou adotar a versão trivial).
+
+---
+
+**ACHADO: Chamada a `tool.preview()` sem try/catch isola mal a falha**
+**EVIDÊNCIA:** §6.3, linhas 255-257:
+```ts
+const tool = selectMutatingToolByAction(action, this.mutatingTools);
+if (tool) {
+  const question = tool.preview(action, content); // ← sem try/catch
+```
+Se `preview()` lançar (ex.: `content` em formato inesperado), o erro sobe para o `catch` externo de `runTurn` e emite `{ type: 'error', ... state: 'erro' }`. Funcionalmente seguro (não executa mutação), mas a experiência do usuário é de erro bruto em vez de "não entendi, pode repetir". A Fase 5b usa `try/catch` com `TOOL_FAILURE_TEXT` para a mesma classe de problema (linhas 273-280 do `sessionManager.ts` real).
+**GRAVIDADE:** BAIXA  
+**CONFIANÇA:** 80%  
+**AÇÃO RECOMENDADA:** Envolver `tool.preview()` em try/catch com `MUTATION_FAILURE_TEXT` (já definido em §4.3), espelhando o padrão da Fase 5b.
+
+---
+
+**ACHADO: Estado `armedMutation` não é limpo em `terminate()` (fim de sessão)**
+**EVIDÊNCIA:** §6.3 adiciona `armedMutation` à `Session`, mas `terminate()` (linhas 129-151 do `sessionManager.ts` real) não o limpa explicitamente. Se a sessão expirar (idle timeout) com `armedMutation` armado, e uma **nova** sessão for criada, `armedMutation` é `null` na nova sessão (é um novo objeto `Session`). OK. Mas dentro da **mesma** sessão, se o idle timeout disparar **entre** a pergunta ser feita e o usuário responder, a sessão inteira é destruída. OK. **Sem risco real.**
+**GRAVIDADE:** BAIXA (quase inexistente)  
+**CONFIANÇA:** 60%  
+**AÇÃO RECOMENDADA:** Adicionar `armedMutation: null` na inicialização de `Session` em `createSession` (já feito para `pendingMutation`, não para `armedMutation` no pseudocódigo de §6.3 — omitido). Recomendação cosmética.
+
+---
+
+## Veredito
+
+**APROVADO COM RESSALVAS**
+
+A correção central (reuso de `markPlayed()`) está conceitualmente correta e herda a proteção contra barrge-in de forma legítima — os ataques propostos (barge-in, `/played` duplicado, múltiplas frases) não encontram caminho para promoção indevida. Mas a v4 mantém **dois achados reincorrentes de rodadas anteriores sem correção** (interface `IMutatingTool` contraditória, `mightBeMutation` sem especificação), o que é aceitável apenas se forem tratados como premissas para implementação imediata, não como débito técnico. Os achados novos (prompt contraditório, falta de try/catch) são de baixa gravidade e não bloqueiam a fase.
