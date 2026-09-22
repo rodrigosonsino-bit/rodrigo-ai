@@ -1,0 +1,42 @@
+Você é um auditor adversarial de planos. NÃO confirme nem aprove: encontre o que está errado. Terminar sem achados é resultado suspeito.
+
+CONTEXTO: projeto "Rodrigo AI", orquestrador de voz 100% local (Node+TypeScript ESM, zero dependências de runtime, MLX). O plano é docs/phase-5b-v3.md — leia inteiro, e leia o código real que ele toca.
+
+Esta é a TERCEIRA rodada, e você é um auditor NOVO. As duas anteriores foram feitas pelo Codex CLI (logs em docs/audits/phase-5b-v1-codex-2026-09-21.log e phase-5b-v2-codex-2026-09-21.log). NÃO assuma que os achados dele estavam certos — nesta linha de trabalho vários achados já caíram por verificação independente.
+
+MUDANÇA DE DESENHO QUE VOCÊ PRECISA ATACAR: a v1 estendia o classificador; a v2 criava um comando de detecção no worker; a v3 ABANDONA o modelo por completo no caminho da ferramenta. Detecção por regex de enunciado inteiro, resposta montada em Node e sintetizada direto no TTS, sem chamar classify nem generate. O plano afirma que isso APAGA 12 achados das rodadas anteriores em vez de corrigi-los.
+
+VERIFICAÇÃO POR EXECUÇÃO (obrigatória):
+
+Transcreva o detector da seção 7.3 (normalização, FILLER, HORA_CORE, DATA_CORE, detectTool) para um script e RODE contra os 34 casos da seção 5. Confirme ou derrube o "ERROS: 0 de 34". Depois vá além da amostra do autor: escreva você mesmo 30 frases em português brasileiro que um usuário real diria pedindo hora ou data, e 30 que NÃO são pedido de hora/data atual, e meça falsos negativos e falsos positivos. A amostra do plano foi escolhida pelo próprio autor — é isso que você precisa checar.
+
+ATAQUE ESPECIFICAMENTE:
+
+a) §4.4: o turno de ferramenta NÃO chama o classificador e emite `label: 'GERAL'` por construção. O plano admite que é asserção, não cálculo. Isso é aceitável? Existe enunciado que case um núcleo e que o classificador real chamaria de outra coisa?
+
+b) §7.4: o caminho determinístico empurra a fala no histórico SEM esperar a confirmação `played` do cliente. O plano sinaliza isso como divergência do padrão da Fase 2. Leia sessionManager.ts e diga se isso quebra alguma invariante de barge-in, preempção ou consistência do histórico.
+
+c) §7.4: o bloco é inserido ANTES da chamada a classify e faz `return` no meio de runTurn. Verifique contra o código REAL: o `finally`, a limpeza de `activeTurn`, `pendingSynthesis` e o timer de idle continuam corretos nesse caminho de saída antecipada? O que acontece se o usuário interromper (barge-in) durante a síntese determinística?
+
+d) O plano afirma que o caminho de ferramenta NÃO precisa do bloco VOICE_SAFETY porque não há prompt. Isso é verdade? A frase montada passa por cleanTextForSpeech — verifique o que essa função faz com "São 11 horas e 6 minutos."
+
+e) §4.3 assume que falso negativo é benigno porque "cai no comportamento de hoje". O comportamento de hoje é ALUCINAR a hora. Uma funcionalidade que funciona para alguns fraseados e silenciosamente inventa para outros é pior ou melhor que não ter a funcionalidade? Argumente.
+
+f) G3 fixa o texto exato "São 11 horas e 6 minutos." Verifique se Intl com pt-BR neste Node produz mesmo "11:06" para essa data, e se o split/Number produz esse texto.
+
+g) A lista de arquivos de §6 está completa? Procure consumidores do construtor de SessionManager que o plano não listou.
+
+h) O plano quebra algum teste existente que ele não listou?
+
+FORMATO OBRIGATÓRIO, por problema:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha, ou a saída real do script que você rodou>
+GRAVIDADE: <ALTA | MEDIA | BAIXA>
+CONFIANCA: <0-100%>
+ACAO RECOMENDADA: <o que mudar, concretamente>
+
+No fim:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Não invente arquivo, linha ou símbolo. Se não confirmou, diga "nao verificado".

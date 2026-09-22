@@ -1,0 +1,198 @@
+# Relatório de Auditoria Adversarial — Plano Fase 5b v4 (híbrida)
+
+**Documento Auditado:** [`docs/phase-5b-v4.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md)  
+**Data da Auditoria:** 2026-09-21  
+**Auditor:** Antigravity / Gemini 3.8 Flash (High)  
+**Ambiente de Verificação:** Execução local real contra Node.js, TypeScript e o repositório `rodrigo-ai`.
+
+---
+
+## 1. VERIFICAÇÃO POR EXECUÇÃO
+
+### 1.1 Transcrição de `mightBeTemporal` (§6.5) contra amostras reais e de domínio
+
+Executamos o filtro permissivo `mightBeTemporal` transcrito fielmente de [`docs/phase-5b-v4.md#L321-L331`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L321-L331) contra a amostra do auditor Hermes (`/Users/rodrigosonsino/hermes-workspace/audit-5b-scratch/adversarial.cjs`) e contra perguntas de domínio do projeto.
+
+#### A. Amostra Coloquial de Hermes (`PEDIDOS_HORA_DATA`):
+*Nota:* O script original de Hermes (`adversarial.cjs`) continha 29 frases (linhas 26–54), embora dividisse por `/ 30` na saída.
+- **Resultado:** **28/29 passaram (96.5%)**, **1 FALHA (3.5%)**:
+  - `FAIL` : `"Em que século estamos?"` → `mightBeTemporal` retornou `false`.
+  - **Causa:** O termo `seculo` / `século` não consta no regex `TIME_GATE`.
+
+#### B. Amostra de Domínio (Virtologia / Teologia):
+- **Perguntas sem vocabulário temporal (amostra do autor §4.1):**
+  - `"Explique a Aceitação dentro da Virtologia"` → `false` (0/8 disparos indesejados).
+- **Perguntas reais de domínio com vocabulário temporal comum:**
+  - `"Em que ano foi fundado o Instituto Virtudes?"` → `true` (Dispara `detect_tool`)
+  - `"Qual é a visão da Virtologia hoje em dia?"` → `true` (Dispara `detect_tool`)
+  - `"Como a Virtologia lida com a ansiedade no dia a dia?"` → `true` (Dispara `detect_tool`)
+  - `"O que a Bíblia ensina sobre orar pela manhã?"` → `true` (Dispara `detect_tool`)
+  - `"Quando começou a Reforma Protestante?"` → `true` (Dispara `detect_tool`)
+  - `"Policarpo foi martirizado em que ano?"` → `true` (Dispara `detect_tool`)
+  - `"Como manter a atenção plena agora na Virtologia?"` → `true` (Dispara `detect_tool`)
+  - **Resultado:** **7/8 (87.5%) das perguntas legítimas de domínio disparam o filtro**.
+- **Conclusão:** O "0/8" alegado na §4.1 decorre exclusivamente de uma escolha enviesada de frases sem nenhuma palavra de tempo. Na prática cotidiana, perguntas teológicas e virtológicas disparam `mightBeTemporal` frequentemente, impondo uma inferência extra de MLX antes de classificar e gerar.
+
+---
+
+### 1.2 Teste com 40 frases inéditas (20 menções de tempo sem pedido + 20 pedidos inéditos)
+
+Testamos o comportamento de `mightBeTemporal` em dois conjuntos inéditos elaborados para esta auditoria:
+
+#### A. 20 frases que mencionam tempo mas NÃO pedem hora/data atual:
+```
+1. "A reunião durou mais de uma hora e meia."            -> DEIXA PASSAR (vai pro modelo)
+2. "Espero você às três da tarde."                        -> DEIXA PASSAR (vai pro modelo)
+3. "Ontem à noite choveu muito aqui."                     -> DEIXA PASSAR (vai pro modelo)
+4. "O ano bissexto tem quantos dias?"                    -> DEIXA PASSAR (vai pro modelo)
+5. "Não vejo a hora de viajar de férias."                 -> DEIXA PASSAR (vai pro modelo)
+6. "Deus criou o mundo em quantos dias?"                 -> DEIXA PASSAR (vai pro modelo)
+7. "Vou ao médico amanhã de manhã."                      -> DEIXA PASSAR (vai pro modelo)
+8. "Quantos minutos tem um dia inteiro?"                 -> DEIXA PASSAR (vai pro modelo)
+9. "Aquele relógio antigo da parede parou de funcionar." -> DEIXA PASSAR (vai pro modelo)
+10. "Amanhã à tarde temos compromisso?"                  -> DEIXA PASSAR (vai pro modelo)
+11. "No próximo mês vou mudar de emprego."               -> DEIXA PASSAR (vai pro modelo)
+12. "Semana que vem é feriado nacional?"                 -> DEIXA PASSAR (vai pro modelo)
+13. "Você lembra o que fizemos na noite passada?"        -> DEIXA PASSAR (vai pro modelo)
+14. "Ele demorou quarenta minutos para chegar."          -> DEIXA PASSAR (vai pro modelo)
+15. "Quando você pretende terminar essa tarefa?"         -> DEIXA PASSAR (vai pro modelo)
+16. "Na época de Jesus o templo ainda existia."          -> BARRADO NO FILTRO
+17. "Faz dois anos que moro aqui."                       -> DEIXA PASSAR (vai pro modelo)
+18. "Ele acorda cedo toda manhã para treinar."           -> DEIXA PASSAR (vai pro modelo)
+19. "Hoje em dia as pessoas não têm paciência."          -> DEIXA PASSAR (vai pro modelo)
+20. "O calendário Maia previa o fim do mundo?"           -> DEIXA PASSAR (vai pro modelo)
+```
+- **Taxa de passagem para o modelo:** **19/20 (95%)**.
+- **Impacto:** O filtro é de fato permissivo quando há termos da lista, mas quase qualquer menção temporal paga o pedágio de uma inferência de LLM extra de ~1s.
+
+#### B. 20 frases que PEDEM hora/data atual de formas inéditas:
+```
+1. "Passou das cinco?"                                   -> BARRADO (Falso Negativo Silencioso!)
+2. "Já bateu meio-dia?"                                  -> PASSOU (via 'dia' em 'meio-dia')
+3. "Falta muito pra meia-noite?"                         -> PASSOU (via 'noite' em 'meia-noite')
+4. "Já escureceu aí fora?"                               -> BARRADO (Falso Negativo Silencioso!)
+5. "Quantas são?"                                        -> BARRADO (Falso Negativo Silencioso!)
+6. "Que momento do dia estamos vivendo?"                 -> PASSOU (via 'dia')
+7. "O ponteiro já passou das três?"                      -> BARRADO (Falso Negativo Silencioso!)
+8. "Já deu a hora do almoço?"                            -> PASSOU (via 'hora')
+9. "Ainda estamos de madrugada ou já clareou?"           -> BARRADO (Falso Negativo Silencioso!)
+10. "Estamos em qual trimestre do ano?"                  -> PASSOU (via 'ano')
+11. "Me situa no tempo: que dia é?"                      -> PASSOU (via 'dia')
+12. "Consegue me passar as horas por favor?"             -> PASSOU (via 'horas')
+13. "Já são cinco da tarde?"                             -> PASSOU (via 'tarde')
+14. "Qual o dia letivo de hoje?"                         -> PASSOU (via 'dia', 'hoje')
+15. "Quantas horas temos no momento?"                    -> PASSOU (via 'horas')
+16. "A quantas anda o relógio?"                          -> PASSOU (via 'relogio')
+17. "Passou do meio-dia já?"                             -> PASSOU (via 'dia')
+18. "Ainda é de manhã ou já é de tarde?"                 -> PASSOU (via 'manha', 'tarde')
+19. "Que horas são pelo horário de Brasília?"            -> PASSOU (via 'horas', 'horario')
+20. "Falta quanto pro fim do expediente?"                -> BARRADO (Falso Negativo Silencioso!)
+```
+- **Taxa de passagem:** **14/20 (70%)**.
+- **Falsos Negativos do Filtro:** **6/20 (30%)** pedidos legítimos foram descartados pelo filtro Node antes mesmo de alcançar o modelo. Expressões coloquiais universais em português como `"Quantas são?"` e `"Passou das cinco?"` caem no caminho comum e alucinam.
+
+---
+
+## 2. ACHADOS ADVERSARIAIS
+
+---
+
+ACHADO: Timeout de `detect_tool` mata o worker com SIGKILL e quebra a promessa de fallback ao caminho normal
+EVIDÊNCIA: [`src/backend/voice/mlxWorkerEngine.ts:265-267`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L265-L267) e plano §4.4 + §6.6 ([`docs/phase-5b-v4.md:347-353`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L347-L353))
+GRAVIDADE: ALTA
+CONFIANCA: 100%
+ACAO RECOMENDADA: O plano afirma em §4.4 que se a detecção estourar timeout, o turno segue normalmente pelo caminho da Fase 5a. Porém, se `detectTool` espelhar `classify()`, seu handler de timeout executa `this.child?.kill('SIGKILL')`. Quando o `catch` em `sessionManager.ts:349-353` engole o erro e chama imediatamente `this.engine.classify(...)`, o processo Python acabou de ser morto e está em reinicialização assíncrona. Como `classify()` não aguarda `waitUntilReady()`, ele lança imediatamente `VoiceEngineError('Worker de voz não está disponível.')`, derrubando o turno com erro na interface. O plano precisa remover o fallback ingênuo em caso de timeout/kill ou garantir que o fallback aguarde a prontidão do worker antes de chamar `classify()`.
+
+---
+
+ACHADO: Data leakage metodológico no critério H11 (amostra de teste vazada no prompt)
+EVIDÊNCIA: Comparação entre [`docs/phase-5b-v4.md:212-230`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L212-L230) (`DETECT_TOOL_SYSTEM_PROMPT`) e [`docs/audits/phase-5b-v3-hermes-2026-09-21.log:21-27`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5b-v3-hermes-2026-09-21.log#L21-L27)
+GRAVIDADE: ALTA
+CONFIANCA: 100%
+ACAO RECOMENDADA: H11 exige cobertura ≥ 80% medida contra as frases do auditor Hermes alegando ser uma "amostra que eu não escolhi". Contudo, o autor copiou literalmente os contra-exemplos exatos da auditoria passada ("São que horas?", "Que hora que é?", "Tá que horas?", "Cê sabe que horas são?", "Hoje é que dia?", "Hoje é dia quanto?", "Tá em que mês?") para dentro do `DETECT_TOOL_SYSTEM_PROMPT` como exemplos few-shot. Isso constitui vazamento de dados de teste (data leakage) e overfitting de prompt. H11 deve exigir ≥ 80% sobre uma bateria de frases temporais verdadeiramente inéditas (hold-out set) não presentes no prompt do worker.
+
+---
+
+ACHADO: Omissão de `event === 'error'` e ausência de constante em `VOICE_LIMITS` para `detect_tool`
+EVIDÊNCIA: [`src/backend/voice/mlxWorkerEngine.ts:204-209`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L204-L209) e [`src/shared/voiceProtocol.ts:84-96`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts#L84-L96)
+GRAVIDADE: MEDIA
+CONFIANCA: 100%
+ACAO RECOMENDADA: Na linha 206 de `mlxWorkerEngine.ts`, `if (event === 'error')` cancela o timeout com `if (pending.kind === 'generate' || pending.kind === 'classify') clearTimeout(pending.timeout)`. O pseudocódigo de §6.4 não inclui `pending.kind === 'detect_tool'` nessa cláusula, fazendo com que um evento de erro do worker deixe o timer armado, provocando `SIGKILL` espúrio posteriormente. Além disso, o plano não define `DETECT_TOOL_TIMEOUT_MS` em `VOICE_LIMITS` (`voiceProtocol.ts`), deixando ambíguo qual limite temporal rege a operação.
+
+---
+
+ACHADO: Sequestro semântico e quebra de latência ao fixar `label: 'GERAL'` por construção sobre conjunto aberto (§4.6)
+EVIDÊNCIA: [`docs/phase-5b-v4.md:133-143`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L133-L143) (§4.6) e [`src/backend/voice/sessionManager.ts:368-370`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L368-L370)
+GRAVIDADE: MEDIA
+CONFIANCA: 95%
+ACAO RECOMENDADA: Na v3, o casamento por regex exata garantia que apenas frases de relógio chegassem à ferramenta. Na v4, com conjunto aberto via LLM, qualquer falso positivo do modelo em perguntas teológicas/históricas (ex.: "Na Bíblia, que horas Jesus morreu?", "Em que dia Deus criou o homem?") sequestra o turno, emite `label: 'GERAL'` como `handled: true` e responde com a hora do sistema. Ademais, o fallback declarado em §4.6 ("chamar classify e pular apenas a geração") exige duas chamadas sequenciais ao LLM MLX (uma para detecção e outra para classificação), dobrando o tempo de processamento do turno e violando a premissa de que o caminho de ferramentas seria mais rápido.
+
+---
+
+ACHADO: Referência cruzada quebrada entre §4.6 e seção 7
+EVIDÊNCIA: [`docs/phase-5b-v4.md:136`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L136) cita `H8`, enquanto a seção 7 define `H8` como teste de cancelamento e `H15` como o teste do classificador ([`docs/phase-5b-v4.md:425`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L425) vs [`docs/phase-5b-v4.md:445`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L445))
+GRAVIDADE: BAIXA
+CONFIANCA: 100%
+ACAO RECOMENDADA: Atualizar a citação em §4.6 de `H8` para `H15`.
+
+---
+
+ACHADO: Inexatidão na asserção do critério H5 — Histórico do usuário já foi inserido antes da ferramenta
+EVIDÊNCIA: [`src/backend/voice/sessionManager.ts:250`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L250) e [`docs/phase-5b-v4.md:420`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L420) (H5)
+GRAVIDADE: MEDIA
+CONFIANCA: 100%
+ACAO RECOMENDADA: O critério H5 prescreve: `"e o histórico permanece inalterado até markPlayed"`. Na realidade do código, `sessionManager.ts:250` executa `session.history.push({ role: 'user', content: transcript })` logo após a transcrição e antes da execução da ferramenta. O que permanece fora do histórico até `markPlayed` é estritamente a resposta do assistente (`role: 'assistant'`). Um teste que avalie `history.length === 0` falhará. Corrigir o enunciado de H5 para especificar que apenas a resposta do assistente não é empurrada antes de `markPlayed`.
+
+---
+
+ACHADO: Especificação de `FakeVoiceEngine` em §5 insuficiente para implementar o teste H8
+EVIDÊNCIA: [`docs/phase-5b-v4.md:171`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L171) vs [`src/backend/voice/fakeEngine.ts:28-35`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/fakeEngine.ts#L28-L35) e [`docs/phase-5b-v4.md:425-426`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L425-L426)
+GRAVIDADE: MEDIA
+CONFIANCA: 100%
+ACAO RECOMENDADA: O teste H8 exige reproduzir para `detect_tool` o mesmo teste que a Fase 3 tem para `classify` (cancelamento com prova de que não há timer preso). Em `fakeEngine.ts`, isso só é possível porque existem `classifySettleDelayMs`, `classifyGates` e `releaseClassifyGate`. A lista da §5 limita a alteração de `fakeEngine.ts` a `detectTool() + toolToReturn + detectToolCalls`, omitindo o controle de barreira/gate para `detectTool`. Adicionar ao escopo de `fakeEngine.ts` o controle de barreira para `detectTool`.
+
+---
+
+ACHADO: Falta de especificação do comando de teste em `package.json` e risco de quebra da invariante B2
+EVIDÊNCIA: [`package.json:13`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/package.json#L13) e [`docs/phase-5b-v4.md:175`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L175)
+GRAVIDADE: MEDIA
+CONFIANCA: 100%
+ACAO RECOMENDADA: §5 declara que `package.json` incluirá os testes Python (`scripts/worker/test_tool_parser.py`), mas §6 não apresenta pseudocódigo ou o comando exato. A invariante B2 do projeto determina que `npm test` seja independente do ambiente Python pesado. Invocar `python3` globalmente ou depender do virtualenv de runtime pode quebrar `npm test` em ambientes limpos de CI. O plano deve especificar exatamente a linha a ser inserida em `package.json` mantendo a independência ou condicionando a execução à existência do executável.
+
+---
+
+ACHADO: `HoraAtualTool.execute()` gera concordância gramatical incorreta e fala não-natural
+EVIDÊNCIA: [`docs/phase-5b-v4.md:289-290`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v4.md#L289-L290)
+GRAVIDADE: MEDIA
+CONFIANCA: 100%
+ACAO RECOMENDADA: O código `São ${Number(h)} horas e ${Number(m)} minutos.` gera anomalias em português falado:
+1. Para 01:01 gera `"São 1 horas e 1 minutos."` (deveria ser `"É uma hora e um minuto."`).
+2. Para 11:00 gera `"São 11 horas e 0 minutos."` (deveria ser `"São 11 horas."` ou `"São 11 horas em ponto."`).
+3. Para 12:00 gera `"São 12 horas e 0 minutos."`.
+Isso contradiz o critério H13 ("a fala precisa soar natural"). Ajustar `HoraAtualTool.execute()` para tratar singular/plural e minutos zerados.
+
+---
+
+## 3. RESPOSTAS DIRETAS AOS PONTOS DE ATAQUE
+
+- **a) Pontos tocados por `classify` em `mlxWorkerEngine.ts`:**
+  O plano acertou ao contemplar `cancel()` e a interface `Pending`, mas omitiu a limpeza do timer no tratamento de `event === 'error'` na linha 206 de `mlxWorkerEngine.ts` e não especificou a constante de timeout em `VOICE_LIMITS`.
+- **b) Fallback da detecção no caminho normal (§4.4):**
+  A premissa é falsa. Se `detect_tool` falhar por timeout, o handler mata o processo Python com `SIGKILL`. O fallback imediato para `classify()` tenta escrever em um processo morto e derruba o turno.
+- **c) Pular o classificador e fixar `label: 'GERAL'` (§4.6):**
+  É um defeito sob conjunto aberto. Falsos positivos do detector em perguntas teológicas com elementos temporais sequestram o roteamento para `GERAL`. Além disso, o recuo sugerido dobra o custo de latência de MLX.
+- **d) Histórico e `session.lastTurnId` (§4.5):**
+  `session.lastTurnId` é atribuído em `submitAudio()` (`sessionManager.ts:229`), portanto `markPlayed` funciona corretamente no fluxo feliz. No entanto, o plano erra ao afirmar em H5 que o histórico fica inalterado, pois a pergunta do usuário já foi registrada antes do desvio para a ferramenta.
+- **e) Metodologia de H11:**
+  Metodologicamente nula devido a vazamento de dados: as frases de teste foram injetadas como exemplos no prompt de detecção do modelo.
+- **f) Completude da lista de arquivos (§5):**
+  Faltam a inclusão de `DETECT_TOOL_TIMEOUT_MS` em `src/shared/voiceProtocol.ts`, o suporte a barreira em `src/backend/voice/fakeEngine.ts`, e a definição do comando em `package.json`.
+- **g) Quebra de testes existentes:**
+  Se `package.json` for alterado sem cautela para rodar scripts Python, a invariante B2 da suíte é violada em ambientes sem Python.
+
+---
+
+## VEREDITO
+
+**REJEITADO** — O desenho híbrido da v4 possui vazamento de dados no critério central (exemplos do teste injetados no prompt em H11), o filtro descarta silenciosamente 30% de pedidos coloquiais inéditos antes de consultar o modelo, o fallback de §4.4 sofre falha catastrófica ao tentar chamar `classify()` após um `SIGKILL` de timeout do worker, e a formatação de hora em §6.5 gera fala gramaticalmente incorreta ("São 1 horas e 0 minutos").
+=====AGY_EXIT=0=====

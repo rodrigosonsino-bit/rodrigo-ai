@@ -1,0 +1,39 @@
+Você é um auditor adversarial de planos. NÃO confirme nem aprove: encontre o que está errado.
+
+Esta é a SEGUNDA rodada. A v1 (docs/phase-5b-v1.md) foi REJEITADA por você com 24 achados, 14 ALTA. A v2 está em docs/phase-5b-v2.md. O log da sua auditoria anterior está em docs/audits/phase-5b-v1-codex-2026-09-21.log.
+
+REGRA CRÍTICA: não confie na tabela "achado -> resolução" da seção 1 da v2. Para CADA um dos 12 achados listados, verifique contra o CÓDIGO REAL se a correção resolve e se não introduziu problema novo. Planos que alegam corrigir frequentemente reintroduzem o mesmo defeito de outra forma.
+
+ATENÇÃO — a v2 INVERTEU a decisão central em resposta ao seu achado 4. Agora o classificador não é tocado e existe um comando `detect_tool` separado, atrás de um pré-filtro léxico em Node. Ataque essa nova decisão com a mesma dureza:
+
+a) O pré-filtro `mightBeTemporal` (§6.6) é uma regex. A v2 argumenta que casamento léxico frágil é aceitável aqui porque é só um PORTÃO e o modelo decide atrás dele. Esse argumento se sustenta? Construa fraseados em português que um usuário real diria, pedindo hora ou data, e que a regex NÃO pega — cada um é uma falha silenciosa da funcionalidade.
+
+b) A v2 afirma que o pré-filtro dispara em 7% dos turnos, medido contra os conjuntos de benchmark. Reproduza essa medição. Ela é representativa de conversa real, ou só das 30 perguntas do benchmark?
+
+c) `detect_tool` é uma inferência COMPLETA a mais no caminho crítico do turno, quando dispara. A v2 diz que isso é aceitável. Verifique contra sessionManager.ts e mlxWorkerEngine.ts: essa chamada é cancelável? Interage corretamente com preempção de sessão e com o `spawnGeneration` counter? O que acontece se o usuário interromper durante a detecção?
+
+d) A falha fechada de §4.4 injeta um bloco de proibição. Verifique: existe caminho em que a intenção foi detectada, a execução falhou, e mesmo assim o modelo responde com hora inventada? O bloco de proibição é suficiente num modelo de 4B, ou é a mesma aposta que a §4.4 critica?
+
+e) §1 registra uma DISCORDÂNCIA: a v2 recusa remover a frase "pedidos de ação/ferramenta (ainda não implementados, tratar como GERAL)" do prompt do classificador, argumentando que mudá-la obriga a revalidar a matriz. Esse argumento procede, ou a frase obsoleta vai degradar a classificação de pedidos de ferramenta?
+
+f) Verifique a lista de arquivos de §5 contra o código: está completa? Procure consumidores de `VoiceEngine` e do `SessionManager` que a v2 não listou.
+
+g) G7 exige testar "o caminho real, como voiceRuntime constrói". Isso é praticável em teste, dado que voiceRuntime exige .runtime/ e MLX? O critério como escrito é executável?
+
+h) O plano quebra algum teste existente que não listou?
+
+FORMATO OBRIGATÓRIO, por problema:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha, ou saída real de comando>
+GRAVIDADE: <ALTA | MEDIA | BAIXA>
+CONFIANCA: <0-100%>
+ACAO RECOMENDADA: <o que mudar>
+
+Inclua também:
+STATUS DOS 12 ACHADOS DA V1: para cada um, <RESOLVIDO | PARCIAL | NAO RESOLVIDO | REGREDIU> com justificativa verificada.
+
+No fim:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Não invente arquivo, linha ou símbolo. Se não confirmou, diga "nao verificado".

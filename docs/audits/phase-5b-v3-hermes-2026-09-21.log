@@ -1,0 +1,114 @@
+Aqui está o relatório adversarial completo:
+
+---
+
+# Auditoria phase-5b-v3 — Rodrigo 5b
+
+## VERIFICAÇÃO POR EXECUÇÃO
+
+### Teste 1: 34 casos da seção 5 (detector transcrito fielmente de §7.3)
+
+**Resultado real:** ERROS 0 de 34 ✓ — o mecanismo funciona **exatamente** como o plano afirma para a amostra do autor.
+
+### Teste 2: 30 pedidos reais de hora/data + 30 menções de tempo (AMOSTRA ADVERSÁRIA)
+
+| Métrica | Valor |
+|---|---|
+| Falsos negativos (pedidos reais que o detector errou) | **29/30 = 96.7%** |
+| Falsos positivos (não-pedidos que o detector aceitou) | **0/30 = 0%** |
+
+**Exemplos de falso negativo** (frases que um brasileiro diria, todas rejeitadas):
+- "São que horas?" → NENHUMA
+- "São quantas horas?" → NENHUMA
+- "Que hora que é?" → NENHUMA
+- "Tá que horas?" → NENHUMA
+- "Hoje é que dia?" → NENHUMA
+- "Tá em que mês?" → NENHUMA
+
+O detector só acerta frases **curtas e diretas**; qualquer variação coloquial falha.
+
+### Teste 3: `Intl` pt-BR às 11:06
+
+```
+Intl says: "11:06"
+Resultado: "São 11 horas e 6 minutos."
+Esperado:  "São 11 horas e 6 minutos."
+Igualdade: true ✓
+```
+
+A formatação produz o texto exato.
+
+---
+
+## ACHADOS
+
+---
+
+**ACHADO:** Cobertura efetiva do detector é ~3% para fala real
+**EVIDÊNCIA:** Script `/workspace/audit-5b-scratch/adversarial.cjs`, saída real: 29/30 falsos negativos (96.7%). O detector só aceita frases curtas e diretas; variações coloquiais brasileiras ("São que horas?", "Tá que horas?", "Hoje é que dia?", "Que hora que é?") falham.
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 100% (medido por execução)
+**ACAO RECOMENDADA:** A conclusão do plano "ERROS: 0 de 34" é verdadeira apenas para a amostra enviesada. A cobertura real é insuficiente para o objetivo declarado. É necessário expandir HORA_CORE/DATA_CORE com variações coloquiais reais ou abandonar o casamento-exato-de-enunciado-inteiro e adotar um modelo que generalize (ex.: casamento de substrings com rejeição de qualificadores, como a v2 fazia).
+
+---
+
+**ACHADO:** Tool path não emite `state:ouvindo` — UI fica presa em `falando`
+**EVIDÊNCIA:** `sessionManager.ts:331-337` (pseudocódigo do plano para o tool path) emite apenas `turn_done` e seta `activeTurn=null`. O fluxo normal (`sessionManager.ts:324-325`) emite `turn_done` **e** `state:ouvindo`. Omitir `ouvindo` significa que o cliente SSE nunca recebe a transição de volta.
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 95% (verificado por leitura de código; não executei um cliente SSE)
+**ACAO RECOMENDADA:** Adicionar `this.emit(session, { type: 'state', state: 'ouvindo' });` no tool path após `activeTurn = null`.
+
+---
+
+**ACHADO:** Histórico empurrado sem esperar `played` quebra invariante da Fase 2
+**EVIDÊNCIA:** `sessionManager.ts:332` (tool path) faz `session.history.push(...)` imediatamente. A Fase 2 estabelece em `markPlayed()` (`sessionManager.ts:361-373`) que o texto só entra no histórico após o cliente POST `/api/voice/session/played`. Se o cliente não reproduziu (aba fechada, conexão perdida), o Fase 2 descarta; o Fase 5b mantém. Diverge do padrão explicitamente notado no plano §7.4.
+**GRAVIDADE:** MEDIA
+**CONFIANÇA:** 100% (contradição interna documentada)
+**ACAO RECOMENDADA:** Seguir o invariante da Fase 2: esperar `played` antes de empurrar ao histórico, OU documentar explicitamente que ferramentas determinísticas são exceção a essa invariante, com justificativa de por que a divergência não cria risco (ex.: texto é nosso, curto, sem PII).
+
+---
+
+**ACHADO:** `registerTool()` não existe em `registry.ts` atual — plano depende de código que não está lá
+**EVIDÊNCIA:** `src/shared/extensions/registry.ts:1-118` não possui método `registerTool()`. `getModuleStatuses()` em `registry.ts:103` tem `available: false` hard-coded para o módulo `tools`. O plano §7.2 propõe `registerTool()` e §223 diz que o módulo passa a ter `available: this.tools.length > 0`, mas o pseudocódigo §7.2 não mostra a alteração em `getModuleStatuses()`.
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 100% (grep retornou zero ocorrências de `registerTool`)
+**ACAO RECOMENDADA:** Adicionar `registerTool()` em `registry.ts` **e** alterar `getModuleStatuses()` para usar `this.tools.length > 0` no módulo `tools`. Sem isso, `tools.available` permanece `false` para sempre.
+
+---
+
+**ACHADO:** Referência cruzada errada entre seções — §4.4 cita G8, §8 define G9 para classificação
+**EVIDÊNCIA:** `phase-5b-v3.md:131` diz "G8 reexecuta a classificação sobre **todos** os núcleos". Na seção 8, `G8 = "Suíte completa sem regressão em B1-B8, C1-C6, Fase 4, Fase 5a"` e `G9 = "Todos os núcleos pelo classificador"`. O número correto é G9.
+**GRAVIDADE:** BAIXA
+**CONFIANÇA:** 100%
+**ACAO RECOMENDADA:** Corrigir §4.4 para citar G9.
+
+---
+
+**ACHADO:** Falso negativo NÃO é benigno — ele cria inconsistência de UX que piora o estado atual
+**EVIDÊNCIA:** O plano §4.3 afirma que "o comportamento de hoje: a fase não piora nada". Mas o comportamento de hoje é **inventar a hora**. A v3 faz o sistema acertar "Que horas são?" mas inventar para "São que horas?". Isso é **objetivamente pior** que o estado atual: o usuário vê o sistema acertar em um caso e errar em outro, criando a percepção de que o sistema é inconsistente. Um sistema que inventa em 100% dos casos pelo menos é consistentemente ruim; um sistema que inventa em 96% e acerta em 4% é inconsistente, o que erode mais a confiança.
+**GRAVIDADE:** ALTA
+**CONFIANÇA:** 90% (argumento UX, não medição)
+**ACAO RECOMENDADA:** Rever a declaração de "benigno" em §4.3. Aumentar a cobertura de fraseado (ACHADO 1) mitiga este problema simultaneamente.
+
+---
+
+**ACHADO:** Filelist em §6 lista arquivos que não existem no repositório
+**EVIDÊNCIA:** `find /workspace/rodrigo-5b-audit -name "*.test.*"` retorna zero resultados. O plano lista `src/backend/__tests__/tools.test.ts` e `src/backend/__tests__/extensions.test.ts` como novos, mas não menciona que precisa **criar o diretório `__tests__`**. Além disso, `extensions.test.ts` é listado como "Modificado", não como "Novo".
+**GRAVIDADE:** BAIXA
+**CONFIANÇA:** 100% (diretório não existe)
+**ACAO RECOMENDADA:** Classificar ambos como "Novos" em vez de um como "Modificado".
+
+---
+
+**ACHADO:** Barge-in durante síntese do tool path pode injetar texto não-reproduzido no histórico
+**EVIDÊNCIA:** No tool path, `session.history.push()` ocorre em `sessionManager.ts:332` **após** `await Promise.allSettled(turn.pendingSynthesis)`. Se `cancelTurn()` (linha 380) rodar durante esse await, `activeTurn` vai a null, a síntese aborta via `abortController.abort()`, mas o áudio pode ter sido parcialmente emitido. O texto já está no histórico. No fluxo normal da Fase 2, o texto só é empurrado em `markPlayed()`, que o cliente só chama após a reprodução completa.
+**GRAVIDADE:** MEDIA
+**CONFIANÇA:** 85% (cenário plausível mas não executei um teste de timing)
+**ACAO RECOMENDADA:** Mover o `history.push` para dentro de `markPlayed()` (seguindo o padrão Fase 2) ou, se a divergência for intencional, documentar o risco de texto parcialmente reproduzido no histórico.
+
+---
+
+## VEREDITO
+
+**REJEITADO** — O desenho (regex-exata + resposta determinística) é correto e a implementação do mecanismo provavelmente funciona, mas a cobertura do detector é de ~3% para fala real (29/30 falsos negativos na amostra adversarial), o tool path tem 2 bugs de estado (falta `state:ouvindo`, histórico sem played) e uma dependência (`registerTool` em `registry.ts`) que não existe no código atual. A declaração de "falso negativo benigno" é falsa: a inconsistência de acertar alguns e errar outros é pior que o estado atual de errar tudo. Corrigir apenas a amostra do plano ("ERROS: 0 de 34") não é suficiente para aprovação; o mecanismo precisa de mais variações coloquiais para ser utilizável.
+=====HERMES_EXIT=0=====

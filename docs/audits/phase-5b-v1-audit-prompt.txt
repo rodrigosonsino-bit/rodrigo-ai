@@ -1,0 +1,38 @@
+Você é um auditor adversarial de planos. Sua tarefa NÃO é confirmar nem aprovar: é encontrar o que está errado. Terminar sem achados é resultado suspeito.
+
+CONTEXTO: projeto "Rodrigo AI", orquestrador de voz 100% local (Node+TypeScript ESM, zero dependências de runtime, MLX). Fases 1-5a aceitas, 62 testes. O plano é docs/phase-5b-v1.md — leia inteiro, e leia o código que ele toca.
+
+Esta fase preenche o ponto de extensão ITool com ferramentas de LEITURA sem argumento (hora, data). O escopo foi deliberadamente reduzido pelo dono: nada que mute estado.
+
+HISTÓRICO QUE IMPORTA: a fase anterior (5a) levou 6 rodadas de auditoria e 75 achados. As três primeiras mataram o desenho porque o escopo era grande demais. As duas últimas acharam defeitos de implementação. A sexta, feita sobre o CÓDIGO por um auditor que executava, achou que um teste de propriedade era vácuo e que o código perdia conteúdo em silêncio — coisas que auditoria de plano não pode achar. Tenha isso em mente: procure o que só se vê lendo o plano CONTRA o código real.
+
+ATAQUE ESPECIFICAMENTE:
+
+a) §4.1 decide estender o comando `classify` existente em vez de criar um segundo comando, para não pagar latência. Verifique em scripts/worker/worker.py e em src/backend/voice/ se essa extensão é mesmo barata, e se o parsing proposto em §6.3 está correto contra o código REAL de handle_classify. O plano afirma que max_tokens de 8 para 12 basta — confira quantos tokens o formato "ROTULO|FERRAMENTA" realmente consome no tokenizer deste modelo, ou diga que não verificou.
+
+b) §4.2 admite que o risco central é regressão de classificação. O plano mitiga com um critério de aceite bloqueante. Isso é suficiente, ou o desenho deveria evitar o risco em vez de medi-lo depois?
+
+c) §6.5 substitui duas ramificações de composição de prompt por filter+join e afirma equivalência byte a byte quando não há ferramenta. Verifique contra sessionManager.ts real: a equivalência vale mesmo? Há caso em que knowledgeBlock é vazio e a junção muda o resultado?
+
+d) O plano lista os arquivos modificados em §5. Está completo? Procure consumidores de `classify` que ele não listou — inclusive em testes.
+
+e) G4 exige comparação byte a byte contra "uma string de referência fixada no teste". Isso é praticável, dado que o prompt contém o bloco de conhecimento que depende do corpus? O critério como escrito é verificável?
+
+f) A ferramenta devolve a hora LOCAL. G9 caso 7 ("que horas são na China?") é a única defesa contra a ferramenta responder a pergunta errada. Existem outros fraseados que disparariam HORA e dariam resposta errada? Proponha os que o plano não considerou.
+
+g) §4.5 usa Intl.DateTimeFormat com locale pt-BR. Verifique se o runtime Node deste projeto tem ICU completo — sem isso, pt-BR degrada silenciosamente para inglês. Isso é verificável rodando node.
+
+h) Verifique se o plano quebra algum teste existente que ele não listou.
+
+FORMATO OBRIGATÓRIO, por problema:
+
+ACHADO: <título curto>
+EVIDÊNCIA: <arquivo:linha, ou saída real de comando que você rodou>
+GRAVIDADE: <ALTA | MEDIA | BAIXA>
+CONFIANCA: <0-100%>
+ACAO RECOMENDADA: <o que mudar, concretamente>
+
+No fim:
+VEREDITO: <APROVADO | APROVADO COM RESSALVAS | REJEITADO> — <uma frase>
+
+Não invente arquivo, linha ou símbolo. Se não conseguiu confirmar, diga "nao verificado".
