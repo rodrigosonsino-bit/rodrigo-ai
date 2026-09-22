@@ -1,0 +1,163 @@
+# Relatório de Auditoria Adversarial de Plano — Fase 5c (v2)
+
+**Documento auditado:** [docs/phase-5c-v2.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md)  
+**Data:** 2026-09-22  
+**Auditor:** Antigravity (2ª rodada — substituindo Hermes por rotação)  
+**Base de comparação:** [docs/phase-5c-v1.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v1.md), [docs/audits/phase-5c-v1-hermes-2026-09-22.log](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v1-hermes-2026-09-22.log), [docs/implementation-phase-5b.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/implementation-phase-5b.md) e o código-fonte atual em `src/` e `scripts/worker/worker.py`.
+
+---
+
+## PARTE A — Verificação dos 8 Achados da Rodada 1
+
+### 1 + 2 (ALTA). Gravação de `pendingMutation` e Janela de Barge-in / Cancelamento
+* **Pergunta da auditoria:** A v2 (§6.3) realmente fecha a janela de estado órfão por barge-in? Existe algum outro caminho de cancelamento (timeout de sessão idle, erro no meio da síntese) que a v2 não cobriu?
+* **Análise de Barge-in:** Sim, a janela clássica de barge-in durante a síntese foi fechada. Em [sessionManager.ts:217-220](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L217-L220), `submitAudio` aborta o turno ativo e atribui `session.activeTurn = activeTurn` (o novo turno). Como `session.pendingMutation` só é atribuído se `session.activeTurn === turn` após `await Promise.allSettled(turn.pendingSynthesis)`, a checagem falha e o estado órfão não é gravado.
+* **Ataque — Erro no meio da síntese (TTS):** **VULNERÁVEL (ALTA).** Em [sessionManager.ts:393-400](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L393-L400), `synthesizeSentence` engole qualquer falha do sintetizador num `catch { return; }` sem rejeitar a Promise e sem emitir `sentence_audio_ready`. Com isso, `Promise.allSettled(turn.pendingSynthesis)` resolve com sucesso (`status: 'fulfilled'`), `session.activeTurn === turn` continua verdadeiro e `session.pendingMutation` **é gravado**, emitindo `turn_done`. O usuário **não ouviu nenhuma pergunta** (o áudio falhou), mas o sistema passa a tratar o turno N+1 como confirmação de algo nunca escutado.
+* **Ataque — Timeout de Sessão Idle:** O timeout de 10min limpa a sessão inteira via `terminate()`, mas dentro da janela de 10min o `PendingMutation` não tem TTL nem expiração por timestamp. Se o usuário falar 8 minutos depois sobre outro assunto, a frase será capturada pelo gate de confirmação em vez de processada normalmente.
+
+### 3 (MÉDIA). Camada 0 de Palavra-chave (`keywordConfirmation`, §6.3)
+* **Pergunta da auditoria:** Extrair e rodar contra frases reais em português coloquial. Decide corretamente os casos óbvios? Erra com segurança (`null`) nos casos que deveriam ir para o LLM?
+* **Execução real do algoritmo:**
+  ```ts
+  const CONFIRM_YES = /\b(sim|pode|isso|exato|claro|beleza|confirmo|manda|vai|certo)\b/;
+  const CONFIRM_NO = /\b(nao|não|cancela|deixa|esquece|para|nunca|jamais)\b/;
+  ```
+* **Resultados dos testes executados:**
+  * `"Sim"`, `"Não"`, `"Exato"`, `"Cancela"` → Decide corretamente (`SIM` / `NAO`).
+  * `"Com certeza"`, `"Nem pensar"` → Retorna `null` (cai seguro para o LLM).
+  * **Falsos Positivos Catastróficos (Retornam `SIM` em recusas expressas):**
+    * `"Isso tá errado"` → **`SIM`** (usuário recusou o preview, mas "isso" casou em `CONFIRM_YES`).
+    * `"Isso é mentira"` / `"Isso tá péssimo"` → **`SIM`**.
+    * `"Pode esquecer"` → **`SIM`** (expressão coloquial enfática de recusa; "pode" casou em `CONFIRM_YES` e "esquecer" não casa em "esquece").
+    * `"Vai dar problema"` → **`SIM`** ("vai" como verbo auxiliar casou em `CONFIRM_YES`).
+  * **Falsos Negativos (Retornam `NAO` em aprovações):**
+    * `"Para mim está bom"` → **`NAO`** ("para" é preposição coloquial, mas casou em `CONFIRM_NO`).
+  * **Colisão indevida:**
+    * `"Cancela isso por favor"` → **`null`** (usuário mandou cancelar claramente, mas "isso" colidiu com "cancela", forçando inferência desnecessária no LLM).
+* **Conclusão:** A Camada 0 **NÃO erra com segurança**. Ela introduz mutações indevidas (falso `SIM`) quando o usuário reclama que o texto está errado ou usa verbos auxiliares e pronomes comuns do português.
+
+### 4 + 5 (MÉDIA). `parse_mutation_output` (§4.1)
+* **Pergunta da auditoria:** Extrair e rodar contra conteúdo com `|`, vazio, >200 chars e ação inexistente. Confirma fatiamento?
+* **Execução real do algoritmo em Python:**
+  * `"LEMBRETE_CRIAR|comprar leite | desnatado"` → `('LEMBRETE_CRIAR', 'comprar leite | desnatado')` (OK, preservou o segundo pipe).
+  * `"LEMBRETE_CRIAR|"` / `"LEMBRETE_CRIAR"` → `('NENHUMA', None)` (OK, conteúdo vazio degrada seguro).
+  * `"LEMBRETE_CRIAR|" + "x" * 201` → `('NENHUMA', None)` (OK, teto de 200 chars respeitado).
+  * `"BANANA|comprar leite"` → `('NENHUMA', None)` (OK, ação fora do conjunto fechado degrada).
+  * `"LEMBRETE_APAGAR|comprar leite"` → `('LEMBRETE_APAGAR', None)` (OK, descarta conteúdo para apagar).
+* **Conclusão:** A função pura cumpre integralmente o prometido nos achados 4 e 5.
+
+### 6 (MÉDIA). `selectMutatingToolByAction` (§6.4)
+* **Pergunta da auditoria:** Funciona para `LEMBRETE_*` e `NOTA_*`? E se `kind` for `NENHUMA`? O código chama com `NENHUMA`?
+* **Análise:**
+  * `kind.split('_')[0]` mapeia perfeitamente `LEMBRETE_CRIAR` e `LEMBRETE_APAGAR` para `'LEMBRETE'`, e `NOTA_*` para `'NOTA'`.
+  * Se `kind` for `'NENHUMA'`, resulta em prefixo `'NENHUMA'` e retorna `null`. O código está protegido no Turno N por `if (action !== 'NENHUMA')`.
+  * **Problema novo encontrado:** Se a ferramenta não estiver disponível ou retornar `null`, o Turno N (§6.3, linha 243) chama `tool.preview(content)` sem checar `if (!tool)`, gerando um `TypeError` não tratado que derruba a sessão em `state: 'erro'`.
+
+### 7 (MÉDIA). Timeouts e Padrão "Sem SIGKILL"
+* **Análise:** Ambos definidos como `10_000ms` em §5 e §6.5 (`DETECT_MUTATION_TIMEOUT_MS` e `DETECT_CONFIRMATION_TIMEOUT_MS`). O comportamento sem `SIGKILL` foi explicitado com o mesmo racional da 5b. Resolvido.
+
+### 8 (BAIXA). Inicialização de `pendingMutation` em `Session`
+* **Análise:** O pseudocódigo de `createSession()` em §6.3 (linhas 179-180) agora contém explicitamente `pendingMutation: null`. Resolvido.
+
+### 9 (BAIXA). Pseudocódigo de `parse_confirmation_output`
+* **Análise:** Pseudocódigo completo em §6.2. Degrada para `"NAO"` em formato inesperado (fail-closed). Resolvido. (Observação: `YES_WORDS` e `NO_WORDS` definidos logo acima são código morto em Python, pois o parser só testa `normalized == "SIM"`).
+
+---
+
+## PARTE B — Auditoria Adversarial Abrangente (Problemas Novos e Omissões)
+
+1. **Incoerência de Assinatura da Interface `IMutatingTool` (§6.1 vs §6.4 vs §6.3):**
+   Em §6.4 o plano afirma textualmente: *"cada instância implementa preview()/execute() recebendo o kind completo (LEMBRETE_CRIAR/LEMBRETE_APAGAR) para saber qual das duas ações realizar internamente"*. No entanto, a interface em [phase-5c-v1.md §6.1](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v1.md#L215-L224) (que a v2 diz manter inalterada) define `preview(content: string | null)` e `execute(content: string | null)`, e as chamadas em §6.3 (linhas 218 e 243) **não passam `kind`**. A ferramenta é incapaz de saber se deve criar ou apagar.
+2. **Omissão total de `mightBeMutation`:**
+   O plano cita `mightBeMutation(transcript)` na linha 231 como o gate permissivo da Camada 0, mas **não fornece regex, lista de palavras, normalização nem critérios de teste automatizado em §7**.
+3. **Falta de Injeção de Dependência para o Diretório `data/`:**
+   Em [voiceRuntime.ts:84](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L84) e [voice.test.ts:78](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts#L78), componentes de I/O recebem caminhos parametrizados (`tmpDir`) para garantir isolamento em testes unitários. Se `jsonStore` fixar `data/` na raiz do projeto, `npm test` gravará no diretório real de trabalho, quebrando a arquitetura de testes herméticos do projeto.
+4. **Constantes `MUTATION_FAILURE_TEXT` e `MUTATION_CANCELLED_TEXT` não especificadas:**
+   Citadas como frases fixas determinísticas em §6.3, mas o texto literal nunca é definido, nem exportado em `voiceProtocol.ts` ou `mutatingTools.ts`.
+5. **Omissão de `max_tokens` para `detect_mutation`:**
+   Na 5b, `detect_tool` usava `max_tokens=6` porque a resposta era uma palavra fixa. Para `detect_mutation`, que retorna texto livre até 200 caracteres (~70-80 tokens), o plano v2 omitiu o parâmetro `max_tokens`, arriscando truncamento se o padrão de 6 tokens for copiado.
+
+---
+
+## Achados Consolidados
+
+### ACHADO: Camada 0 de confirmação gera falsos positivos graves com mutação indevida
+EVIDÊNCIA: [docs/phase-5c-v2.md §6.3:183-195](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L183-L195)
+A regex `CONFIRM_YES` contém pronomes e verbos altamente comuns como `isso`, `vai`, `pode` em busca por limite de palavra (`\b`), sem ancoragem no início/fim ou restrição de tamanho. Testes de execução real comprovam que:
+1. `"Isso tá errado"` retorna **`SIM`**, executando a mutação quando o usuário rejeitou explicitamente o preview lido pelo assistente.
+2. `"Pode esquecer"` retorna **`SIM`** (recusa enfática tratada como confirmação).
+3. `"Para mim está bom"` retorna **`NAO`** (a preposição "para" casou na negação).
+GRAVIDADE: ALTA  
+CONFIANCA: 95%  
+ACAO RECOMENDADA: Restringir a Camada 0 a enunciados estritamente curtos (ex.: até 2 ou 3 palavras) e ancorados (`^(sim|não|nao|cancela|confirmo|claro|nunca|jamais)$`), ou remover termos polissêmicos como `isso`, `para`, `vai` e delegar qualquer frase estruturada (> 1 palavra) para a Camada 1 (LLM).
+
+---
+
+### ACHADO: Falha na síntese de áudio (TTS) deixa `pendingMutation` órfão
+EVIDÊNCIA: [docs/phase-5c-v2.md §6.3:247-258](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L247-L258) e [src/backend/voice/sessionManager.ts:393-400](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L393-L400)
+`sessionManager.ts` engole exceções do provedor de TTS com `catch { return; }`. Em caso de erro na síntese da pergunta, `Promise.allSettled(turn.pendingSynthesis)` resolve com sucesso sem emitir `sentence_audio_ready`. O bloco em §6.3 verifica apenas `session.activeTurn === turn` e grava `session.pendingMutation = ...`. O usuário não ouve nada, e a próxima fala é indevidamente tratada como confirmação de uma ação desconhecida.  
+GRAVIDADE: ALTA  
+CONFIANCA: 90%  
+ACAO RECOMENDADA: Condicionar a gravação de `pendingMutation` ao sucesso real da síntese (ex.: verificando se pelo menos uma sentença foi sintetizada com sucesso em `turn`), ou lançar erro se a síntese falhar para que o turno caia no bloco `catch` e não grave `pendingMutation`.
+
+---
+
+### ACHADO: Contradição entre interface `IMutatingTool` e despacho em `selectMutatingToolByAction`
+EVIDÊNCIA: [docs/phase-5c-v2.md §6.4:282-284](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L282-L284) vs [docs/phase-5c-v1.md §6.1:215-224](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v1.md#L215-L224) e [docs/phase-5c-v2.md §6.3:218,243](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L218)
+O §6.4 especifica que as ferramentas recebem o `kind` completo (`LEMBRETE_CRIAR` / `LEMBRETE_APAGAR`) para saber qual operação executar. No entanto, `IMutatingTool` (§6.1) define `preview(content)` e `execute(content)` sem o parâmetro `kind`, e as chamadas no Turno N e N+1 passam apenas `content`. A ferramenta fica sem informação para decidir se cria ou apaga o registro.  
+GRAVIDADE: MEDIA  
+CONFIANCA: 95%  
+ACAO RECOMENDADA: Atualizar `IMutatingTool` para `preview(kind: MutationName, content: string | null): string` e `execute(kind: MutationName, content: string | null): string`, ajustando as invocações em §6.3 para `tool.preview(action, content)` e `tool.execute(mutation.kind, mutation.content)`.
+
+---
+
+### ACHADO: Chamada a `tool.preview` desprotegida contra retorno nulo de `selectMutatingToolByAction`
+EVIDÊNCIA: [docs/phase-5c-v2.md §6.3:242-243](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L242-L243)
+`selectMutatingToolByAction` retorna `IMutatingTool | null` (caso a ferramenta não esteja registrada ou `isAvailable()` retorne falso). No Turno N, o código invoca `tool.preview(content)` diretamente sem verificar `if (!tool)`. Em caso de ferramenta ausente ou indisponível, lança `TypeError: Cannot read properties of null`, derrubando o turno em `state: 'erro'` em vez de degradar com segurança para o caminho normal.  
+GRAVIDADE: MEDIA  
+CONFIANCA: 90%  
+ACAO RECOMENDADA: Adicionar verificação explícita: se `!tool`, abortar o caminho de mutação e seguir para a classificação normal, espelhando a proteção de `selectToolByName` existente na Fase 5b.
+
+---
+
+### ACHADO: Filtro permissivo `mightBeMutation` citado sem especificação nem testes
+EVIDÊNCIA: [docs/phase-5c-v2.md §4.2, §5 e §6.3:231](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L231)
+Ao contrário da Fase 5b (que detalhou a regex `TIME_GATE`, normalização e testes unitários dedicados em `tools.test.ts`), `mightBeMutation` é apenas invocada em `sessionManager.ts` sem ter seu algoritmo, expressões regulares ou vocabulário especificados no plano ou nos critérios de aceite de §7.  
+GRAVIDADE: MEDIA  
+CONFIANCA: 85%  
+ACAO RECOMENDADA: Incluir o pseudocódigo de `mightBeMutation`, a lista fechada de palavras/raízes e critérios de aceite automatizados em §7 (análogos a H1 da 5b).
+
+---
+
+### ACHADO: Ausência de parametrização de diretório para `jsonStore` compromete isolamento de testes
+EVIDÊNCIA: [docs/phase-5c-v2.md §4.5, §5](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L121) e [src/backend/voice/voiceRuntime.ts:84](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L84)
+O plano define que `jsonStore` salvará em `data/` na raiz do projeto. Sem injeção de dependência do diretório base (`baseDir` ou `rootDir`, como feito em `AudioStore`), a execução de testes automatizados com `FakeVoiceEngine` irá ler e modificar arquivos de dados reais do usuário no disco em vez de operar em diretórios temporários (`tmpDir`).  
+GRAVIDADE: BAIXA  
+CONFIANCA: 90%  
+ACAO RECOMENDADA: Projetar `jsonStore` e as classes `LembreteTool` / `NotaTool` para receberem `dataDir: string` (com valor padrão apontando para `data/` sob `rootDir`), permitindo que testes injetem diretórios isolados gerados com `fs.mkdtempSync`.
+
+---
+
+### ACHADO: Constantes `MUTATION_FAILURE_TEXT` e `MUTATION_CANCELLED_TEXT` não especificadas
+EVIDÊNCIA: [docs/phase-5c-v2.md §6.3:220, 223](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L220)
+O pseudocódigo utiliza essas duas variáveis como frases determinísticas para resposta por áudio, mas os textos exatos não foram definidos no plano nem listados nos arquivos afetados (§5). Na Fase 5b, omissões dessa classe foram marcadas como pseudocódigo incompleto.  
+GRAVIDADE: BAIXA  
+CONFIANCA: 95%  
+ACAO RECOMENDADA: Definir os literais em `voiceProtocol.ts` (ex.: `"Não consegui salvar a alteração agora."` e `"Ação cancelada."`) e incluir testes unitários conferindo seu conteúdo.
+
+---
+
+### ACHADO: Falta de especificação de `max_tokens` para `detect_mutation` no worker
+EVIDÊNCIA: [docs/phase-5c-v2.md §6.2](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v2.md#L148)
+`handle_detect_tool` operava com `max_tokens=6`. A tarefa `detect_mutation` precisa emitir a ação e o conteúdo livre do usuário fatiado em até 200 caracteres (`MAX_MUTATION_CONTENT_CHARS`), demandando cerca de 60 a 80 tokens. A v2 não especificou o parâmetro `max_tokens` na chamada de geração do worker.  
+GRAVIDADE: BAIXA  
+CONFIANCA: 85%  
+ACAO RECOMENDADA: Especificar explicitamente no plano que `handle_detect_mutation` deve chamar `stream_generate` com `max_tokens=80` (ou valor compatível com `MAX_MUTATION_CONTENT_CHARS`).
+
+---
+
+## Veredito
+
+**REJEITADO**
+
+A v2 fechou com sucesso a janela de cancelamento por barge-in, mas introduziu uma Camada 0 de palavras-chave que executa mutações indevidas perante recusas expressas do usuário (como *"Isso tá errado"* e *"Pode esquecer"*), mantém uma janela de estado órfão caso a síntese TTS falhe silenciosamente, e contém contradição direta entre a interface `IMutatingTool` e sua estratégia de despacho.
