@@ -1,4 +1,4 @@
-import type { ConversationMessage, OrchestratorLabel } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 
 export interface GenerateCallbacks {
   onSentence: (text: string, index: number) => void;
@@ -21,6 +21,13 @@ export interface VoiceEngine {
    * tem especialista real ainda — é decisão + transparência, não roteamento de verdade.
    */
   classify(turnId: string, epoch: number, text: string): Promise<OrchestratorLabel>;
+  /**
+   * Fase 5b: decide se o texto pede uma ferramenta do sistema (HORA/DATA) ou nenhuma.
+   * Nunca lança por "não reconheci a intenção" — isso é NENHUMA, não erro (ver
+   * parse_tool_output, §4.9). Só rejeita por falha real do motor (timeout, worker
+   * indisponível) — mesma semântica de classify().
+   */
+  detectTool(turnId: string, epoch: number, text: string): Promise<ToolName>;
   /**
    * Gera a resposta de um turno. Resolve quando a geração termina (ou é cancelada).
    * Frases completas são emitidas incrementalmente via callbacks.onSentence.

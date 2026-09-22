@@ -38,4 +38,54 @@ describe('Pontos de Extensão e Registro Modular (Fase 1)', () => {
     assert.equal(knowledge?.available, false);
     assert.equal(knowledge?.phase, 5);
   });
+
+  it('Fase 5b (H9): registra ferramentas, reflete no status de forma idempotente e responde a reset', () => {
+    const registry = ExtensionRegistry.getInstance();
+    registry.resetForTesting();
+
+    const horaTool = {
+      name: 'HORA',
+      description: 'Hora atual do relógio do sistema.',
+      isAvailable: () => true,
+      execute: () => 'São 10 horas em ponto.'
+    };
+    const dataTool = {
+      name: 'DATA',
+      description: 'Data atual do sistema.',
+      isAvailable: () => true,
+      execute: () => 'Hoje é segunda-feira.'
+    };
+
+    registry.registerTool(horaTool);
+    registry.registerTool(dataTool);
+    // Idempotência por name:
+    registry.registerTool({ ...horaTool, description: 'Duplicata ignorada' });
+
+    assert.equal(registry.getTools().length, 2);
+    assert.deepEqual(
+      registry.getTools().map((t) => t.name),
+      ['HORA', 'DATA']
+    );
+
+    const statuses = registry.getModuleStatuses();
+    const tools = statuses.find((s) => s.id === 'tools');
+    assert.equal(tools?.available, true);
+    assert.equal(tools?.phase, 5);
+    assert.equal(
+      tools?.description,
+      '2 ferramentas ativas: HORA, DATA.'
+    );
+
+    // resetForTesting zera ferramentas e volta available para false
+    registry.resetForTesting();
+    assert.equal(registry.getTools().length, 0);
+
+    const statusesAfterReset = registry.getModuleStatuses();
+    const toolsAfterReset = statusesAfterReset.find((s) => s.id === 'tools');
+    assert.equal(toolsAfterReset?.available, false);
+    assert.equal(
+      toolsAfterReset?.description,
+      'Nenhuma ferramenta conectada — depende do runtime de voz (rode "npm run setup:voice").'
+    );
+  });
 });

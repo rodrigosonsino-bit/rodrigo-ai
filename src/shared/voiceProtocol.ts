@@ -8,6 +8,13 @@ export type VoiceState = 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | '
 /** Fase 3 — rótulo de classificação de intenção. Nenhum tem especialista real ainda (Fase 4). */
 export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'AMBIGUO';
 
+/** Fase 5b — nomes de ferramentas suportadas pelo sistema e detecção. */
+export const TOOL_NAMES = ['HORA', 'DATA', 'NENHUMA'] as const;
+export type ToolName = (typeof TOOL_NAMES)[number];
+export function isToolName(v: unknown): v is ToolName {
+  return typeof v === 'string' && (TOOL_NAMES as readonly string[]).includes(v);
+}
+
 export interface StateEvent {
   type: 'state';
   state: VoiceState;
@@ -90,6 +97,7 @@ export const VOICE_LIMITS = {
   MAX_CONTEXT_TOKENS: 4096,
   TURN_TIMEOUT_MS: 60_000,
   CLASSIFY_TIMEOUT_MS: 10_000,
+  DETECT_TOOL_TIMEOUT_MS: 10_000,
   WARMUP_TIMEOUT_MS: 120_000,
   IDLE_TIMEOUT_MS: 10 * 60_000,
   WORKER_SHUTDOWN_GRACE_MS: 3_000

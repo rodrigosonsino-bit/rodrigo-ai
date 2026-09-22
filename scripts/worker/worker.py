@@ -60,6 +60,49 @@ CLASSIFICATION_SYSTEM_PROMPT = (
     "- 'Explique o conceito de Aceitação nesse método' -> VIRTOLOGIA (pede o conceito técnico).\n"
     "- 'Preciso de mais aceitação da minha família' -> GERAL (sentimento cotidiano, não pede o conceito)."
 )
+TOOL_NAMES = {"HORA", "DATA", "NENHUMA"}
+
+DETECT_TOOL_SYSTEM_PROMPT = (
+    "Você decide se a frase do usuário pede a HORA atual, a DATA de hoje, ou NENHUMA das duas. "
+    "Responda com UMA ÚNICA PALAVRA, sem pontuação, sem explicação: HORA, DATA ou NENHUMA.\n"
+    "HORA: o usuário quer saber que horas são agora, neste lugar. Vale para qualquer jeito de "
+    "perguntar, inclusive coloquial: 'que horas vocês têm aí', 'alguém sabe as horas', "
+    "'dá pra ver que horas são', 'tô sem relógio, que horas são', 'me diz as horas', "
+    "'preciso saber a hora certa agora'.\n"
+    "DATA: o usuário quer saber que dia é hoje, o dia da semana, o mês ou o ano atuais. Também "
+    "vale coloquial: 'em que dia da semana estamos', 'qual a data de hoje', 'que dia do mês é "
+    "hoje', 'estamos em que ano', 'me diz que dia é hoje', 'qual o dia certo hoje'.\n"
+    "NENHUMA: todo o resto. Isso INCLUI perguntas sobre tempo que não são a hora ou a data de "
+    "agora aqui: hora em outro fuso ou país, datas passadas ou futuras, quanto tempo falta para "
+    "algo, duração, aniversário, feriado, horário de funcionamento, ou qualquer cálculo com datas "
+    "— e também perguntas de outro assunto que apenas mencionam uma palavra de tempo de "
+    "passagem.\n"
+    "Exemplos:\n"
+    "Que horas vocês têm aí? -> HORA\n"
+    "Alguém sabe as horas? -> HORA\n"
+    "Dá pra ver que horas são? -> HORA\n"
+    "Tô sem relógio, que horas são? -> HORA\n"
+    "Em que dia da semana estamos? -> DATA\n"
+    "Qual a data de hoje? -> DATA\n"
+    "Estamos em que mês mesmo? -> DATA\n"
+    "Que horas são em Lisboa agora? -> NENHUMA\n"
+    "Em que dia da semana caiu o Natal do ano passado? -> NENHUMA\n"
+    "Quanto tempo dura uma consulta médica? -> NENHUMA\n"
+    "A que horas abre a padaria? -> NENHUMA\n"
+    "Fale sobre o significado da graça na vida cristã. -> NENHUMA\n"
+)
+
+
+def parse_tool_output(raw: str) -> str:
+    """Função PURA — testada em scripts/worker/test_tool_parser.py.
+
+    Formato inválido degrada para NENHUMA: não reconhecer intenção deve custar a ferramenta,
+    nunca o turno (ao contrário do classificador, onde formato inválido é erro).
+    """
+    normalized = (raw or "").strip().upper().strip(".!? \n")
+    return normalized if normalized in TOOL_NAMES else "NENHUMA"
+
+
 STT_MODEL_ID = "mlx-community/whisper-small-mlx"
 MAX_TURN_TOKENS = 160
 
@@ -311,6 +354,54 @@ class Worker:
             if self._mx is not None:
                 self._mx.clear_cache()
 
+    def handle_detect_tool(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        turn_id = msg["turnId"]
+        epoch = msg["epoch"]
+        text = msg["text"]
+
+        if not text or not text.strip():
+            emit({"event": "tool_detection", "reqId": req_id, "turnId": turn_id, "tool": "NENHUMA"})
+            return
+
+        handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
+        with self._current_lock:
+            self._current = handle
+
+        try:
+            messages = [
+                {"role": "system", "content": DETECT_TOOL_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ]
+            prompt = self._llm_tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
+            )
+
+            from mlx_lm.generate import stream_generate
+            from mlx_lm.sample_utils import make_sampler
+
+            sampler = make_sampler(temp=0.0)
+            raw = ""
+            for response in stream_generate(
+                self._llm, self._llm_tokenizer, prompt, max_tokens=6, sampler=sampler
+            ):
+                if handle.cancel_event.is_set():
+                    log_diag(f"Detecção de ferramenta cancelada pelo worker (turnId={turn_id}).")
+                    return
+                raw += response.text
+
+            tool = parse_tool_output(raw)
+            emit({"event": "tool_detection", "reqId": req_id, "turnId": turn_id, "tool": tool})
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na detecção de ferramenta: {exc}\n{traceback.format_exc()}")
+            emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar ferramenta."})
+        finally:
+            with self._current_lock:
+                if self._current is handle:
+                    self._current = None
+            if self._mx is not None:
+                self._mx.clear_cache()
+
     def handle_generate(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
         turn_id = msg["turnId"]
@@ -433,6 +524,8 @@ class Worker:
                     self.handle_transcribe(msg)
                 elif cmd == "classify":
                     self.handle_classify(msg)
+                elif cmd == "detect_tool":
+                    self.handle_detect_tool(msg)
                 elif cmd == "generate":
                     self.handle_generate(msg)
             except Exception as exc:  # noqa: BLE001
@@ -457,7 +550,7 @@ class Worker:
                 self.handle_cancel(msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
-            elif cmd in ("transcribe", "classify", "generate"):
+            elif cmd in ("transcribe", "classify", "generate", "detect_tool"):
                 # Fila de tamanho 1: se algo estiver esperando (não deveria, pois o Node só
                 # envia um novo comando após cancelar o anterior), descarta o mais antigo.
                 try:

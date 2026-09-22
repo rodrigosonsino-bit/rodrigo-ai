@@ -1,7 +1,12 @@
-import type { ConversationMessage, OrchestratorLabel } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, VoiceEngine } from './engine.js';
 
 interface ClassifyGate {
+  resolve: () => void;
+  timer: NodeJS.Timeout | null;
+}
+
+interface DetectToolGate {
   resolve: () => void;
   timer: NodeJS.Timeout | null;
 }
@@ -14,6 +19,7 @@ export class FakeVoiceEngine implements VoiceEngine {
   public transcribeCalls: string[] = [];
   public generateCalls: Array<{ turnId: string; epoch: number; messages: ConversationMessage[] }> = [];
   public classifyCalls: Array<{ turnId: string; text: string }> = [];
+  public detectToolCalls: Array<{ turnId: string; text: string }> = [];
   public cancelledTurnIds: string[] = [];
   public shutdownCalled = false;
 
@@ -32,6 +38,10 @@ export class FakeVoiceEngine implements VoiceEngine {
    */
   public classifySettleDelayMs = 0;
   private classifyGates = new Map<string, ClassifyGate>();
+
+  public toolToReturn: ToolName = 'NENHUMA';
+  public detectToolSettleDelayMs = 0;
+  private detectToolGates = new Map<string, DetectToolGate>();
 
   isReadySync(): boolean {
     return true;
@@ -78,6 +88,38 @@ export class FakeVoiceEngine implements VoiceEngine {
     return this.classifyGates.has(turnId);
   }
 
+  async detectTool(turnId: string, epoch: number, text: string): Promise<ToolName> {
+    this.detectToolCalls.push({ turnId, text });
+
+    await new Promise<void>((resolve) => {
+      let timer: NodeJS.Timeout | null = null;
+      if (this.detectToolSettleDelayMs > 0) {
+        timer = setTimeout(resolve, this.detectToolSettleDelayMs);
+      }
+      this.detectToolGates.set(turnId, { resolve, timer });
+      if (this.detectToolSettleDelayMs === 0) resolve();
+    });
+
+    this.detectToolGates.delete(turnId);
+    if (this.cancelledSet.has(turnId)) {
+      throw new Error(`Detecção de ferramenta do turno ${turnId} cancelada.`);
+    }
+    return this.toolToReturn;
+  }
+
+  /** Libera manualmente uma detecção travada em detectToolSettleDelayMs alto (sem cancelar). */
+  releaseDetectToolGate(turnId: string): void {
+    const gate = this.detectToolGates.get(turnId);
+    if (!gate) return;
+    if (gate.timer) clearTimeout(gate.timer);
+    this.detectToolGates.delete(turnId);
+    gate.resolve();
+  }
+
+  isDetectToolPending(turnId: string): boolean {
+    return this.detectToolGates.has(turnId);
+  }
+
   async generate(
     turnId: string,
     epoch: number,
@@ -104,13 +146,21 @@ export class FakeVoiceEngine implements VoiceEngine {
     this.cancelledSet.add(turnId);
     this.cancelledTurnIds.push(turnId);
 
-    // Achado v2-3 da auditoria: limpar o timer do gate (não só resolvê-lo) — sem isso,
-    // um classifySettleDelayMs alto deixa um setTimeout vazando no runner de testes.
-    const gate = this.classifyGates.get(turnId);
-    if (gate) {
-      if (gate.timer) clearTimeout(gate.timer);
+    // Bloco já existente (fakeEngine.ts:107-114), para classifyGates — inalterado:
+    const classifyGate = this.classifyGates.get(turnId);
+    if (classifyGate) {
+      if (classifyGate.timer) clearTimeout(classifyGate.timer);
       this.classifyGates.delete(turnId);
-      gate.resolve();
+      classifyGate.resolve();
+    }
+
+    // Achado 2 (ALTA) da rodada 5 — o mesmo bloco, repetido para detectToolGates. Sem isto,
+    // isDetectToolPending(turnId) continua true depois de cancel(), e H8 falha.
+    const detectToolGate = this.detectToolGates.get(turnId);
+    if (detectToolGate) {
+      if (detectToolGate.timer) clearTimeout(detectToolGate.timer);
+      this.detectToolGates.delete(turnId);
+      detectToolGate.resolve();
     }
   }
 

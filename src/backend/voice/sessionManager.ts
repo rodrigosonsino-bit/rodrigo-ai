@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
+import type { ITool } from '../../shared/extensions/tools.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
 import type { ConversationMessage, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
+import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { AudioStore } from './audioStore.js';
 import type { VoiceEngine } from './engine.js';
 import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
@@ -86,6 +88,8 @@ export class SessionManager {
   private readonly agents: readonly IAgent[];
   /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
   private readonly retriever: KnowledgeRetriever | null;
+  /** Fase 5b: ferramentas do sistema registradas. */
+  private readonly tools: readonly ITool[];
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -96,13 +100,15 @@ export class SessionManager {
     ttsProvider: IVoiceProvider,
     audioStore: AudioStore,
     agents: readonly IAgent[],
-    retriever: KnowledgeRetriever | null = null
+    retriever: KnowledgeRetriever | null = null,
+    tools: readonly ITool[] = []
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
     this.audioStore = audioStore;
     this.agents = agents;
     this.retriever = retriever;
+    this.tools = tools;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -249,6 +255,52 @@ export class SessionManager {
       this.emit(session, { type: 'transcript', turnId: turn.turnId, text: transcript });
       session.history.push({ role: 'user', content: transcript });
       this.trimHistory(session);
+
+      // Fase 5b: três camadas — filtro permissivo, modelo decide, código responde.
+      if (this.tools.length > 0 && mightBeTemporal(transcript)) {
+        let detected = 'NENHUMA';
+        try {
+          detected = await this.engine.detectTool(turn.turnId, turn.epoch, transcript);
+        } catch (err) {
+          // §4.4: a intenção nunca foi estabelecida — cair no caminho normal é o correto.
+          detected = 'NENHUMA';
+          console.error('[tool] detecção falhou, seguindo pelo caminho normal:', err);
+        }
+        if (session.activeTurn !== turn) return; // cancelado durante a detecção
+
+        const tool = selectToolByName(detected, this.tools);
+        if (tool) {
+          let text: string;
+          try {
+            text = tool.execute();
+          } catch (err) {
+            // §4.3: falha FECHADA e determinística — o modelo não volta ao caminho.
+            text = TOOL_FAILURE_TEXT;
+            console.error('[tool] execução falhou:', err);
+          }
+          console.log(`[tool] turno=${turn.turnId} ferramenta=${tool.name}`);
+
+          this.emit(session, {
+            type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true
+          });
+          this.emit(session, { type: 'state', state: 'falando' });
+
+          const clean = cleanTextForSpeech(text);
+          turn.expectedSentences.add(0);
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0));
+          await Promise.allSettled(turn.pendingSynthesis);
+
+          // Encerramento IDÊNTICO ao do caminho normal (sessionManager.ts:323-326).
+          // O histórico NÃO é tocado aqui: entra por markPlayed(), quando o cliente
+          // confirma a reprodução — mesma invariante que protege o barge-in na Fase 2.
+          if (session.activeTurn === turn) {
+            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+            this.emit(session, { type: 'state', state: 'ouvindo' });
+            session.activeTurn = null;
+          }
+          return;
+        }
+      }
 
       // Fase 3: classifica ANTES de "falando" — o estado continua "processando" durante
       // a classificação (ordem fixada na auditoria, Achado 4). Cancelamento nesta janela

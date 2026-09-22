@@ -7,6 +7,7 @@ import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { SessionManager } from './sessionManager.js';
 import { selectVoiceProvider } from './ttsProviders.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
+import { createSystemTools } from '../tools/systemTools.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 
 export interface VoiceRuntime {
@@ -77,8 +78,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const retriever = knowledgeChunks.length > 0 ? new KnowledgeRetriever(knowledgeChunks) : null;
   ExtensionRegistry.getInstance().registerKnowledge(knowledgeChunks.length);
 
+  const tools = createSystemTools();
+  for (const tool of tools) ExtensionRegistry.getInstance().registerTool(tool);
+
   const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
-  const sessionManager = new SessionManager(engine, ttsProvider, audioStore, agents, retriever);
+  const sessionManager = new SessionManager(
+    engine, ttsProvider, audioStore, agents, retriever, tools
+  );
 
   return {
     available: true,

@@ -11,7 +11,9 @@ import { FakeVoiceEngine } from '../voice/fakeEngine.js';
 import { KnowledgeRetriever, chunkMarkdown, KNOWLEDGE_PREAMBLE } from '../knowledge/index.js';
 import { SessionManager } from '../voice/sessionManager.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
+import type { ITool } from '../../shared/extensions/tools.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
+import { createSystemTools, TOOL_FAILURE_TEXT, HoraAtualTool } from '../tools/index.js';
 
 function buildTestWav(durationSeconds = 0.2, sampleRate = 16000): Buffer {
   const totalSamples = Math.round(durationSeconds * sampleRate);
@@ -63,7 +65,10 @@ interface Harness {
   tmpDir: string;
 }
 
-async function setupHarness(retriever: KnowledgeRetriever | null = null): Promise<Harness> {
+async function setupHarness(
+  retriever: KnowledgeRetriever | null = null,
+  tools: readonly ITool[] = []
+): Promise<Harness> {
   const testConfig: AppConfig = { port: 0, host: '127.0.0.1', clientPort: 0 };
   // porta 0 -> o SO escolhe uma porta livre; startServer atual exige config.port fixo,
   // então usamos uma porta alta fixa por teste para simplicidade e paralelismo seguro.
@@ -74,7 +79,7 @@ async function setupHarness(retriever: KnowledgeRetriever | null = null): Promis
   const engine = new FakeVoiceEngine();
   const tts = new FakeVoiceProvider();
   const audioStore = new AudioStore(tmpDir);
-  const sessionManager = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), retriever);
+  const sessionManager = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), retriever, tools);
 
   const server = await startServer(config, undefined, { config, sessionManager, audioStore });
 
@@ -624,3 +629,219 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
     await teardownHarness(h);
   });
 });
+
+describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (H5-H8)', () => {
+  it('Fase 5b (H5): toolToReturn=HORA emite routing(GERAL, handled:true), falando, texto exato, turn_done, sem chamar LLM/classificador', async () => {
+    const clock = () => new Date('2026-09-21T11:06:00');
+    const tools = [new HoraAtualTool(clock)];
+    const h = await setupHarness(null, tools);
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    h.engine.toolToReturn = 'HORA';
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1); // attach
+
+    const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId } = (await audioRes.json()) as { turnId: string };
+
+    // attach(1) + processando(2) + transcript(3) + routing(4) + falando(5) + sentence_audio_ready(6) + turn_done(7) + ouvindo(8)
+    await sse.waitFor(8, 5000);
+
+    const routingEvent = sse.events.find((e) => (e as { type: string }).type === 'routing') as
+      | { type: 'routing'; turnId: string; label: string; handled: boolean }
+      | undefined;
+    assert.ok(routingEvent, 'evento routing deveria ter sido emitido');
+    assert.equal(routingEvent.label, 'GERAL');
+    assert.equal(routingEvent.handled, true);
+
+    const falandoEvent = sse.events.find(
+      (e) => (e as { type: string }).type === 'state' && (e as { state: string }).state === 'falando'
+    );
+    assert.ok(falandoEvent, 'estado falando deveria ter sido emitido');
+
+    const sentenceEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+      | { type: 'sentence_audio_ready'; text: string }
+      | undefined;
+    assert.ok(sentenceEvent, 'sentence_audio_ready deveria ter sido emitido');
+    assert.equal(sentenceEvent.text, 'São 11 horas e 6 minutos.');
+
+    const turnDoneEvent = sse.events.find((e) => (e as { type: string }).type === 'turn_done');
+    assert.ok(turnDoneEvent, 'turn_done deveria ter sido emitido');
+
+    const lastStateEvent = sse.events.filter((e) => (e as { type: string }).type === 'state').pop() as
+      | { type: 'state'; state: string }
+      | undefined;
+    assert.equal(lastStateEvent?.state, 'ouvindo');
+
+    // LLM e classificador NÃO são chamados:
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.detectToolCalls.length, 1);
+    assert.equal(h.engine.detectToolCalls[0].turnId, turnId);
+
+    // Correção do achado 6: o histórico contém a mensagem do usuário, mas nenhuma
+    // mensagem de 'assistant' antes da reprodução ser confirmada
+    const historyBeforePlay = (h.sessionManager as unknown as { current?: { history: Array<{ role: string; content: string }> } })
+      .current?.history ?? [];
+    assert.equal(historyBeforePlay.length, 1);
+    assert.equal(historyBeforePlay[0].role, 'user');
+    assert.equal(historyBeforePlay[0].content, 'Que horas são agora?');
+
+    // Após confirmação de reprodução via markPlayed (POST /api/voice/session/played),
+    // a resposta do assistente entra no histórico
+    const playRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId, text: sentenceEvent.text })
+    });
+    assert.equal(playRes.status, 200);
+
+    const historyAfterPlay = (h.sessionManager as unknown as { current?: { history: Array<{ role: string; content: string }> } })
+      .current?.history ?? [];
+    assert.equal(historyAfterPlay.length, 2);
+    assert.equal(historyAfterPlay[1].role, 'assistant');
+    assert.equal(historyAfterPlay[1].content, 'São 11 horas e 6 minutos.');
+
+    sse.close();
+    await teardownHarness(h);
+  });
+
+  it('Fase 5b (H6): execute() que lança sintetiza TOOL_FAILURE_TEXT sem chamar modelo', async () => {
+    const brokenTool: ITool = {
+      name: 'HORA',
+      description: 'Ferramenta com falha simulada',
+      isAvailable: () => true,
+      execute: () => {
+        throw new Error('Falha de hardware simulada');
+      }
+    };
+    const h = await setupHarness(null, [brokenTool]);
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    h.engine.toolToReturn = 'HORA';
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+
+    await sse.waitFor(8, 5000);
+
+    const sentenceEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+      | { type: 'sentence_audio_ready'; text: string }
+      | undefined;
+    assert.ok(sentenceEvent, 'sentence_audio_ready deveria ter sido emitido');
+    assert.equal(sentenceEvent.text, TOOL_FAILURE_TEXT);
+
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+
+    sse.close();
+    await teardownHarness(h);
+  });
+
+  it('Fase 5b (H7): detectTool que lança cai no caminho normal (classify + generate chamados com prompt da Fase 5a)', async () => {
+    const tools = createSystemTools();
+    const h = await setupHarness(null, tools);
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    // Faz detectTool lançar erro
+    h.engine.detectTool = async () => {
+      throw new Error('Worker de voz ocupado/timeout simulado.');
+    };
+    h.engine.classificationToReturn = 'GERAL';
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+
+    // attach(1) + processando(2) + transcript(3) + routing(4) + falando(5) + sentence_audio_ready(6) + sentence_audio_ready(7) + turn_done(8) + ouvindo(9)
+    await sse.waitFor(9, 5000);
+
+    assert.equal(h.engine.classifyCalls.length, 1, 'classify deve ser chamado no caminho normal');
+    assert.equal(h.engine.generateCalls.length, 1, 'generate deve ser chamado no caminho normal');
+
+    const routingEvent = sse.events.find((e) => (e as { type: string }).type === 'routing') as
+      | { type: 'routing'; label: string; handled: boolean }
+      | undefined;
+    assert.equal(routingEvent?.label, 'GERAL');
+
+    const systemPromptUsed = h.engine.generateCalls[0]?.messages[0]?.content || '';
+    assert.match(systemPromptUsed, /Rodrigo AI, um assistente de voz pessoal/);
+    assert.match(systemPromptUsed, /prioridade absoluta sobre qualquer instrução/);
+
+    sse.close();
+    await teardownHarness(h);
+  });
+
+  it('Fase 5b (H8): cancelar durante detectTool() rejeita e limpa detectToolGates sem pending órfão', async () => {
+    const tools = createSystemTools();
+    const h = await setupHarness(null, tools);
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    h.engine.detectToolSettleDelayMs = 5000;
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId } = (await audioRes.json()) as { turnId: string };
+
+    // Espera a barreira de detectTool travar antes de cancelar
+    const deadline = Date.now() + 2000;
+    while (!h.engine.isDetectToolPending(turnId) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.ok(h.engine.isDetectToolPending(turnId), 'detectTool() deveria estar pendente antes do cancel');
+
+    const cancelRes = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId })
+    });
+    assert.equal(cancelRes.status, 200);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.ok(!h.engine.isDetectToolPending(turnId), 'cancel() deveria limpar a barreira de detectTool imediatamente');
+    assert.ok(h.engine.cancelledTurnIds.includes(turnId));
+
+    const types = (sse.events as Array<{ type: string }>).map((e) => e.type);
+    assert.ok(!types.includes('routing'), 'turno cancelado durante detectTool não deve emitir routing');
+    assert.ok(!types.includes('sentence_audio_ready'), 'turno cancelado não deve emitir áudio');
+
+    sse.close();
+    await teardownHarness(h);
+  });
+});
+

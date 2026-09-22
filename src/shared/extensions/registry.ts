@@ -54,6 +54,15 @@ export class ExtensionRegistry {
     return this.tools;
   }
 
+  /**
+   * Fase 5b: registra ferramentas do sistema.
+   * Idempotente por name — registrar a mesma ferramenta duas vezes não duplica.
+   */
+  public registerTool(tool: ITool): void {
+    if (this.tools.some((t) => t.name === tool.name)) return;
+    this.tools.push(tool);
+  }
+
   /** Fase 5a: registra quantos trechos de referência foram carregados. */
   public registerKnowledge(chunkCount: number): void {
     this.knowledgeChunkCount = chunkCount;
@@ -100,8 +109,11 @@ export class ExtensionRegistry {
         id: 'tools',
         name: 'Ferramentas do Sistema',
         phase: 5,
-        available: false,
-        description: 'Integrações e ferramentas operacionais não habilitadas nesta fase (previsto para Fase 5).'
+        available: this.tools.length > 0,
+        description:
+          this.tools.length > 0
+            ? `${this.tools.length} ferramentas ativas: ${this.tools.map((t) => t.name).join(', ')}.`
+            : 'Nenhuma ferramenta conectada — depende do runtime de voz (rode "npm run setup:voice").'
       }
       ,{
         id: 'knowledge',

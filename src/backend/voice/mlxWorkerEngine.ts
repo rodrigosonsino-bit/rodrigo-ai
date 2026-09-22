@@ -1,8 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import type { ConversationMessage, OrchestratorLabel } from '../../shared/voiceProtocol.js';
-import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import { isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, VoiceEngine } from './engine.js';
 import { VoiceEngineError } from './engine.js';
 
@@ -40,7 +40,16 @@ interface PendingClassify {
   spawnGeneration: number;
 }
 
-type Pending = PendingTranscribe | PendingGenerate | PendingClassify;
+interface PendingDetectTool {
+  kind: 'detect_tool';
+  turnId: string;
+  resolve: (tool: ToolName) => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
+type Pending = PendingTranscribe | PendingGenerate | PendingClassify | PendingDetectTool;
 
 let reqCounter = 0;
 function nextReqId(): string {
@@ -128,10 +137,7 @@ export class MlxWorkerEngine implements VoiceEngine {
 
   private failAllPending(err: Error): void {
     for (const [, pending] of this.pending) {
-      // Achado v2-2 da auditoria: limpar o timer também para 'classify', não só 'generate'
-      // — sem isso, o timeout de uma classificação pendente continua armado à toa depois
-      // que o worker já morreu e a Promise já foi rejeitada aqui embaixo.
-      if (pending.kind === 'generate' || pending.kind === 'classify') {
+      if (pending.kind === 'generate' || pending.kind === 'classify' || pending.kind === 'detect_tool') {
         clearTimeout(pending.timeout);
       }
       pending.reject(err);
@@ -201,9 +207,18 @@ export class MlxWorkerEngine implements VoiceEngine {
       return;
     }
 
+    if (event === 'tool_detection' && pending.kind === 'detect_tool') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      pending.resolve(isToolName(msg.tool) ? (msg.tool as ToolName) : 'NENHUMA');
+      return;
+    }
+
     if (event === 'error') {
       this.pending.delete(reqId);
-      if (pending.kind === 'generate' || pending.kind === 'classify') clearTimeout(pending.timeout);
+      if (pending.kind === 'generate' || pending.kind === 'classify' || pending.kind === 'detect_tool') {
+        clearTimeout(pending.timeout);
+      }
       pending.reject(new VoiceEngineError((msg.message as string) || 'Erro desconhecido no worker de voz.'));
       return;
     }
@@ -282,6 +297,38 @@ export class MlxWorkerEngine implements VoiceEngine {
     });
   }
 
+  async detectTool(turnId: string, epoch: number, text: string): Promise<ToolName> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(reqId);
+        reject(
+          new VoiceEngineError(
+            `Detecção de ferramenta do turno ${turnId} excedeu ${VOICE_LIMITS.DETECT_TOOL_TIMEOUT_MS}ms.`
+          )
+        );
+        // Achado 1 (ALTA) da 4ª rodada: ao contrário de classify()/generate(), este timeout
+        // NÃO mata o worker. detect_tool é uma decisão auxiliar e descartável — a §4.4 exige
+        // que o worker continue utilizável imediatamente depois, para o classify() do caminho
+        // normal rodar em seguida. Se o worker estiver de fato travado (não só lento nesta
+        // troca), o classify() seguinte vai, ele sim, estourar CLASSIFY_TIMEOUT_MS e disparar
+        // o kill-e-reinício catastrófico já auditado — duplicá-lo aqui derrubaria o próprio
+        // fallback que esta função existe para viabilizar.
+      }, VOICE_LIMITS.DETECT_TOOL_TIMEOUT_MS);
+
+      this.pending.set(reqId, { kind: 'detect_tool', turnId, resolve, reject, timeout, spawnGeneration });
+
+      try {
+        this.writeCommand({ cmd: 'detect_tool', reqId, turnId, epoch, text });
+      } catch (err) {
+        clearTimeout(timeout);
+        this.pending.delete(reqId);
+        reject(err as Error);
+      }
+    });
+  }
+
   async generate(
     turnId: string,
     epoch: number,
@@ -326,8 +373,8 @@ export class MlxWorkerEngine implements VoiceEngine {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
 
-      if (pending.kind === 'classify') {
-        pending.reject(new VoiceEngineError(`Classificação do turno ${turnId} cancelada.`));
+      if (pending.kind === 'classify' || pending.kind === 'detect_tool') {
+        pending.reject(new VoiceEngineError(`Operação do turno ${turnId} cancelada.`));
       } else {
         pending.resolve(); // generate() cancelado: não é erro, o chamador já abandonou o turno
       }
