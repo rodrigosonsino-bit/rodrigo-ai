@@ -1,0 +1,193 @@
+{
+  "date": "2026-09-22T18:30:18.029Z",
+  "sample": "docs/audits/phase-5b-v5-h11-sample-2026-09-22.md",
+  "total": 20,
+  "correctCount": 15,
+  "coveragePct": 75,
+  "threshold": 80,
+  "passed": false,
+  "results": [
+    {
+      "n": 1,
+      "text": "Que horas são?",
+      "expected": "HORA",
+      "transcript": "Que horas são?",
+      "response": "São 15 horas e 29 minutos.",
+      "detected": "HORA",
+      "correct": true
+    },
+    {
+      "n": 2,
+      "text": "Qual é a data de hoje?",
+      "expected": "DATA",
+      "transcript": "Qual é a data de hoje?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 3,
+      "text": "Me fala a hora aí?",
+      "expected": "HORA",
+      "transcript": "Me fala agora aí?",
+      "response": "É um prazer! A data de hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "NENHUMA",
+      "correct": false
+    },
+    {
+      "n": 4,
+      "text": "Hoje é dia quanto?",
+      "expected": "DATA",
+      "transcript": "Hoje é dia quanto?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 5,
+      "text": "Tá marcando quanto agora?",
+      "expected": "HORA",
+      "transcript": "Está marcando quanto agora?",
+      "response": "São 15 horas e 29 minutos.",
+      "detected": "HORA",
+      "correct": true
+    },
+    {
+      "n": 6,
+      "text": "Já passou do meio-dia?",
+      "expected": "HORA",
+      "transcript": "Já passou do meio-dia?",
+      "response": "Sim, já passou do meio-dia.",
+      "detected": "NENHUMA",
+      "correct": false
+    },
+    {
+      "n": 7,
+      "text": "Em que dia a gente tá mesmo?",
+      "expected": "DATA",
+      "transcript": "E que dia a gente está mesmo?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 8,
+      "text": "Ainda é cedo ou já tá ficando tarde?",
+      "expected": "HORA",
+      "transcript": "Ainda é cedo ou já tá ficando tarde?",
+      "response": "Já tá ficando tarde.",
+      "detected": "NENHUMA",
+      "correct": false
+    },
+    {
+      "n": 9,
+      "text": "Hoje caiu em qual dia do mês?",
+      "expected": "DATA",
+      "transcript": "Hoje cai um e igual dia do mês?",
+      "response": "Não, hoje não cai um e igual dia do mês. É o 22 de setembro.",
+      "detected": "NENHUMA",
+      "correct": false
+    },
+    {
+      "n": 10,
+      "text": "A gente já chegou no dia vinte e dois?",
+      "expected": "DATA",
+      "ambiguous": true,
+      "transcript": "A gente já chegou no dia 22?",
+      "response": "Sim, já chegamos no dia 22.",
+      "detected": "NENHUMA",
+      "correct": false
+    },
+    {
+      "n": 11,
+      "text": "Tô meio perdido aqui, você consegue me dizer que horas tá dando agora?",
+      "expected": "HORA",
+      "transcript": "Perto o meio perdido aqui, você consegue me dizer que hora está dando agora?",
+      "response": "São 15 horas e 29 minutos.",
+      "detected": "HORA",
+      "correct": true
+    },
+    {
+      "n": 12,
+      "text": "Eu tava preenchendo um negócio aqui e esqueci, qual é a data de hoje mesmo?",
+      "expected": "DATA",
+      "transcript": "Eu tava preenchendo um negócio aqui e esqueci, qual é a data de hoje mesmo?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 13,
+      "text": "Nossa, parece que esse dia não acaba… quanto tá dando no relógio?",
+      "expected": "HORA",
+      "transcript": "Nossa, parece que esse dia não acaba, quanto tá dando no relógio?",
+      "response": "São 15 horas e 29 minutos.",
+      "detected": "HORA",
+      "correct": true
+    },
+    {
+      "n": 14,
+      "text": "Preciso colocar a data aqui antes de mandar isso, hoje é quanto?",
+      "expected": "DATA",
+      "transcript": "Preciso colocar a data aqui antes de mandar isso. Hoje é quanto?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 15,
+      "text": "Tô organizando meus compromissos e me embananei todo, em que dia nós estamos?",
+      "expected": "DATA",
+      "transcript": "Estou organizando meus compromissos e me envananei todo, e que dia nós estamos?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 16,
+      "text": "Ô, vê pra mim quanto é que tá dando aí?",
+      "expected": "HORA",
+      "ambiguous": true,
+      "transcript": "Ou, vê pra mim quanto é que tá dando aí?",
+      "response": "São 15 horas e 29 minutos.",
+      "detected": "HORA",
+      "correct": true
+    },
+    {
+      "n": 17,
+      "text": "Mano, hoje é dia quanto mesmo?",
+      "expected": "DATA",
+      "transcript": "Mano, hoje é dia quanto mesmo?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 18,
+      "text": "Eita, já são quantas?",
+      "expected": "HORA",
+      "transcript": "Eita, já são o quantas?",
+      "response": "São 15 horas e 29 minutos.",
+      "detected": "HORA",
+      "correct": true
+    },
+    {
+      "n": 19,
+      "text": "Rapaz, nós tá em que dia hoje?",
+      "expected": "DATA",
+      "transcript": "Rapaz, nós tá aqui dia hoje?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    },
+    {
+      "n": 20,
+      "text": "Peraí, hoje é vinte e dois já ou eu tô viajando?",
+      "expected": "DATA",
+      "transcript": "E hoje é 22 já ou eu tô viajando?",
+      "response": "Hoje é terça-feira, 22 de setembro de 2026.",
+      "detected": "DATA",
+      "correct": true
+    }
+  ]
+}
