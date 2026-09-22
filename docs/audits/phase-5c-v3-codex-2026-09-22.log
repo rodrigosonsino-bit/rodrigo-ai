@@ -1,0 +1,83 @@
+Auditei a v3 contra v1/v2, os dois logs, a arquitetura da 5b e o código atual. A skill exigiu três pareceres independentes; os três convergiram no bloqueio principal.
+
+Dos oito achados da rodada 2:
+
+- Corrigidos: whitelist exata, interface com `kind`, guardas contra `null`, especificação de `MUTATION_GATE`, `baseDir` obrigatório e `max_tokens=96`.
+- Parcialmente corrigido: falha de TTS não cria mais pending, mas emissão SSE ainda é confundida com entrega real.
+- Não corrigido: textos literais de falha e cancelamento continuam ausentes.
+
+ACHADO: `delivered === true` não comprova que o usuário ouviu a pergunta  
+EVIDÊNCIA: [phase-5c-v3.md:289](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:289>) retorna `true` depois de sintetizar e chamar `emit`. No código real, [sessionManager.ts:114](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts:114>) descarta silenciosamente o evento quando não há SSE e não observa o resultado de `write`. Mesmo com SSE, o frontend ainda precisa receber, baixar, decodificar e reproduzir o áudio ([voice.ts:299](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts:299>)). Só depois da reprodução ele envia `/played` ([voice.ts:342](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts:342>)). Portanto, sim: `delivered` pode ser `true` com cliente desconectado, falha de download/decode ou áudio não reproduzido.  
+GRAVIDADE: ALTA  
+CONFIANCA: 99%  
+ACAO RECOMENDADA: Manter a mutação em estado preparatório, vinculada a `turnId` e `audioId`, e promovê-la a `pendingMutation` somente após ACK autenticado de reprodução. Registrar `askedAt` nesse ACK e testar SSE ausente/fechado, desconexão, falha de playback, barge-in e ACK obsoleto.
+
+ACHADO: `JsonStore.read()` pode transformar corrupção em perda destrutiva  
+EVIDÊNCIA: [phase-5c-v3.md:333](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:333>) captura qualquer erro e retorna `{ items: [] }`. JSON inválido, erro de permissão ou falha de I/O seriam tratados como arquivo vazio; a mutação seguinte poderia sobrescrever os dados existentes. A escrita atômica não evita essa perda lógica. As instâncias `lembretes.json` e `notas.json` não compartilham estado nem apresentam corrida entre si; este é o risco real.  
+GRAVIDADE: ALTA  
+CONFIANCA: 96%  
+ACAO RECOMENDADA: Tratar somente `ENOENT` como armazenamento vazio; validar o schema lido e propagar corrupção e demais erros, bloqueando qualquer escrita enquanto o arquivo estiver ilegível.
+
+ACHADO: Prompts finais ainda são apenas rascunhos com placeholders  
+EVIDÊNCIA: A v3 declara os prompts inalterados e remete à v2 ([phase-5c-v3.md:163](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:163>)); a v2 remete à v1; e a v1 chama explicitamente a seção de “rascunho” e contém `# exemplos NOVOS aqui` ([phase-5c-v1.md:229](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v1.md:229>)). Não existe texto integral para auditar ou congelar.  
+GRAVIDADE: MEDIA  
+CONFIANCA: 98%  
+ACAO RECOMENDADA: Especificar integralmente os prompts finais de detecção e confirmação, incluindo exemplos e formato, antes de congelar a amostra de validação.
+
+ACHADO: Critérios de cobertura não têm limiar de aprovação  
+EVIDÊNCIA: [phase-5c-v3.md:372](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:372>) apenas exige um “H-equivalente”, sem tamanho da amostra, denominador end-to-end, limiar ou tolerância de falsos positivos. A 5b exigia explicitamente pelo menos 80% ([phase-5b-v5.md:707](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5b-v5.md:707>)) e terminou não aprovada com 75% ([implementation-phase-5b.md:68](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/implementation-phase-5b.md:68>)).  
+GRAVIDADE: MEDIA  
+CONFIANCA: 97%  
+ACAO RECOMENDADA: Fixar antes da amostra metas separadas para detecção de mutação e confirmação, avaliação end-to-end com áudio/STT e tolerância zero para falso `SIM` que execute mutação.
+
+ACHADO: Falha de feedback depois da mutação pode induzir repetição destrutiva  
+EVIDÊNCIA: [phase-5c-v3.md:220](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:220>) executa a mutação antes de “falar `text`”, herdando o caminho cujo TTS engole falhas em [sessionManager.ts:393](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts:393>). Se o sucesso não for ouvido, o usuário pode repetir uma criação ou apagar novamente, agora removendo outro item.  
+GRAVIDADE: MEDIA  
+CONFIANCA: 91%  
+ACAO RECOMENDADA: Especificar feedback pós-commit confiável e idempotência por identificador de mutação; no mínimo, expor resultado textual persistente e testar falha de TTS/playback após `execute()`.
+
+ACHADO: TTL usa relógio civil e começa cedo demais  
+EVIDÊNCIA: [phase-5c-v3.md:121](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:121>) usa `Date.now()` e inicia o prazo na emissão, não na reprodução. Mudança de fuso não altera epoch, mas ajuste NTP/manual para trás prolonga o pending e salto à frente o expira antecipadamente. Com `>`, exatamente 60.000 ms ainda é aceito.  
+GRAVIDADE: MEDIA  
+CONFIANCA: 92%  
+ACAO RECOMENDADA: Iniciar o TTL no ACK de reprodução, usar relógio monotônico injetável e testar 59.999/60.000/60.001 ms e saltos do relógio.
+
+ACHADO: Textos literais declarados continuam sem definição  
+EVIDÊNCIA: [phase-5c-v3.md:155](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:155>) afirma que os textos são literais, mas [phase-5c-v3.md:224](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:224>) apenas referencia `MUTATION_FAILURE_TEXT` e `MUTATION_CANCELLED_TEXT`; nenhum valor é fornecido. Logo o achado 7 da rodada 2 não foi corrigido.  
+GRAVIDADE: BAIXA  
+CONFIANCA: 99%  
+ACAO RECOMENDADA: Definir os dois valores exatos e verificá-los em testes.
+
+ACHADO: Whitelist exata é segura, mas transfere expressões comuns demais ao LLM  
+EVIDÊNCIA: Execução isolada da lógica de [phase-5c-v3.md:87](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:87>):
+
+```text
+"Isso tá errado"         => null
+"Pode esquecer"          => null
+"Para mim está bom"      => null
+"Cancela isso por favor" => null
+"Sim"                    => SIM
+"Não"                    => NAO
+"Cancela"                => NAO
+"Claro"                  => SIM
+"beleza"                 => null
+"pode sim"               => null
+"tá bom"                 => null
+"manda ver"              => null
+"não, obrigado"          => null
+"melhor não"             => null
+"de jeito nenhum"        => null
+```
+
+Os casos adicionais foram somente um ensaio mínimo pedido, não uma amostra de cobertura. A mudança fecha o falso positivo destrutivo da v2, mas aumenta latência e dependência da camada que ainda não tem meta comprovada.  
+GRAVIDADE: BAIXA  
+CONFIANCA: 96%  
+ACAO RECOMENDADA: Não ampliar agora com frases vistas nesta auditoria. Medir posteriormente com amostra independente congelada e só então ajustar a whitelist.
+
+ACHADO: `max_tokens=96` é estimativa, não garantia contra truncamento válido  
+EVIDÊNCIA: [phase-5c-v3.md:55](</Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v3.md:55>) justifica 96 tokens por aproximação. Conteúdo de até 200 caracteres com tokenização desfavorável pode ser truncado e ainda resultar em `AÇÃO|conteúdo` sintaticamente aceito.  
+GRAVIDADE: BAIXA  
+CONFIANCA: 86%  
+ACAO RECOMENDADA: Usar margem baseada no pior caso e um terminador/formato que permita detectar truncamento, degradando para `NENHUMA`.
+
+VEREDITO: REJEITADO — a v3 ainda permite armar uma mutação pendente sem prova de que a pergunta foi reproduzida, violando a garantia central de confirmação falada.
