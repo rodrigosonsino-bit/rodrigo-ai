@@ -1,0 +1,29 @@
+Verifiquei os 6 achados contra o plano v6 (`docs/phase-5b-v6.md`) e contra os arquivos de código-fonte reais no workspace. Aqui está o veredito para cada item:
+
+---
+
+**Item 1: CORRIGIDO**
+A seção 6.2 do plano v6 mostra explicitamente o pseudocódigo corrigido de `stdin_reader_loop()` (linhas 169-176), com a tupla `("transcribe", "classify", "generate", "detect_tool")`. O código real atual (`worker.py:460`) continua sem `"detect_tool"` — exatamente como o achado descreveu. O plano especifica a correção correta: adicionar `"detect_tool"` à tupla para que o comando entre na fila em vez de cair no `else` de "comando desconhecido" (`worker.py:472`).
+
+**Item 2: CORRIGIDO**
+A seção 6.8 do plano v6 mostra o corpo completo de `cancel()` (linhas 226-247) com a limpeza de `detectToolGates`, usando exatamente o mesmo padrão do bloco já existente para `classifyGates` (get do mapa, `clearTimeout` se timer existir, `delete` do mapa, `resolve`). O código real atual (`fakeEngine.ts:103-115`) não tem `detectToolGates` nem o tipo `DetectToolGate` — esperado, pois o plano apenas especifica. A correção resolve o problema: sem ela, `isDetectToolPending(turnId)` continuaria `true` após `cancel()`.
+
+**Item 3: CORRIGIDO**
+A seção 6.9 do plano v6 mostra o pseudocódigo completo de `getModuleStatuses()` (linhas 250-277), com o módulo `tools` agora derivando `available: this.tools.length > 0` — mesmo padrão exato dos módulos `voice` (`this.voiceProviders.length > 0`) e `agents` (`this.agents.length > 0`). O código real atual (`registry.ts:99-105`) ainda tem `available: false` fixo — esperado. A correção é consistente.
+
+**Item 4: CORRIGIDO**
+A seção 6.10 do plano v6 mostra a assinatura completa de `detectTool(turnId: string, epoch: number, text: string): Promise<ToolName>` na interface `VoiceEngine` (linhas 284-306), com documentação explicando a semântica (nunca lança por "não reconheci", só por falha real). É consistente com os outros métodos da interface e com as implementações já especificadas para `MlxWorkerEngine` (§6.4) e `FakeVoiceEngine` (§6.8). O código real atual (`engine.ts:13-37`) não tem `detectTool()` — esperado.
+
+**Item 5: CORRIGIDO**
+A seção 6.4 do plano v6 (linhas 200-207) agora contém uma nota explícita afirmando que cada um dos quatro trechos (`PendingDetectTool`, `failAllPending()`, `handleLine()`, `detectTool()`, `cancel()`) é uma **modificação** do código atual, não uma descrição do estado atual. Deixa claro que `failAllPending()` hoje (`mlxWorkerEngine.ts:129-140`) não tem `detect_tool` na cláusula de `clearTimeout` — o bloco mostrado é a versão corrigida a ser aplicada.
+
+**Item 6: CORRIGIDO**
+A seção 6.2 do plano v6 (linhas 184-196) documenta explicitamente as duas decisões deliberadas de paridade com `handle_classify()`: (1) verificar `cancel_event` **dentro** do loop de `stream_generate`, não antes de iniciar a geração (decisão herdada, desperdício de um ciclo no pior caso, não bug); (2) não emitir evento `cancelled` quando `cancel_event` interrompe o loop (o Node resolve/rejeita localmente, o evento seria cosmético).
+
+---
+
+**VEREDITO: APROVADO**
+
+Os 6 achados da rodada 5 foram corrigidos no plano v6. Todos os problemas eram de completude de pseudocódigo, não de decisão de desenho, e as correções são consistentes com o código atual do workspace e entre si.
+
+**Observação lateral (não bloqueante):** O plano menciona em §6.10 que `import type { ToolName } from '../../shared/voiceProtocol.js';` seria acrescentado ao topo de `engine.ts`, junto de `ConversationMessage` e `OrchestratorLabel` já importados. O código real de `engine.ts` importa esses dois tipos de `voiceProtocol.js`, então o acréscimo é coerente. Além disso, o plano referencia `registerTool()` como nova função em `registry.ts` (§6.9), mas o código real atual não possui tal função — apenas `registerAgent()` e `registerVoiceProvider()`. Isso é esperado (o plano especifica, não implementa), e o padrão de idempotência por `name` é corretamente espelhado de `registerAgent()`.
