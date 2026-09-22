@@ -1,0 +1,193 @@
+Agora tenho todo o contexto necessário. Deixe-me consolidar a auditoria completa.
+
+---
+
+# Relatório de Auditoria Adversarial — Plano Fase 5b v5 (híbrida, corrigida)
+
+**Documento Auditado:** `docs/phase-5b-v5.md`
+**Data da Auditoria:** 2026-09-22
+**Auditor:** Hermes Agent (longcat-2.0:free)
+**Ambiente de Verificação:** Leitura de código-fonte real + execução de pseudocódigo extraído do plano.
+
+---
+
+## PARTE A — Verificação dos 9 achados da rodada 4
+
+### Achado 1: Timeout de `detect_tool` mata worker com SIGKILL
+- **Log v4**: detectTool espelharia classify(), que executa `this.child?.kill('SIGKILL')` no timeout (mlxWorkerEngine.ts:265-267). Fallback para classify() falha porque worker está morto.
+- **Correção v5**: §4.4 + §6.4 — timeout de detectTool() NÃO mata o processo; só rejeita a Promise.
+- **Código real**: classify() em mlxWorkerEngine.ts:254-283 e generate() em :285-315 têm `this.child?.kill('SIGKILL')` no timeout. O pseudocódigo de detectTool() em §6.4 NÃO tem kill.
+- **Veredito**: CORRIGIDO. O pseudocódigo é consistente com o que existe hoje (classify/generate matam, detect_tool não).
+
+### Achado 2: Vazamento de dados em H11
+- **Log v4**: 6 frases do auditor v3 copiadas para DETECT_TOOL_SYSTEM_PROMPT.
+- **Correção v5**: §0, §4.9, §7 (H11) — prompt reescrito com frases novas, nunca vistas em logs anteriores.
+- **Código real**: worker.py ainda tem o prompt da v4 (não reescrito — esperado, plano não implementado ainda).
+- **Veredito**: CORRIGIDO no plano. O prompt em §4.9 usa frases diferentes das que o auditor v3 usou (verificado: "São que horas?", "Que hora que é?", "Tá que horas?", etc. NÃO aparecem no novo prompt).
+
+### Achado 3: `event === 'error'` não limpa timer de detect_tool; sem constante em VOICE_LIMITS
+- **Log v4**: mlxWorkerEngine.ts:204-209 — `if (event === 'error')` só limpa timer para generate/classify.
+- **Correção v5**: §4.8, §6.4 — detect_tool incluído na limpeza; DETECT_TOOL_TIMEOUT_MS: 10_000 em VOICE_LIMITS.
+- **Código real**: voiceProtocol.ts:84-96 não tem DETECT_TOOL_TIMEOUT_MS (esperado — plano não implementado).
+- **Veredito**: CORRIGIDO no plano. O pseudocódigo em §6.4 mostra a correção.
+
+### Achado 4: `label: 'GERAL'` fixado por construção sobre conjunto aberto
+- **Log v4**: v4 dizia que "H8 reexecuta o classificador real" — ambígua, parecia dobrar latência.
+- **Correção v5**: §4.6 — sem chamada a classify() em runtime no caminho de ferramenta. label: 'GERAL' fixado sem exceção. Teste de bancada offline (H15).
+- **Veredito**: CORRIGIDO. A v5 é explícita: NÃO há recuo em runtime.
+
+### Achado 5: Referência cruzada quebrada (§4.6 cita H8)
+- **Log v4**: §4.6 cita H8, mas H8 é teste de cancelamento.
+- **Correção v5**: §4.6, §7 — citação corrigida para H15.
+- **Veredito**: CORRIGIDO. §4.6 agora cita H15 (linha 181 do plano).
+
+### Achado 6: H5 afirma histórico inalterado, mas `session.history.push` do usuário já roda antes
+- **Log v4**: sessionManager.ts:250 — `session.history.push({ role: 'user', ... })` antes da detecção.
+- **Correção v5**: §7 (H5) — teste verifica que history contém mensagem do usuário, mas NENHUM `role: 'assistant'` até markPlayed.
+- **Código real**: sessionManager.ts:250 confirma.
+- **Veredito**: CORRIGIDO. H5 agora especifica corretamente.
+
+### Achado 7: §5 não dá ao FakeVoiceEngine o mecanismo de barreira
+- **Log v4**: fakeEngine.ts só tinha detectTool() + toolToReturn + detectToolCalls, sem gates.
+- **Correção v5**: §5, §6.8 — mecanismo completo (detectToolSettleDelayMs, detectToolGates, releaseDetectToolGate, isDetectToolPending).
+- **Código real**: fakeEngine.ts não tem esses mecanismos (esperado).
+- **Veredito**: CORRIGIDO no plano.
+
+### Achado 8: §5 promete alterar package.json sem especificar como
+- **Log v4**: §5 promete alterar package.json, arriscando invariante B2.
+- **Correção v5**: §5, §7 (H2) — package.json NÃO é tocado; test_tool_parser.py segue precedente de test_repetition_detector.py.
+- **Código real**: package.json não tem scripts Python.
+- **Veredito**: CORRIGIDO. v5 explicitamente não toca package.json (linha 336-337).
+
+### Achado 9: `HoraAtualTool.execute()` produz concordância errada
+- **Log v4**: "São 1 horas e 0 minutos" para 01:01 e 11:00.
+- **Correção v5**: §4.7, §6.5 — singular/plural corrigido, "em ponto" para minutos zerados.
+- **Código real**: Não existe systemTools.ts ainda. Mas o pseudocódigo em §4.7 foi executado por mim e produz resultados corretos (ver tabela abaixo).
+- **Veredito**: CORRIGIDO no plano.
+
+**Testes executados do pseudocódigo da §4.7:**
+
+```
+01:01 -> "É 1 hora e 1 minuto."        (esperado: "É 1 hora e 1 minuto.")  ✓
+11:00 -> "São 11 horas em ponto."      (esperado: "São 11 horas em ponto.") ✓
+12:00 -> "São 12 horas em ponto."      (esperado: "São 12 horas em ponto.") ✓
+11:06 -> "São 11 horas e 6 minutos."   (esperado: "São 11 horas e 6 minutos.") ✓
+00:00 -> "São 0 horas em ponto."       (esperado: "São 0 horas em ponto.")  ✓
+00:01 -> "São 0 horas e 1 minuto."     (esperado: "São 0 horas e 1 minuto.") ✓
+23:59 -> "São 23 horas e 59 minutos."  (esperado: "São 23 horas e 59 minutos.") ✓
+01:00 -> "É 1 hora em ponto."          (esperado: "É 1 hora em ponto.") ✓
+02:01 -> "São 2 horas e 1 minuto."     (esperado: "São 2 horas e 1 minuto.") ✓
+```
+
+Todos os testes passaram.
+
+**Testes executados do TIME_GATE da §4.1:**
+
+```
+'Que horas são agora?' -> True (esperado: True) ✓
+'Que dia é hoje?' -> True (esperado: True) ✓
+'Em que século estamos?' -> True (esperado: True) ✓  ← correção da v5 funciona
+'Quantas são?' -> False (esperado: False) ✓  ← limitação reconhecida no plano
+'Passou das cinco?' -> False (esperado: False) ✓  ← limitação reconhecida no plano
+'Explique a Aceitação dentro da Virtologia' -> False (esperado: False) ✓
+'Na Bíblia, que horas Jesus morreu?' -> True (esperado: True) ✓  ← falso positivo do filtro (reconhecido no plano §8.2)
+'Em que ano foi fundado o Instituto Virtudes?' -> True (esperado: True) ✓
+```
+
+Todos os testes passaram. "Século" agora é reconhecido.
+
+**Testes executados do `parse_tool_output` da §4.9:**
+
+```
+'HORA' -> 'HORA' ✓
+'hora' -> 'HORA' ✓
+' DATA ' -> 'DATA' ✓
+'NENHUMA' -> 'NENHUMA' ✓
+'' -> 'NENHUMA' ✓
+'BANANA' -> 'NENHUMA' ✓
+'HORA.' -> 'HORA' ✓
+'HORA\n' -> 'HORA' ✓
+'  data  ' -> 'DATA' ✓
+'Nenhuma' -> 'NENHUMA' ✓  ← fora do conjunto
+'HORAS' -> 'NENHUMA' ✓  ← plural não está no conjunto (correto)
+'Sim' -> 'NENHUMA' ✓
+'ERROR' -> 'NENHUMA' ✓
+```
+
+Todos os testes passaram.
+
+---
+
+## PARTE B — Auditoria adversarial normal
+
+---
+
+ACHADO: `cancel()` do `FakeVoiceEngine` não é atualizado para limpar `detectToolGates` — código do plano deixa timer vazando em teste de cancelamento
+EVIDÊNCIA: O plano §6.8 adiciona `detectToolGates` ao FakeVoiceEngine, mas NÃO atualiza o método `cancel()` do FakeVoiceEngine (fakeEngine.ts:103-115) para limpar `detectToolGates`. O `cancel()` atual só trata `classifyGates`. Com a implementação literal do plano, um teste H8 que:
+1. Chama `detectTool()` com `detectToolSettleDelayMs > 0`
+2. Chama `cancel(turnId)`
+3. Verifica `isDetectToolPending(turnId)` → ainda retornaria `true` porque `detectToolGates` nunca é limpo no `cancel()`.
+O gate só seria resolvido pelo `releaseDetectToolGate(turnId)` ou pelo timer expirando. O H8 promete "sem pending órfão nem timer preso", mas o pending ficaria órfão no Map `detectToolGates` até o timeout.
+GRAVIDADE: ALTA
+CONFIANCA: 100%
+ACAO RECOMENDADA: Adicionar ao pseudocódigo de §6.8 que o `cancel()` do FakeVoiceEngine também deve limpar `detectToolGates` (mesmo padrão de fakeEngine.ts:109-114 para classifyGates). Sem isso, o teste H8 falharia ao verificar `isDetectToolPending(turnId)` após cancelamento.
+
+---
+
+ACHADO: `stdin_reader_loop` do worker.py não é atualizado para aceitar comando `detect_tool` no despacho
+EVIDÊNCIA: O plano §6.2 mostra o handle_detect_tool() e diz "Despacho, nos dois pontos onde classify aparece hoje (scripts/worker/worker.py:434) e o elif de cmd == cancel/ping". Mas o `stdin_reader_loop` em worker.py:460-472 só aceita `"transcribe"`, `"classify"`, `"generate"` no `elif cmd in (...)`. O plano NÃO mostra a atualização dessa linha para incluir `"detect_tool"`. Sem isso, o comando detect_tool chega ao worker, é lido pela stdin_reader_loop, mas cai no `else: log_diag(f"Comando desconhecido ignorado: {cmd!r}")` e nunca chega ao handle_detect_tool().
+GRAVIDADE: ALTA
+CONFIANCA: 100%
+ACAO RECOMENDADA: Adicionar explicitamente ao pseudocódigo de §6.2 que a linha `elif cmd in ("transcribe", "classify", "generate")` deve passar a incluir `"detect_tool"`.
+
+---
+
+ACHADO: `failAllPending()` em mlxWorkerEngine.ts não é mostrado como atualizado para incluir `detect_tool` na limpeza de timer
+EVIDÊNCIA: O plano §6.4 mostra `failAllPending()` com `detect_tool` incluído. Mas a lista de arquivos modificados em §5 diz que mlxWorkerEngine.ts é modificado, e o pseudocódigo de §6.4 mostra a mudança. Verificação: o pseudocódigo em §6.4 mostra:
+```ts
+if (pending.kind === 'generate' || pending.kind === 'classify' || pending.kind === 'detect_tool') {
+  clearTimeout(pending.timeout);
+}
+```
+Isso está correto. No entanto, o plano NÃO menciona que o `failAllPending()` também precisa ser atualizado — ele apenas mostra o código já atualizado. O problema é que o código atual em mlxWorkerEngine.ts:129-140 NÃO tem `detect_tool`. O plano mostra o código CORRIGIDO, mas não deixa claro que é uma mudança. Isso é uma questão de clareza, não de correção.
+GRAVIDADE: BAIXA
+CONFIANCA: 90%
+ACAO RECOMENDADA: Deixar mais explícito em §6.4 que o `failAllPending()` está sendo modificado (não apenas mostrado como ficaria).
+
+---
+
+ACHADO: `handle_detect_tool` no plano NÃO emite evento `cancelled` quando cancelado — Node nunca confirma cancelamento
+EVIDÊNCIA: O `handle_classify` em worker.py:289-291 também não emite `cancelled` quando `handle.cancel_event.is_set()` é True durante a geração. O plano espelha esse comportamento. No entanto, o Node resolve/rejeita o pending localmente via cancel(), então o pending já foi removido do Map. O evento `cancelled` é apenas cosmético. Mas o plano NÃO documenta essa decisão — um implementador pode achar que precisa adicionar emissão de `cancelled` no handle_detect_tool.
+GRAVIDADE: BAIXA
+CONFIANCA: 85%
+ACAO RECOMENDADA: Documentar em §6.2 que `handle_detect_tool` segue o mesmo padrão de `handle_classify`: não emite `cancelled` quando cancelado, pois o Node já resolve localmente.
+
+---
+
+ACHADO: `getModuleStatuses()` em registry.ts não tem pseudocódigo — implementação pode não atualizar `available` para módulo `tools`
+EVIDÊNCIA: O plano §5 lista registry.ts como modificado ("módulo tools com available: this.tools.length > 0"), mas NÃO fornece o pseudocódigo para `getModuleStatuses()`. O código atual em registry.ts:103 tem `available: false` hard-coded. Um implementador pode adicionar `registerTool()` mas esquecer de atualizar `getModuleStatuses()`, deixando o módulo `tools` permanentemente `available: false`.
+GRAVIDADE: MÉDIA
+CONFIANCA: 95%
+ACAO RECOMENDADA: Adicionar o pseudocódigo de `getModuleStatuses()` mostrando a mudança de `available: false` para `available: this.tools.length > 0` no módulo `tools`.
+
+---
+
+ACHADO: `handle_detect_tool` no plano NÃO verifica `handle.cancel_event.is_set()` antes de iniciar a geração — pode iniciar geração desnecessária
+EVIDÊNCIA: O `handle_classify` verifica `handle.cancel_event.is_set()` dentro do loop de stream_generate, mas não antes de iniciar. O plano espelha isso. Se o cancelamento chegar entre o recebimento do comando e o início da geração, o worker ainda inicia a geração. O Node já resolve localmente, então o resultado é descartado. Mas isso desperdaça recursos. O plano não documenta essa decisão.
+GRAVIDADE: BAIXA
+CONFIANCA: 80%
+ACAO RECOMENDADA: Documentar que `handle_detect_tool` segue o mesmo padrão de `handle_classify`: verificação de cancelamento apenas dentro do loop, não antes.
+
+---
+
+ACHADO: `detectTool()` na interface `VoiceEngine` não tem pseudocódigo — implementação pode não adicionar o método
+EVIDÊNCIA: O plano §5 lista `src/backend/voice/engine.ts` como modificado ("detectTool() na interface"), mas NÃO fornece o pseudocódigo para a interface. A interface VoiceEngine em engine.ts:13-37 não tem detectTool(). Um implementador pode adicionar detectTool() em MlxWorkerEngine mas esquecer de adicionar na interface, quebrando o FakeVoiceEngine (que precisa implementar detectTool() para satisfazer a interface).
+GRAVIDADE: MÉDIA
+CONFIANCA: 95%
+ACAO RECOMENDADA: Adicionar o pseudocódigo da interface VoiceEngine mostrando a adição de `detectTool(turnId: string, epoch: number, text: string): Promise<ToolName>`.
+
+---
+
+## VEREDITO
+
+**REJEITADO** — Os 9 achados da rodada 4 foram corretamente endereçados no plano (verificação por execução de pseudocódigo confirma TIME_GATE, parse_tool_output e HoraAtualTool.execute() funcionam conforme especificado), mas a v5 introduziu 2 regressões ALTA em seções que não foram atacadas pelos achados: o `cancel()` do FakeVoiceEngine não é atualizado para limpar `detectToolGates` (§6.8 omite essa mudança, quebrando H8), e o `stdin_reader_loop` do worker.py não é atualizado para aceitar `detect_tool` (§6.2 mostra o handler mas não o despacho, fazendo o comando cair no `else` de "comando desconhecido"). Sem essas duas correções, a implementação literal do plano falharia em tempo de execução.
