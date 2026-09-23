@@ -247,9 +247,6 @@ medição. Processo completo, do plano ao código:
   função pura + 2 de integração do gate — a contagem exata mudou entre rodadas conforme achados
   novos pediam testes novos; o número que vale é o último, medido agora).
 
-**Ainda não commitado neste ponto do documento** — ver estado de entrega real no handoff mais
-recente antes de assumir que isso já está no histórico do git.
-
 **Nada disto remedeu H-mutação** (§5, 76,5%) — continua fora de escopo, gap reconhecido, não
 resolvido. Falta ainda, antes de considerar o falso SIM oficialmente corrigido: medir de novo
 contra uma amostra hold-out nova (protocolo de congelamento — commitar a implementação primeiro,
