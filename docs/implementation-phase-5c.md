@@ -198,3 +198,59 @@ apresentada como pronta porque a medição real, definida antes de qualquer exec
   encontrado e corrigido no meio do processo estão registrados aqui, na íntegra, sem arredondar pra
   cima. Decisão sobre próximos passos (mitigar agora vs. seguir roteiro e voltar depois, mesma
   postura já adotada para a Fase 5b) fica para o usuário.
+
+---
+
+## 8. Mitigação do falso SIM — implementada e auditada (2026-09-23, mesmo dia)
+
+O achado de segurança do §5 (falso SIM sobre negação, caso #18) foi mitigado no mesmo dia da
+medição. Processo completo, do plano ao código:
+
+- **Plano v7** (`docs/phase-5c-v7.md`) — rodada 1 de auditoria (`agy`): **REJEITADO**, achado
+  crítico real e confirmado (gate posicionado fora do bloco que deveria restringi-lo, quebraria
+  `"com certeza"`, já na whitelist da Camada 0). Log: `docs/audits/phase-5c-v7-agy-rodada1-2026-09-23.log`.
+- **Plano v8** corrige os 7 achados da rodada 1 — rodada 2 (`agy`, mesma ferramenta, regra da
+  skill permite até a 2ª rodada): **APROVADO COM RESSALVAS**, 6/7 achados confirmados resolvidos
+  por execução real em Node.js contra 9 frases de colisão adversarial; 4 ressalvas vinculantes
+  (marcadores cobriam só o verbo "criar", faltava "nada" no veto de negação, Whisper expande "tá"
+  para "está", inconsistência entre o prompt da amostra e a lista de marcadores). Log:
+  `docs/audits/phase-5c-v8-agy-rodada2-2026-09-23.log`.
+- **Plano v9** (`docs/phase-5c-v9.md`) aplica as 4 ressalvas — decisão de não gastar rodada 3
+  (mudanças mecânicas em listas já testadas) informada por consulta ao Jev/TypeSafe (98% de
+  confiança pela aplicação direta).
+- **Implementação**: delegada ao `agy` em modo `accept-edits` (primeira vez nesta sessão que uma
+  ferramenta externa escreve código de produção diretamente, não só audita) — `src/backend/voice/
+  sessionManager.ts` (gate + `hasAffirmativeMarker` + `AFFIRMATIVE_MARKERS`/`NEGATION_MARKERS`) e
+  `src/backend/__tests__/mutatingTools.test.ts` (testes da função pura). **Verificado
+  independentemente antes de aceitar** (nunca só a autodeclaração): diff revisado linha a linha —
+  posição do gate dentro do bloco `if (confirmed === null)` confirmada contando as chaves à mão —
+  e `typecheck`/`build`/`test` rerodados do zero, 106/106.
+- **Auditoria de código** (Hermes, `docker exec hermes hermes -z`, material copiado — só código e
+  testes, nunca `docs/research/`): **APROVADO COM RESSALVAS**. Confirmou por execução real (116
+  casos adversariais, script Node próprio) que o achado crítico da rodada 1 do plano não se
+  repetiu no código, e que `scripts/worker/worker.py` ficou intocado. 3 ressalvas reais:
+  1. `'esta bom'` faltando (mesmo padrão do par `'ta valendo'`/`'esta valendo'`, só que numa
+     palavra diferente) — corrigido.
+  2. Testes cobriam só a função pura `hasAffirmativeMarker`, não o fluxo de integração no
+     `SessionManager` — dois testes novos adicionados em `voice.test.ts`: um prova que `"com
+     certeza"` (Camada 0) nunca aciona `detectConfirmation` nem o gate; outro é a regressão direta
+     do caso #18 real através do fluxo HTTP/SSE completo, não só da função isolada.
+  3. **Limite estrutural, documentado, não corrigível por código**: o gate só vê o texto da
+     transcrição — se o Whisper engolir a palavra de negação e o texto residual coincidir com um
+     marcador afirmativo (ex. `"não, pode fazer"` → STT `"pode fazer"`), o gate não tem como saber
+     que houve negação. Protege o padrão real do caso #18 (resíduo sem nenhum marcador), não o
+     caso geral de perda de negação. Documentado no código (comentário em `AFFIRMATIVE_MARKERS`)
+     e com teste que nomeia o limite explicitamente, em vez de fingir que não existe.
+  Log completo: `docs/audits/phase-5c-v9-codigo-hermes-2026-09-23.log`.
+- **Estado final, verificado por mim antes de escrever isto**: `npm run typecheck`, `npm run
+  build` e `npm test` rodados do zero — **110/110 passando** (104 de antes da mitigação + 6 da
+  função pura + 2 de integração do gate — a contagem exata mudou entre rodadas conforme achados
+  novos pediam testes novos; o número que vale é o último, medido agora).
+
+**Ainda não commitado neste ponto do documento** — ver estado de entrega real no handoff mais
+recente antes de assumir que isso já está no histórico do git.
+
+**Nada disto remedeu H-mutação** (§5, 76,5%) — continua fora de escopo, gap reconhecido, não
+resolvido. Falta ainda, antes de considerar o falso SIM oficialmente corrigido: medir de novo
+contra uma amostra hold-out nova (protocolo de congelamento — commitar a implementação primeiro,
+só depois pedir a amostra, prompt já congelado em `docs/phase-5c-v9.md` §6).

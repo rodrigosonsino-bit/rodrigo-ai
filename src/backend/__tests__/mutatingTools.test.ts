@@ -10,7 +10,7 @@ import {
   selectMutatingToolByAction,
   createMutatingTools
 } from '../tools/mutatingTools.js';
-import { keywordConfirmation } from '../voice/sessionManager.js';
+import { keywordConfirmation, hasAffirmativeMarker, normalizeConfirmation } from '../voice/sessionManager.js';
 import type { IMutatingTool } from '../../shared/extensions/tools.js';
 
 describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
@@ -246,6 +246,167 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
           `Esperava null (delegar para Camada 1) para "${frase}"`
         );
       }
+    });
+  });
+
+  describe('hasAffirmativeMarker (Camada 2 — Gate de Marcador Afirmativo)', () => {
+    it('reconhece cada marcador afirmativo isoladamente', () => {
+      const affirmativeMarkers = [
+        'sim',
+        'claro',
+        'confirmo',
+        'confirma',
+        'certo',
+        'certeza',
+        'exato',
+        'exatamente',
+        'positivo',
+        'isso mesmo',
+        'bora',
+        'beleza',
+        'fechou',
+        'fechado',
+        'manda',
+        'pode sim',
+        'pode criar',
+        'pode marcar',
+        'pode fazer',
+        'pode apagar',
+        'pode guardar',
+        'pode salvar',
+        'pode anotar',
+        'ta valendo',
+        'esta valendo',
+        'perfeito',
+        'combinado',
+        'ta bom',
+        'esta bom',
+        'blz',
+        'ok'
+      ];
+
+      for (const marker of affirmativeMarkers) {
+        assert.equal(
+          hasAffirmativeMarker(marker),
+          true,
+          `Esperava que hasAffirmativeMarker fosse true para o marcador isolado "${marker}"`
+        );
+      }
+    });
+
+    it('cada marcador de negação veta um marcador afirmativo presente na mesma frase', () => {
+      const negationMarkers = [
+        'nao',
+        'nem',
+        'nunca',
+        'jamais',
+        'cancela',
+        'cancelar',
+        'esquece',
+        'esquecer',
+        'tira',
+        'tirar',
+        'nada'
+      ];
+
+      // Cada marcador de negação veta um marcador afirmativo ("sim")
+      for (const neg of negationMarkers) {
+        assert.equal(
+          hasAffirmativeMarker(`sim ${neg}`),
+          false,
+          `Esperava false para "sim ${neg}" (veto por "${neg}")`
+        );
+        assert.equal(
+          hasAffirmativeMarker(`${neg}, sim`),
+          false,
+          `Esperava false para "${neg}, sim" (veto por "${neg}")`
+        );
+      }
+
+      // Casos reais e frases de colisão adversarial (incluindo "claro que não" e "nada tá certo")
+      const casosColisao = [
+        'claro que não',
+        'nada tá certo',
+        'jamais confirma',
+        'nunca com certeza',
+        'nem, pode fazer isso',
+        'cancela, pode sim',
+        'pode apagar não, cancelar',
+        'esquece, tá bom',
+        'esquecer, fechado',
+        'tira, beleza',
+        'tirar, ok'
+      ];
+
+      for (const frase of casosColisao) {
+        assert.equal(
+          hasAffirmativeMarker(frase),
+          false,
+          `Esperava false para a colisão com negação "${frase}"`
+        );
+      }
+    });
+
+    it('respeita fronteira de palavra: "embora" não casa "bora" e "incerto" não casa "certo"', () => {
+      assert.equal(hasAffirmativeMarker('embora'), false);
+      assert.equal(hasAffirmativeMarker('Eu vou embora agora'), false);
+      assert.equal(hasAffirmativeMarker('incerto'), false);
+      assert.equal(hasAffirmativeMarker('O resultado ainda é incerto'), false);
+    });
+
+    it('teste de regressão direto do caso #18 real: "E, depois eu faço." deve ser false', () => {
+      assert.equal(hasAffirmativeMarker('E, depois eu faço.'), false);
+      assert.equal(hasAffirmativeMarker('e, depois eu faco'), false);
+    });
+
+    it('retorna true para as 9 frases da tabela de verificação item-a-item da v8', () => {
+      const frasesV8 = [
+        { frase: 'sim, pode criar', marcador: 'sim / pode criar' },
+        { frase: 'manda ver', marcador: 'manda' },
+        { frase: 'pode sim, vai fundo', marcador: 'pode sim / sim' },
+        { frase: 'é isso mesmo, bora', marcador: 'isso mesmo / bora' },
+        { frase: 'confirma aí que tá certo', marcador: 'confirma / certo' },
+        { frase: 'isso, pode fazer', marcador: 'pode fazer' },
+        { frase: 'Beleza? Deixe a registrado.', marcador: 'beleza' },
+        { frase: 'fechou, pode marcar', marcador: 'fechou / pode marcar' },
+        { frase: 'anota sim, tá valendo', marcador: 'sim' }
+      ];
+
+      for (const { frase, marcador } of frasesV8) {
+        assert.equal(
+          hasAffirmativeMarker(frase),
+          true,
+          `Esperava true para "${frase}" (marcador esperado: ${marcador})`
+        );
+      }
+    });
+
+    it('colapsa espaços internos repetidos em normalizeConfirmation', () => {
+      assert.equal(normalizeConfirmation('sim   pode   criar'), 'sim pode criar');
+      assert.equal(normalizeConfirmation('  pode    apagar   '), 'pode apagar');
+      assert.equal(hasAffirmativeMarker('pode    apagar'), true);
+      assert.equal(hasAffirmativeMarker('esta    valendo'), true);
+    });
+
+    it('achado 1 da auditoria de código (Hermes, 2026-09-23): "está bom" reconhecido, mesmo par tá/está de "ta valendo"/"esta valendo"', () => {
+      // O Whisper costuma expandir a contração "tá" para a forma gramatical "está" — o par
+      // precisa existir pra cada marcador contraído, não só pra "valendo". Faltava o espelho
+      // de "ta bom" até este achado.
+      assert.equal(hasAffirmativeMarker('tá bom'), true);
+      assert.equal(hasAffirmativeMarker('está bom'), true);
+      assert.equal(hasAffirmativeMarker('Está bom, pode criar.'), true);
+    });
+
+    it('achado 3 da auditoria de código (Hermes, 2026-09-23): limite estrutural — negação perdida pelo STT cujo resíduo contém marcador não é vetada', () => {
+      // Documentando o limite, não "corrigindo" — não há correção possível numa camada que só
+      // vê texto: se o STT engolir a negação e o resíduo coincidir com um marcador afirmativo,
+      // o gate não tem como recuperar a informação perdida. Ver comentário em AFFIRMATIVE_MARKERS
+      // (sessionManager.ts) para o raciocínio completo.
+      assert.equal(
+        hasAffirmativeMarker('pode fazer'), // residual real de "não, pode fazer" após o STT engolir "não,"
+        true,
+        'limite estrutural conhecido e documentado — o texto residual não carrega mais a negação'
+      );
     });
   });
 });

@@ -61,6 +61,7 @@ export function normalizeConfirmation(text: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[.!?]+$/, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -74,6 +75,43 @@ export function keywordConfirmation(transcript: string): 'SIM' | 'NAO' | null {
   if (CONFIRM_YES_EXACT.has(n)) return 'SIM';
   if (CONFIRM_NO_EXACT.has(n)) return 'NAO';
   return null;
+}
+
+/**
+ * Fase 5c v9 — camada 2, só sobre veredito SIM vindo do LLM (Camada 1). Um SIM sem marcador
+ * afirmativo reconhecível, OU com um marcador de negação explícito na mesma fala, é rebaixado
+ * para NAO (fail-closed). Substring com fronteira de palavra (\b) sobre texto já normalizado
+ * (normalizeConfirmation: minúsculas, NFD sem acento, sem pontuação final, espaços internos
+ * colapsados — achado 5).
+ *
+ * Limite estrutural conhecido, não corrigível por esta camada (achado 3 da auditoria de código,
+ * Hermes, 2026-09-23): o gate só enxerga o TEXTO da transcrição. Se o Whisper engolir a palavra
+ * de negação e o texto residual, por coincidência, contiver um marcador afirmativo (ex. "não,
+ * pode fazer" -> STT "pode fazer"), o gate não tem como saber que houve negação — a informação
+ * nunca chegou ao texto. O gate protege o caso onde o resíduo pós-STT fica sem nenhum marcador
+ * (o padrão real do caso #18, docs/phase-5c-v7.md §1), não o caso geral de perda de negação.
+ */
+const AFFIRMATIVE_MARKERS = [
+  'sim', 'claro', 'confirmo', 'confirma', 'certo', 'certeza', 'exato', 'exatamente', 'positivo',
+  'isso mesmo', 'bora', 'beleza', 'fechou', 'fechado', 'manda',
+  'pode sim', 'pode criar', 'pode marcar', 'pode fazer',
+  'pode apagar', 'pode guardar', 'pode salvar', 'pode anotar',
+  'ta valendo', 'esta valendo',
+  'perfeito', 'combinado', 'ta bom', 'esta bom',
+  'blz', 'ok'
+];
+
+const NEGATION_MARKERS = [
+  'nao', 'nem', 'nunca', 'jamais', 'cancela', 'cancelar', 'esquece', 'esquecer', 'tira', 'tirar',
+  'nada'
+];
+
+const AFFIRMATIVE_REGEX = new RegExp(`\\b(?:${AFFIRMATIVE_MARKERS.join('|')})\\b`);
+const NEGATION_REGEX = new RegExp(`\\b(?:${NEGATION_MARKERS.join('|')})\\b`);
+
+export function hasAffirmativeMarker(transcript: string): boolean {
+  const n = normalizeConfirmation(transcript);
+  return AFFIRMATIVE_REGEX.test(n) && !NEGATION_REGEX.test(n);
 }
 
 /**
@@ -343,6 +381,15 @@ export class SessionManager {
             } catch (err) {
               confirmed = 'NAO'; // fail closed
               console.error('[mutation] detecção de confirmação falhou, assumindo NÃO:', err);
+            }
+
+            // Fase 5c v8 — camada 2: só sobre o resultado da Camada 1 (LLM), nunca da Camada 0.
+            if (confirmed === 'SIM' && !hasAffirmativeMarker(transcript)) {
+              confirmed = 'NAO';
+              // achado 7: console.warn, não console.error — decisão de negócio esperada, não falha técnica.
+              console.warn(
+                '[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).'
+              );
             }
           }
           if (session.activeTurn !== turn) return;

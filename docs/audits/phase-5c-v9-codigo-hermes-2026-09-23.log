@@ -1,0 +1,200 @@
+Todos os dados coletados. Vou agora compilar o relatório final estruturado.
+
+---
+
+# AUDITORIA ADVERSARIAL DE CÓDIGO — Fase 5c v9
+
+**Data:** 2026-09-23 | **Auditor:** Hermes | **Escopo:** `src/backend/voice/sessionManager.ts`, `src/backend/__tests__/mutatingTools.test.ts`, `scripts/worker/worker.py`
+
+**Metodologia:** extração da lógica real para script Node isolado (`/workspace/phase-5c-v9-audit/gate-audit.mjs`), 116 casos adversarial executados contra o código real, análise estática de branches e regex. Nenhum arquivo copiado foi editado.
+
+---
+
+## ACHADO 1 — `"esta bom"` não está na lista (par tá/esta incompleto)
+
+**ACHADO** | `AFFIRMATIVE_MARKERS` inclui `'ta valendo'` E `'esta valendo'` (par completo), mas `'ta bom'` entra SEM o par `'esta bom'`.
+
+**EVIDÊNCIA:** `src/backend/voice/sessionManager.ts:93` — lista não contém `'esta bom'`. Execução real no script `tabom-check.mjs`:
+- `"tá bom"` (original) → `true` ✓
+- `"está bom"` (Whisper expande "tá" → "está") → **`false` ✗**
+
+**MECANISMO:** Se o Whisper transcrever `/ta bõ/` como `"está bom"` (fenômeno documentado na ressalva 3 da v9), o gate rebaixa a confirmação para NÃO. A ressalva 3 corrigiu `'ta valendo'`/`'esta valendo'` mas **esqueceu o espelho de `'ta bom'`**.
+
+**GRAVIDADE:** MÉDIA — causa falso-negativo (confirmação legítima rebaixada). Não é CRÍTICA porque o resultado é fail-closed (usuário só precisa repetir), mas é o **mesmo bug** que a ressalva 3 tentou corrigir.
+
+**CONFIANÇA:** 100% — verificado por execução real em Node.
+
+**AÇÃO:** Adicionar `'esta bom'` a `AFFIRMATIVE_MARKERS`.
+
+---
+
+## ACHADO 2 — `"conversa"` casa `"confirma"`? Não, mas a fronteira é OK
+
+Teste de boundary executado: `"conversa"` → `false` (correto, fronteira de palavra protege). `"confusão"` → `false` (correto). Nenhum problema de fronteira de palavra encontrado — a proteção `\b` funciona como esperado em Node.js.
+
+**Nota:** teste original esperava `true` para `"conversa"` porque achei que `"confirma"` estivesse na lista. Na verdade `"confirma"` ESTÁ na lista (`sessionManager.ts:88`), e `"conversa"` NÃO casa por causa do `\b` (u precede "confirma" em "conversa", quebra a fronteira). Correto.
+
+---
+
+## ACHADO 3 — Falso-positivo estrutural: negação perdida pelo Whisper = gate inútil
+
+**ACHADO:** O gate confia cegamente na transcrição do Whisper. Se o Whisper engole a palavra de negação (ex.: `"não, pode fazer"` → `"pode fazer"`), o gate **nunca vê a negação** porque ela não existe mais no texto.
+
+**EVIDÊNCIA:** execuções no `gate-audit.mjs`, TESTE 4:
+- Whisper: `"não, pode fazer"` → `"pode fazer"` → `hasAffirmativeMarker` = **`true`** (esperado `false`)
+- Whisper: `"nunca, manda ver"` → `"manda ver"` → **`true`** (esperado `false`)
+- Whisper: `"esquece, beleza"` → `"beleza"` → **`true`** (esperado `false`)
+- Whisper: `"jamais confirma"` → `"confirma"` → **`true`** (esperado `false`)
+
+**MECANISMO:** O gate é determinístico sobre a transcrição. Se a transcrição perde a negação, o gate se torna um acelerador de falso-positivo: **quanto pior o Whisper, mais perigoso fica o gate**, porque ele dá uma falsa sensação de segurança enquanto falha silenciosamente nos casos que mais importam (negação curta + Whisper degradado = caso #18).
+
+**GRAVIDADE:** ALTA — este é o **cenário de ataque que o gate deveria proteger**. O gate foi projetado para proteger contra "LLM erra quando Whisper engole negação", mas se o Whisper engole a negação, o texto fica puramente afirmativo, e o gate (que só vê o texto) não tem como saber que houve negação.
+
+**CONFIANÇA:** 100% — demonstrado por execução real. O gate simplesmente não foi desenhado para este caso.
+
+**AÇÃO:** Redesenhar o gate para rodar sobre o sinal de áudio (ex.: VAD + espectro) antes da transcrição, OU aceitar que o gate só protege contra erro do LLM quando a transcrição está intacta — e documentar que ele **não** protege contra perda de negação pelo STT.
+
+---
+
+## ACHADO 4 — Gate posicionado corretamente dentro do bloco `if (confirmed === null)` ✓
+
+**VERIFICAÇÃO:** O gate ESTÁ dentro do bloco `if (confirmed === null)` (linha 371), após `keywordConfirmation` (Camada 0). Linhas relevantes do `sessionManager.ts` real:
+```
+370: let confirmed = keywordConfirmation(transcript); // camada 0
+371: if (confirmed === null) {
+...
+380:   if (confirmed === 'SIM' && !hasAffirmativeMarker(transcript)) {
+```
+
+**PROVA:** Execução do TESTE 6 — `keywordConfirmation("com certeza")` → `'SIM'`. O bloco `if (confirmed === null)` NÃO entra. `hasAffirmativeMarker` NUNCA é invocado. ✓
+
+O bug crítico real do plano v7 (Achado 1 da rodada 1) **não se repetiu** no código de verdade. Arquitetura correta.
+
+**GRAVIDADE:** (sem bug) — achado da rodada 1 não traduzido para o código. ✓
+
+**CONFIANÇA:** 100%
+
+---
+
+## ACHADO 5 — Branches do gate não cobertos por nenhum teste
+
+**ACHADO:** Os testes em `mutatingTools.test.ts` testam APENAS a função pura `hasAffirmativeMarker` isoladamente. Os seguintes branches do fluxo real (linhas 370-387 do `sessionManager.ts`) **não são cobertos por nenhum teste**:
+
+| Branch | O que faz | Coberto? |
+|---|---|---|
+| 1 | `keywordConfirmation` retorna `'SIM'` (whitelist) → gate ignorado | **NÃO** |
+| 2 | `keywordConfirmation` retorna `null` → delega ao LLM | **NÃO** |
+| 3 | `detectConfirmation` lança exceção → `confirmed = 'NAO'` + `console.error` | **NÃO** |
+| 4a | Gate rebaixa `'SIM'` → `'NAO'` | **NÃO** (só a função pura) |
+| 4b | Gate emite `console.warn` | **NÃO** |
+| 5 | Integração completa: pendingMutation → gate → `tool.execute()` | **NÃO** |
+
+**EVIDÊNCIA:** `src/backend/__tests__/mutatingTools.test.ts` — 6 `describe`/`it` dentro de `hasAffirmativeMarker`, todos testando a função pura. Nenhum teste de integração do `SessionManager`.
+
+**GRAVIDADE:** MÉDIA — Os testes de função pura passam, mas não garantem que o **fluxo completo** funciona. Em particular, o critério de aceite #3 da v8 ("uma resposta que bate exatamente com `CONFIRM_YES_EXACT` resolve SIM sem nunca invocar `hasAffirmativeMarker`") **não está implementado como teste**.
+
+**CONFIANÇA:** 95% — confirmado por análise estática do diff e do arquivo de testes.
+
+**AÇÃO:** Adicionar pelo menos um teste de integração do `SessionManager` que mocka `engine.detectConfirmation` para retornar `'SIM'` e verifica que: (a) quando a transcrição bate na whitelist exata, o gate não é invocado; (b) quando o LLM diz `'SIM'` mas `hasAffirmativeMarker` retorna `false`, o `console.warn` é emitido e `confirmed` vira `'NAO'`.
+
+---
+
+## ACHADO 6 — `console.warn` e `console.error` silenciosos em produção
+
+**ACHADO:** O `console.warn` do gate (linha 383) e o `console.error` de falha do LLM (linha 376) são saídas silenciosas em produção — nenhum log estruturado, nenhum métrica, nenhum alerta. Se o gate começar a rebaixar confirmações em produção, ninguém vai saber até um usuário reclamar.
+
+**EVIDÊNCIA:** `sessionManager.ts:383` — `console.warn('[mutation][gate]...')`
+
+**GRAVIDADE:** BAIXA — o código funciona, mas operabilidade fica comprometida.
+
+**AÇÃO:** Substituir por logger estruturado com nível adequado (`warn` para gate, `error` para falha) e, idealmente, emitir um evento SSE `gate_demotion` para o cliente.
+
+---
+
+## ACHADO 7 — `scripts/worker/worker.py` não foi tocado (conforme exigido) ✓
+
+**VERIFICAÇÃO:** Busca por alterações em `DETECT_CONFIRMATION_SYSTEM_PROMPT` (linha 135 do worker.py) e `parse_confirmation_output` (linha 173): o conteúdo é idêntico ao descrito no plano. Nenhuma alteração detectada. **Correto** — o plano exigia que não fossem tocados, e não foram.
+
+**GRAVIDADE:** (sem bug) ✓
+
+---
+
+## ACHADO 8 — Falso-negativos massivos: gírias coloquiais não reconhecidas
+
+**ACHADO:** 18 frases afirmativas coloquiais comuns em PT-BR **não são reconhecidas** pelo gate, todas resultando em `hasAffirmativeMarker = false`:
+
+| Frase | Frequência real | Rebaixada? |
+|---|---|---|
+| "ah, tá" | Muito alta | Sim |
+| "faz isso" | Alta | Sim |
+| "só faz" | Alta | Sim |
+| "show" | Alta | Sim |
+| "massa" | Alta | Sim |
+| "tranquilo" | Alta | Sim |
+| "suave" | Alta | Sim |
+| "tamo aí" | Alta | Sim |
+| "valeu" | Alta | Sim |
+| "tudo bem" | Alta | Sim |
+| "acertou" | Média | Sim |
+| "é isso" | Alta | Sim |
+
+**EVIDÊNCIA:** Execução do TESTE 2 no `gate-audit.mjs` — 18 falhas num total de 34 frases afirmativas.
+
+**GRAVIDADE:** BAIXA-MÉDIA — o gate é fail-closed. Falso-negativo significa "usuário tinha dito sim, mas o sistema não executa a mutação e pergunta de novo". Inconveniente, não perigoso. Mas se a taxa de falso-negativo for alta o suficiente, o sistema fica irritante de usar (usuário precisa repetir "sim" três vezes até achar um marcador).
+
+**CONFIANÇA:** 100% — medido.
+
+**AÇÃO:** Coletar dados reais (amostra hold-out do §6 da v9) e medir a taxa de falso-negativo antes de decidir se expande a lista.
+
+---
+
+## ACHADO 9 — `normalizeConfirmation` sem limite de comprimento
+
+**ACHADO:** A função `normalizeConfirmation` (linha 58-66) não limita o comprimento da string. Se `transcript` for gigante (ex.: Whisper buga e devolve 1MB de texto), o processamento regex pode ser lento.
+
+**EVIDÊNCIA:** Teste de performance mostra 0ms para 100k chars — não é um problema prático atual, mas é uma superfície de ataque se o Whisper for alimentado com áudio adversarial.
+
+**GRAVIDADE:** BAIXA — não há evidence de exploração, mas é uma defensive programming omission.
+
+**AÇÃO:** Considerar `text.slice(0, MAX_CONFIRMATION_LENGTH)` antes de normalizar.
+
+---
+
+## ACHADO 10 — Colisão entre `"confirma"` (affirmative) e `"confirma"` em contexto negativo
+
+**ACHADO:** `"confirma"` está em `AFFIRMATIVE_MARKERS` (linha 88). A frase `"não confirma"` é corretamente vetada (`NEGATION_REGEX` captura `"nao"`). Mas a frase `"nunca confirma"` — que é uma negação real e comum — depende do `"nunca"` ser capturado pelo `NEGATION_REGEX`. Execução confirma: **funciona** (`"nunca confirma"` → `false`). Sem bug aqui.
+
+---
+
+## TABELA-RESUMO DOS ACHADOS
+
+| # | Achado | Gravidade | Confiança | Status |
+|---|---|---|---|---|
+| 1 | `"esta bom"` faltando (par tá/esta incompleto) | MÉDIA | 100% | Bug real |
+| 2 | Boundary "conversa" vs "confirma" | — | — | OK (falso alarme do meu teste) |
+| 3 | Whisper perde negação → gate inútil | ALTA | 100% | Limitação estrutural |
+| 4 | Gate dentro do `if (confirmed === null)` | — | 100% | OK ✓ |
+| 5 | Branches do gate não cobertos por teste | MÉDIA | 95% | Bug real |
+| 6 | `console.warn/error` sem log estruturado | BAIXA | 90% | Melhoria |
+| 7 | `worker.py` inalterado | — | 100% | OK ✓ |
+| 8 | Falso-negativos com gírias coloquiais | BAIXA-MÉDIA | 100% | Risco conhecido |
+| 9 | Sem limite de comprimento em `normalizeConfirmation` | BAIXA | 80% | Melhoria |
+| 10 | Colisão `"confirma"` em negação | — | — | OK (funciona) |
+
+---
+
+## VEREDITO: **APROVADO COM RESSALVAS**
+
+**Justificativa:**
+
+- O código **implementa corretamente** a arquitetura do plano v9: gate posicionado dentro do `if (confirmed === null)`, nunca interfere na Camada 0. O Achado 1 da rodada 1 (bug crítico do plano v7) **não se repetiu** no código real.
+- `AFFIRMATIVE_MARKERS` e `NEGATION_MARKERS` são conforme o plano. `worker.py` está intocado.
+- **Ressalva 1 (bloqueante suave):** `"esta bom"` precisa ser adicionado — é o mesmo bug que a ressalva 3 tentou corrigir. Sem isso, um usuário dizendo `"está bom"` após o Whisper expandir `"tá bom"` terá a confirmação rebaixada.
+- **Ressalva 2 (importante):** Os testes cobrem a função pura mas NÃO o fluxo de integração do gate no `SessionManager`. O critério de aceite #3 da v8 ("SIM da Camada 0 nunca passa pelo gate") **não está provado por teste**. Pelo menos um teste de integração mockando `detectConfirmation` é necessário.
+- **Ressalva 3 (documental):** O gate NÃO protege contra perda de negação pelo Whisper (Achado 3). Isso precisa ser documentado explicitamente para que não se tenha falsa sensação de segurança. O gate protege contra erro do LLM quando a transcrição está intacta — não contra degradação do STT.
+
+**Arquivos produzidos durante a auditoria (todos em `/workspace/phase-5c-v9-audit/`, fora do material copiado):**
+- `gate-audit.mjs` — 116 casos adversarial executados contra a lógica extraída
+- `tabom-check.mjs` — verificação do bug "esta bom"
+- `regex-deep-check.mjs` — análise de boundary e performance da regex
+- `coverage-analysis.mjs` — análise de branches não cobertos

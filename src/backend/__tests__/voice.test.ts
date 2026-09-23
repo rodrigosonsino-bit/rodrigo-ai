@@ -1230,6 +1230,133 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       }
     });
 
+    it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): SIM da Camada 0 nunca aciona o gate nem detectConfirmation', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: pagar a conta';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'pagar a conta'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: pagar a conta?' })
+        });
+
+        // "com certeza" bate na whitelist exata da Camada 0 (CONFIRM_YES_EXACT) — o gate v9
+        // (Camada 2) mora dentro do bloco que só roda quando a Camada 0 devolve null, então
+        // não deveria nem ser avaliado aqui. Regressão direta do achado crítico da rodada 1
+        // de auditoria do plano v7 (gate fora de escopo rebaixava SIM da Camada 0).
+        h.engine.fixedTranscript = 'Com certeza';
+
+        await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        await sse.waitFor(15, 5000);
+
+        assert.equal(
+          h.engine.detectConfirmationCalls.length,
+          0,
+          'detectConfirmation NÃO deve ser chamado — "com certeza" resolve na Camada 0'
+        );
+        const audioEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(audioEvent.text, 'Lembrete criado.');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): gate rebaixa SIM da Camada 1 sem marcador afirmativo — regressão do caso #18 real', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: lavar o carro';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'lavar o carro'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: lavar o carro?' })
+        });
+
+        // Texto residual real do caso #18 (docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md):
+        // o Whisper engoliu "nem" de "nem, depois eu faço", sobrando só "E, depois eu faço." — sem
+        // nenhum marcador afirmativo. O LLM (simulado aqui) erra e responde SIM; o gate da Camada 2
+        // precisa rebaixar para NAO mesmo assim.
+        h.engine.fixedTranscript = 'E, depois eu faço.';
+        h.engine.confirmationToReturn = 'SIM';
+
+        await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        await sse.waitFor(15, 5000);
+
+        assert.equal(h.engine.detectConfirmationCalls.length, 1, 'detectConfirmation deve ter sido acionado');
+        const audioEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(
+          audioEvent.text,
+          'Tudo bem, não fiz nada.',
+          'o gate deve ter rebaixado o SIM do LLM para NAO — nenhuma mutação deve ter sido executada'
+        );
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
     it('Fase 5c: TTL de 60s expira pendingMutation e enunciado seguinte segue caminho normal', async (t) => {
       const mutatingTools = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
