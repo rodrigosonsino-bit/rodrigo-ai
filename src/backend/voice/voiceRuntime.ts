@@ -82,7 +82,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const tools = createSystemTools();
   for (const tool of tools) ExtensionRegistry.getInstance().registerTool(tool);
 
-  const dataDir = path.join(rootDir, 'data');
+  // RODRIGO_DATA_DIR permite isolar a persistência de lembretes/notas em testes manuais
+  // (ex. scripts/h5c-check.mjs) sem tocar data/ de produção — mesma lógica de injeção de
+  // baseDir que AudioStore/JsonStore já usam, só que também respeitável via env var aqui
+  // porque createVoiceRuntime() não recebe esse parâmetro do chamador (server.ts).
+  const dataDir = process.env.RODRIGO_DATA_DIR
+    ? path.resolve(process.env.RODRIGO_DATA_DIR)
+    : path.join(rootDir, 'data');
   const mutatingTools = createMutatingTools(dataDir);
   for (const mTool of mutatingTools) ExtensionRegistry.getInstance().registerMutatingTool(mTool);
 
