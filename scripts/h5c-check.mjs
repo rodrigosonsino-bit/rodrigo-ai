@@ -43,11 +43,25 @@ const CONFIRMATION_SAMPLE_PATH = process.env.RODRIGO_H5C_CONFIRMATION_SAMPLE
   || 'docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md';
 const OUT_PATH = 'docs/audits/phase-5c-v6-result-2026-09-23.json';
 
+/**
+ * Isola só a seção "## As N frases (...)" do arquivo — o resto do arquivo (proveniência,
+ * prompt usado para gerar a amostra) também contém linhas "N. texto" (o próprio prompt pede
+ * uma lista numerada como exemplo de formato), e um parser sem escopo pegaria essas linhas
+ * também. Bug real encontrado na primeira execução desta bateria: o parser sem escopo leu
+ * "1. DIRETA E CURTA — ..." de dentro do bloco ```prompt``` como se fosse um 18º caso real.
+ */
+function extractSampleSection(text) {
+  const startIdx = text.search(/^##\s+As\s+\d+\s+frases/m);
+  if (startIdx === -1) throw new Error('Seção "## As N frases" não encontrada na amostra.');
+  const afterStart = text.slice(startIdx);
+  const nextHeadingRel = afterStart.slice(1).search(/^##\s/m);
+  return nextHeadingRel === -1 ? afterStart : afterStart.slice(0, nextHeadingRel + 1);
+}
+
 function parseNumberedSample(mdPath) {
-  const text = fs.readFileSync(mdPath, 'utf8');
-  const lines = text.split('\n');
+  const section = extractSampleSection(fs.readFileSync(mdPath, 'utf8'));
   const cases = [];
-  for (const line of lines) {
+  for (const line of section.split('\n')) {
     const m = line.match(/^(\d+)\.\s+(.+)$/);
     if (m) cases.push({ n: Number(m[1]), text: m[2].trim() });
   }
@@ -56,10 +70,9 @@ function parseNumberedSample(mdPath) {
 
 /** Amostra de confirmação: cada linha traz a etiqueta [SIM]/[NAO] com o veredito esperado. */
 function parseTaggedSample(mdPath) {
-  const text = fs.readFileSync(mdPath, 'utf8');
-  const lines = text.split('\n');
+  const section = extractSampleSection(fs.readFileSync(mdPath, 'utf8'));
   const cases = [];
-  for (const line of lines) {
+  for (const line of section.split('\n')) {
     const m = line.match(/^(\d+)\.\s+\[(SIM|NAO)\]\s+(.+)$/);
     if (m) cases.push({ n: Number(m[1]), expected: m[2], text: m[3].trim() });
   }
@@ -108,7 +121,9 @@ async function runOneTurn(sessionId, token, wavPath, sse) {
   if (!res.ok) throw new Error(`Falha ao enviar áudio: ${res.status} ${await res.text()}`);
   const { turnId } = await res.json();
 
-  const deadline = Date.now() + 45_000;
+  // 130s: cobre a espera do próprio servidor por WARMUP_TIMEOUT_MS (120s, voiceProtocol.ts)
+  // no primeiro turno se o worker MLX ainda não tiver terminado de carregar o modelo.
+  const deadline = Date.now() + 130_000;
   let transcript = null, routingLabel = null, handled = null, done = false, errorMsg = null;
   const sentences = [];
   let cursor = sse.events.length; // cursor avança — nunca reescanear de um índice fixo (armadilha conhecida)
@@ -247,6 +262,12 @@ async function runConfirmationBattery() {
 async function main() {
   console.log(`[h5c] Conectando em ${BASE_URL} — servidor real com runtime de voz e RODRIGO_DATA_DIR=${DATA_DIR} precisa já estar rodando.`);
   fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  console.log('[h5c] Aquecendo (turno descartado das métricas, pode levar até 2min — worker MLX carregando)...');
+  const warm = await newSession();
+  const warmWav = await synthesizeWav('Olá, isso é um aquecimento.', 'warm');
+  await runOneTurn(warm.sessionId, warm.token, warmWav, warm.sse);
+  await endSession(warm.sessionId, warm.token, warm.sse);
 
   const mutation = await runMutationBattery();
   const confirmation = await runConfirmationBattery();
