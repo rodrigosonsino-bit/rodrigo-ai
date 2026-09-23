@@ -109,19 +109,92 @@ Log completo: `docs/audits/phase-5c-codigo-hermes-2026-09-23.log`.
 
 ---
 
-## 5. Estado da fase
+## 5. H-mutação e H-confirmação — verificação com MLX real: **NENHUM DOS DOIS CRITÉRIOS PASSOU**
 
-**IMPLEMENTADA E COM CÓDIGO AUDITADO, PENDENTE DE MEDIÇÃO COM MLX REAL.** Mesmo padrão da Fase 5b:
-tudo que pode ser verificado sem o modelo real (build, suíte automatizada, mutation testing, leitura
-exaustiva da garantia central) está feito e aprovado. Falta:
+`scripts/h5c-check.mjs`: variante de dois turnos de `h11-check.mjs`. Turno N pede a mutação e
+confirma reprodução real via `/played` (é isso que promove `armedMutation` para `pendingMutation`,
+`sessionManager.ts` `markPlayed()`); turno N+1 confirma ou nega. Resultado conferido pela fala E
+pelo arquivo `data/lembretes.json` real (`RODRIGO_DATA_DIR` isolado, nunca `data/` de produção —
+ver §6 abaixo). Amostras congeladas por uma IA independente (Hermes, que nunca viu
+`DETECT_MUTATION_SYSTEM_PROMPT`/`DETECT_CONFIRMATION_SYSTEM_PROMPT`), mesmo protocolo da Fase 5b:
+`docs/audits/phase-5c-v6-h-mutacao-sample-2026-09-23.md` (17 frases) e
+`docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md` (18 frases). Relatório completo:
+`docs/audits/phase-5c-v6-result-2026-09-23.json`.
 
-- **Cobertura de `detect_mutation`** — o sistema reconhece pedidos de lembrete/nota em fala
-  coloquial real, na mesma proporção medida pela H11 da 5b (meta ≥80%, `docs/phase-5c-v5.md` §7)?
-- **Cobertura de `detect_confirmation`** — sim/não coloquial é reconhecido corretamente (meta ≥90%,
-  **tolerância zero para falso "sim" sobre negação clara** — um único caso reprova a fase, não
-  importa a porcentagem)?
-- Ambas exigem o mesmo protocolo de congelamento já usado na 5b: prompts já estão congelados desde
-  a v4 (nenhuma mudança de conteúdo desde então); falta compor uma amostra de validação nova (não
-  reaproveitar a da 5b) e medir com áudio real.
+**A primeira execução real do script encontrou um bug real nele mesmo antes de medir qualquer
+coisa do sistema**: o parser da amostra não tinha escopo — lia qualquer linha `"N. texto"` do
+arquivo `.md` inteiro, inclusive a lista de exemplo dentro do bloco de prompt reproduzido na seção
+"Prompt usado para gerar a amostra". Um 18º caso fantasma ("DIRETA E CURTA — a forma mais óbvia...")
+foi enviado como frase real e quebrou o classificador do worker. Corrigido (parser agora isola a
+seção "## As N frases" antes de extrair casos) e a bateria foi refeita do zero antes de qualquer
+número ser aceito como resultado — mesma disciplina de "validar o harness antes de tratar sua
+saída como evidência" que já existe no projeto.
 
-Nenhum bloqueio técnico impede essa medição — só não foi feita ainda nesta sessão.
+### H-mutação: 13/17 = 76,5% — **NÃO ATINGIU a meta de ≥80%**
+
+| # | Frase | Transcrição real (Whisper) | Resultado |
+|---|---|---|---|
+| 5 | "Você pode me ajudar a não deixar essa data passar?" | idêntica | não armou — resposta conversacional genérica, `detect_mutation` não reconheceu a intenção indireta |
+| 9 | "Ah, deixa isso registrado pra mim." | "Aaaaah, deixa isso registrado pra mim." | não armou — respondeu "Claro, anotado" sem de fato criar nada |
+| 11 | "Amanhã é aniversário da minha mãe, então me acorda cedo, tá?" | "A manhã é aniversário..." | não armou — respondeu como conversa social, ignorou o pedido de lembrete embutido |
+| 14 | "Depois que eu sair do trabalho, tem uma carta que eu preciso achar, me dá um toque." | idêntica (STT ok) | não armou — o modelo **alucinou instruções de onde a carta estaria guardada**, resposta inteira inventada |
+
+As quatro falhas são pedidos genuinamente indiretos/embutidos (grupos 2 e 3 da amostra, por
+desenho) — nenhuma tem problema de transcrição. O caso #14 é o mais grave: não é só "não detectou",
+é uma alucinação de conteúdo específico sem base nenhuma, no mesmo padrão de invenção que H11 da
+Fase 5b já tinha flagrado como o comportamento que essas fases inteiras existem para eliminar.
+
+### H-confirmação: 16/18 = 88,9% geral (meta ≥90%) **E 1 falso SIM sobre negação clara (meta: zero)**
+
+| # | Frase | Transcrição real (Whisper) | Resultado |
+|---|---|---|---|
+| 7 | "beleza, deixa registrado" (esperado SIM) | "Beleza? Deixe a registrado." | detectado NAO — falso negativo (direção segura, mas erro de cobertura) |
+| 15 | "nah, nem rola" (esperado NAO) | STT produziu saída degenerada (repetição de caracteres) | acertou NAO por acaso — a transcrição em si já estava corrompida antes de chegar ao detector |
+| **18** | **"nem, depois eu faço" (esperado NAO)** | **"E, depois eu faço."** — Whisper **engoliu a palavra "nem"**, a única palavra de negação da frase | **"Lembrete criado." — executou a mutação que o usuário tinha negado** |
+
+**O caso #18 é o achado central desta medição.** É exatamente o pior caso que `docs/phase-5c-v5.md`
+§7 nomeia como motivo da tolerância zero: o STT perdeu a única palavra de negação da frase antes de
+qualquer detecção rodar, o `detect_confirmation` recebeu texto que soa afirmativo ("E, depois eu
+faço") e classificou como SIM, e o sistema **criou um lembrete real que o usuário havia recusado**.
+A garantia de "nunca muta sem confirmação ouvida" (§1 deste documento) se sustenta — a pergunta foi
+feita e reproduzida antes de qualquer coisa ser armada; o que falhou foi a camada de STT
+**antes** da confirmação, um ponto que a arquitetura da fase não cobre porque assume (corretamente
+para o código, incorretamente para o pipeline completo) que a transcrição chega intacta ao detector.
+Contra-verificado no arquivo real: `data/lembretes.json` do diretório de teste isolado tem 9 itens
+após a bateria — 8 confirmações SIM corretas mais este falso positivo, número que bate exatamente
+com o relatório (nunca aceitar a autodeclaração do script sem conferir o artefato).
+
+Nenhuma mudança foi feita no prompt, no filtro, no gate de deduplicação ou no código em resposta a
+este resultado. Como na Fase 5b, a decisão de como (e se) mitigar fica para uma sessão futura,
+deliberadamente — inclusive a pergunta de se a mitigação certa é no STT (ex.: normalizar
+transcrições curtas de uma palavra contra uma whitelist antes do detector) ou em alguma camada de
+verificação adicional sobre `pendingMutation`.
+
+---
+
+## 6. Decisão §3.3 do handoff — isolamento de dados de teste
+
+`voiceRuntime.ts` passou a respeitar `RODRIGO_DATA_DIR` (se definida) no lugar do `data/` fixo em
+`rootDir` — mesma lógica de injeção de `baseDir` que `AudioStore`/`JsonStore` já usavam, só que
+agora também configurável por variável de ambiente porque `createVoiceRuntime()` não recebe esse
+parâmetro do chamador (`server.ts`). Esta bateria rodou inteira contra `/tmp/rodrigo-h5c-data`,
+nunca tocando `data/` do repositório — `data/` continua não existindo no working tree.
+
+---
+
+## 7. Estado da fase
+
+**IMPLEMENTADA, COM CÓDIGO AUDITADO, MEDIDA COM MLX REAL — NENHUM DOS DOIS CRITÉRIOS BLOQUEANTES
+PASSOU.** Mesmo padrão de honestidade da Fase 5b (H11: 75%, abaixo da meta): a fase não é
+apresentada como pronta porque a medição real, definida antes de qualquer execução
+(`docs/phase-5c-v5.md` §7), não passou.
+
+- **H-mutação: 76,5%** (meta ≥80%) — quatro falhas, todas pedidos indiretos/embutidos genuínos, uma
+  delas (#14) uma alucinação de conteúdo, não só uma detecção perdida.
+- **H-confirmação: 88,9% geral** (meta ≥90%) **e 1 falso SIM sobre negação clara** (meta: zero,
+  bloqueante por si só independente da porcentagem) — causado por perda da palavra de negação no
+  STT antes do detector rodar.
+- Nenhuma pendência escondida: os dois números, o achado do falso positivo e o bug do harness
+  encontrado e corrigido no meio do processo estão registrados aqui, na íntegra, sem arredondar pra
+  cima. Decisão sobre próximos passos (mitigar agora vs. seguir roteiro e voltar depois, mesma
+  postura já adotada para a Fase 5b) fica para o usuário.

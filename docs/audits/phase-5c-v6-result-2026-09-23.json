@@ -1,0 +1,359 @@
+{
+  "date": "2026-09-23T12:02:50.014Z",
+  "mutationSample": "docs/audits/phase-5c-v6-h-mutacao-sample-2026-09-23.md",
+  "confirmationSample": "docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md",
+  "dataDir": "/tmp/rodrigo-h5c-data",
+  "mutation": {
+    "results": [
+      {
+        "n": 1,
+        "text": "Apaga o lembrete de amanhã, por favor.",
+        "transcript": "Apaga o lembrete de amanhã, por favor.",
+        "response": "Posso apagar o lembrete mais recente?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 2,
+        "text": "Cria um lembrete pra eu não esquecer a reunião.",
+        "transcript": "Cria um lembrete para eu não esquecer a reunião.",
+        "response": "Posso criar o lembrete: Não esquecer a reunião?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 3,
+        "text": "Anota isso pra mim, vai.",
+        "transcript": "Anota isso pra mim, vai!",
+        "response": "Posso guardar a nota: Anota isso pra mim, vai!?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 4,
+        "text": "Me lembra de ligar pro médico às 14h.",
+        "transcript": "Me lembra de ligar pro médico as 14 horas.",
+        "response": "Posso criar o lembrete: Ligar pro médico as 14 horas?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 5,
+        "text": "Você pode me ajudar a não deixar essa data passar?",
+        "transcript": "Você pode me ajudar a não deixar essa data passar?",
+        "response": "Claro que posso. Qual data você quer evitar perder? Me diga mais detalhes e eu te ajudo a organizar, lembrar ou marcar tudo no calendário da sua vida.",
+        "detected": "NAO_ARMADA"
+      },
+      {
+        "n": 6,
+        "text": "Essa informação tsuma da minha cabeça, guarda isso aí.",
+        "transcript": "Essa informação te suma da minha cabeça, guarda isso aí.",
+        "response": "Posso guardar a nota: Essa informação te suma da minha cabeça?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 7,
+        "text": "Se eu esquecer de pagar a conta, me dá um toque.",
+        "transcript": "Se eu esquecer de pagar a conta, me dá um toque.",
+        "response": "Posso criar o lembrete: Pagar a conta?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 8,
+        "text": "Tira esse compromisso da minha lista, não vou poder ir.",
+        "transcript": "Tira esse compromisso da minha lista, não vou poder ir.",
+        "response": "Posso apagar o lembrete mais recente?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 9,
+        "text": "Ah, deixa isso registrado pra mim.",
+        "transcript": "Aaaaah, deixa isso registrado pra mim.",
+        "response": "Claro, anotado. Você está bem? Se precisar de algo mais tarde, é só dizer.",
+        "detected": "NAO_ARMADA"
+      },
+      {
+        "n": 10,
+        "text": "Vou sair agora, mas antes anota que o cliente ligou pedindo desconto.",
+        "transcript": "Vou sair agora, mas antes anota que o cliente ligou pedindo desconto.",
+        "response": "Posso guardar a nota: O cliente ligou pedindo desconto?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 11,
+        "text": "Amanhã é aniversário da minha mãe, então me acorda cedo, tá?",
+        "transcript": "A manhã é aniversário da minha mãe, então me acorda cedo, tá?",
+        "response": "Claro, já estou te acordando. Bom aniversário para a sua mãe! Que seja um dia especial e cheio de felicidade.",
+        "detected": "NAO_ARMADA"
+      },
+      {
+        "n": 12,
+        "text": "Não posso esquecer isso de jeito nenhum, coloca um alarme pra mim.",
+        "transcript": "Não posso esquecer isso de jeito nenhum, coloca um alarme pra mim.",
+        "response": "Posso criar o lembrete: Não posso esquecer isso de jeito nenhum?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 13,
+        "text": "Olha, aquela reunião de sexta foi cancelada, pode remover isso da agenda.",
+        "transcript": "Olha, aquela reunião de sexta foi cancelada, pode remover isso da agenda.",
+        "response": "Posso apagar o lembrete mais recente?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 14,
+        "text": "Depois que eu sair do trabalho, tem uma carta que eu preciso achar, me dá um toque.",
+        "transcript": "Depois que eu sair do trabalho, tenho uma carta que eu preciso achar, me dá um toque.",
+        "response": "Depois do trabalho, vá até o quarto da sua casa. A carta está sobre a mesa de cabeceira — perto do relógio que ainda não foi trocado por causa das chuvas recentes. Se precisar, eu tô aqui pra te ajudar com isso depois.",
+        "detected": "NAO_ARMADA"
+      },
+      {
+        "n": 15,
+        "text": "Ô, acelera aí e grava isso antes que eu esqueça, né?",
+        "transcript": "Ou, acelera aí e grava isso antes que eu esqueça, né?",
+        "response": "Posso criar o lembrete: Grava isso antes que eu esqueça?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 16,
+        "text": "Dá uma anotação aí no seu caderninho digital, parceiro.",
+        "transcript": "Dá uma anotação aí no seu caderninho digital, parceiro.",
+        "response": "Posso guardar a nota: Anotaçã0 aí no seu caderninho digital, parceiro.?",
+        "detected": "ARMADA"
+      },
+      {
+        "n": 17,
+        "text": "Apaga aquele negócio lá, não serve mais, brother.",
+        "transcript": "Apaga aquele negócio lá, não serve mais, brother.",
+        "response": "Posso apagar o lembrete mais recente?",
+        "detected": "ARMADA"
+      }
+    ],
+    "armedCount": 13,
+    "total": 17,
+    "coveragePct": 76.47058823529412,
+    "passed": false
+  },
+  "confirmation": {
+    "results": [
+      {
+        "n": 1,
+        "expected": "SIM",
+        "text": "sim, pode criar",
+        "transcript": "Sim, pode criar.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 0,
+        "countAfter": 1
+      },
+      {
+        "n": 2,
+        "expected": "SIM",
+        "text": "manda ver",
+        "transcript": "manda ver.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 1,
+        "countAfter": 2
+      },
+      {
+        "n": 3,
+        "expected": "SIM",
+        "text": "pode sim, vai fundo",
+        "transcript": "Pode sim, vai fundo.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 2,
+        "countAfter": 3
+      },
+      {
+        "n": 4,
+        "expected": "SIM",
+        "text": "é isso mesmo, bora",
+        "transcript": "É isso mesmo, bora!",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 3,
+        "countAfter": 4
+      },
+      {
+        "n": 5,
+        "expected": "SIM",
+        "text": "confirma aí que tá certo",
+        "transcript": "Confirma aí que tá certo.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 4,
+        "countAfter": 5
+      },
+      {
+        "n": 6,
+        "expected": "SIM",
+        "text": "isso, pode fazer",
+        "transcript": "Isso, pode fazer.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 5,
+        "countAfter": 6
+      },
+      {
+        "n": 7,
+        "expected": "SIM",
+        "text": "beleza, deixa registrado",
+        "transcript": "Beleza? Deixe a registrado.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": false,
+        "falseYesOnNegation": false,
+        "countBefore": 6,
+        "countAfter": 6
+      },
+      {
+        "n": 8,
+        "expected": "SIM",
+        "text": "fechou, pode marcar",
+        "transcript": "Fechou, pode marcar.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 6,
+        "countAfter": 7
+      },
+      {
+        "n": 9,
+        "expected": "SIM",
+        "text": "anota sim, tá valendo",
+        "transcript": "A nota sim, está valendo.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 7,
+        "countAfter": 8
+      },
+      {
+        "n": 10,
+        "expected": "NAO",
+        "text": "acho que não, deixa quieto",
+        "transcript": "Acho que não, deixa quieto.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 11,
+        "expected": "NAO",
+        "text": "não, na verdade muda de ideia, não faz",
+        "transcript": "Não, na verdade muda de ideia, não o faz.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 12,
+        "expected": "NAO",
+        "text": "ah, melhor não",
+        "transcript": "Agora, melhor não.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 13,
+        "expected": "NAO",
+        "text": "não precisa não, deixa",
+        "transcript": "Não precisa não, deixa.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 14,
+        "expected": "NAO",
+        "text": "pera, cancela isso",
+        "transcript": "Espera, cancela isso.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 15,
+        "expected": "NAO",
+        "text": "nah, nem rola",
+        "transcript": "O nevro, a o th§, ae'R,n'E'-E'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 16,
+        "expected": "NAO",
+        "text": "vixe, esquece",
+        "transcript": "Vixe, esquece.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 17,
+        "expected": "NAO",
+        "text": "é... acho que não hein",
+        "transcript": "E, acho que não é isso.",
+        "response": "Tudo bem, não fiz nada.",
+        "detected": "NAO",
+        "correct": true,
+        "falseYesOnNegation": false,
+        "countBefore": 8,
+        "countAfter": 8
+      },
+      {
+        "n": 18,
+        "expected": "NAO",
+        "text": "nem, depois eu faço",
+        "transcript": "E, depois eu faço.",
+        "response": "Lembrete criado.",
+        "detected": "SIM",
+        "correct": false,
+        "falseYesOnNegation": true,
+        "countBefore": 8,
+        "countAfter": 9
+      }
+    ],
+    "correctCount": 16,
+    "total": 18,
+    "coveragePct": 88.88888888888889,
+    "falsePositiveCount": 1,
+    "passed": false
+  },
+  "overallPassed": false
+}
