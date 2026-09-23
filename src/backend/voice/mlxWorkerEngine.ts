@@ -1,8 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import type { ConversationMessage, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
-import { isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import { isMutationName, isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, VoiceEngine } from './engine.js';
 import { VoiceEngineError } from './engine.js';
 
@@ -49,7 +49,31 @@ interface PendingDetectTool {
   spawnGeneration: number;
 }
 
-type Pending = PendingTranscribe | PendingGenerate | PendingClassify | PendingDetectTool;
+interface PendingDetectMutation {
+  kind: 'detect_mutation';
+  turnId: string;
+  resolve: (res: [MutationName, string | null]) => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
+interface PendingDetectConfirmation {
+  kind: 'detect_confirmation';
+  turnId: string;
+  resolve: (res: 'SIM' | 'NAO') => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
+type Pending =
+  | PendingTranscribe
+  | PendingGenerate
+  | PendingClassify
+  | PendingDetectTool
+  | PendingDetectMutation
+  | PendingDetectConfirmation;
 
 let reqCounter = 0;
 function nextReqId(): string {
@@ -137,7 +161,13 @@ export class MlxWorkerEngine implements VoiceEngine {
 
   private failAllPending(err: Error): void {
     for (const [, pending] of this.pending) {
-      if (pending.kind === 'generate' || pending.kind === 'classify' || pending.kind === 'detect_tool') {
+      if (
+        pending.kind === 'generate' ||
+        pending.kind === 'classify' ||
+        pending.kind === 'detect_tool' ||
+        pending.kind === 'detect_mutation' ||
+        pending.kind === 'detect_confirmation'
+      ) {
         clearTimeout(pending.timeout);
       }
       pending.reject(err);
@@ -214,9 +244,32 @@ export class MlxWorkerEngine implements VoiceEngine {
       return;
     }
 
+    if (event === 'mutation_detection' && pending.kind === 'detect_mutation') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      const action = isMutationName(msg.action) ? (msg.action as MutationName) : 'NENHUMA';
+      const content = typeof msg.content === 'string' ? msg.content : null;
+      pending.resolve([action, content]);
+      return;
+    }
+
+    if (event === 'confirmation_detection' && pending.kind === 'detect_confirmation') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      const confirmation = msg.confirmation === 'SIM' ? 'SIM' : 'NAO';
+      pending.resolve(confirmation);
+      return;
+    }
+
     if (event === 'error') {
       this.pending.delete(reqId);
-      if (pending.kind === 'generate' || pending.kind === 'classify' || pending.kind === 'detect_tool') {
+      if (
+        pending.kind === 'generate' ||
+        pending.kind === 'classify' ||
+        pending.kind === 'detect_tool' ||
+        pending.kind === 'detect_mutation' ||
+        pending.kind === 'detect_confirmation'
+      ) {
         clearTimeout(pending.timeout);
       }
       pending.reject(new VoiceEngineError((msg.message as string) || 'Erro desconhecido no worker de voz.'));
@@ -329,6 +382,80 @@ export class MlxWorkerEngine implements VoiceEngine {
     });
   }
 
+  async detectMutation(
+    turnId: string,
+    epoch: number,
+    text: string
+  ): Promise<[MutationName, string | null]> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(reqId);
+        reject(
+          new VoiceEngineError(
+            `Detecção de mutação do turno ${turnId} excedeu ${VOICE_LIMITS.DETECT_MUTATION_TIMEOUT_MS}ms.`
+          )
+        );
+        // Operação auxiliar descartável — NÃO mata o worker (mesmo padrão de detectTool)
+      }, VOICE_LIMITS.DETECT_MUTATION_TIMEOUT_MS);
+
+      this.pending.set(reqId, {
+        kind: 'detect_mutation',
+        turnId,
+        resolve,
+        reject,
+        timeout,
+        spawnGeneration
+      });
+
+      try {
+        this.writeCommand({ cmd: 'detect_mutation', reqId, turnId, epoch, text });
+      } catch (err) {
+        clearTimeout(timeout);
+        this.pending.delete(reqId);
+        reject(err as Error);
+      }
+    });
+  }
+
+  async detectConfirmation(
+    turnId: string,
+    epoch: number,
+    text: string
+  ): Promise<'SIM' | 'NAO'> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(reqId);
+        reject(
+          new VoiceEngineError(
+            `Detecção de confirmação do turno ${turnId} excedeu ${VOICE_LIMITS.DETECT_CONFIRMATION_TIMEOUT_MS}ms.`
+          )
+        );
+        // Operação auxiliar descartável — NÃO mata o worker
+      }, VOICE_LIMITS.DETECT_CONFIRMATION_TIMEOUT_MS);
+
+      this.pending.set(reqId, {
+        kind: 'detect_confirmation',
+        turnId,
+        resolve,
+        reject,
+        timeout,
+        spawnGeneration
+      });
+
+      try {
+        this.writeCommand({ cmd: 'detect_confirmation', reqId, turnId, epoch, text });
+      } catch (err) {
+        clearTimeout(timeout);
+        this.pending.delete(reqId);
+        reject(err as Error);
+      }
+    });
+  }
+
   async generate(
     turnId: string,
     epoch: number,
@@ -373,7 +500,12 @@ export class MlxWorkerEngine implements VoiceEngine {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
 
-      if (pending.kind === 'classify' || pending.kind === 'detect_tool') {
+      if (
+        pending.kind === 'classify' ||
+        pending.kind === 'detect_tool' ||
+        pending.kind === 'detect_mutation' ||
+        pending.kind === 'detect_confirmation'
+      ) {
         pending.reject(new VoiceEngineError(`Operação do turno ${turnId} cancelada.`));
       } else {
         pending.resolve(); // generate() cancelado: não é erro, o chamador já abandonou o turno

@@ -88,4 +88,40 @@ describe('Pontos de Extensão e Registro Modular (Fase 1)', () => {
       'Nenhuma ferramenta conectada — depende do runtime de voz (rode "npm run setup:voice").'
     );
   });
+
+  it('Fase 5c: registra ferramentas mutantes de forma idempotente e responde a reset', () => {
+    const registry = ExtensionRegistry.getInstance();
+    registry.resetForTesting();
+
+    assert.deepEqual(registry.getMutatingTools(), []);
+
+    const lembreteTool = {
+      name: 'lembrete',
+      description: 'Lembretes do usuário.',
+      isAvailable: () => true,
+      preview: () => 'Posso criar?',
+      execute: () => 'Criado.'
+    };
+    const notaTool = {
+      name: 'nota',
+      description: 'Notas do usuário.',
+      isAvailable: () => true,
+      preview: () => 'Posso salvar?',
+      execute: () => 'Salvo.'
+    };
+
+    registry.registerMutatingTool(lembreteTool);
+    registry.registerMutatingTool(notaTool);
+    // Idempotência por name:
+    registry.registerMutatingTool({ ...lembreteTool, description: 'Duplicata ignorada' });
+
+    assert.equal(registry.getMutatingTools().length, 2);
+    assert.deepEqual(
+      registry.getMutatingTools().map((t) => t.name),
+      ['lembrete', 'nota']
+    );
+
+    registry.resetForTesting();
+    assert.equal(registry.getMutatingTools().length, 0);
+  });
 });

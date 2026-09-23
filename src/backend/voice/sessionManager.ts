@@ -1,16 +1,80 @@
 import crypto from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
-import type { ITool } from '../../shared/extensions/tools.js';
+import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
-import type { ConversationMessage, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
-import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
+import {
+  MUTATION_CANCELLED_TEXT,
+  MUTATION_FAILURE_TEXT,
+  PENDING_MUTATION_TTL_MS,
+  VOICE_LIMITS
+} from '../../shared/voiceProtocol.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
+import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
 import { AudioStore } from './audioStore.js';
 import type { VoiceEngine } from './engine.js';
 import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
 import type { RetrievedChunk } from '../knowledge/index.js';
+
+export interface ArmedMutation {
+  kind: MutationName;
+  content: string | null;
+  turnId: string;
+}
+
+export interface PendingMutation {
+  kind: MutationName;
+  content: string | null;
+  askedAtTurnId: string;
+  askedAt: number; // performance.now()
+}
+
+const CONFIRM_YES_EXACT = new Set([
+  'sim',
+  'claro',
+  'confirmo',
+  'certo',
+  'exato',
+  'exatamente',
+  'positivo',
+  'isso mesmo',
+  'pode confirmar',
+  'com certeza'
+]);
+
+const CONFIRM_NO_EXACT = new Set([
+  'nao',
+  'cancela',
+  'jamais',
+  'nunca',
+  'negativo',
+  'deixa pra la',
+  'esquece isso',
+  'nao quero'
+]);
+
+export function normalizeConfirmation(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.!?]+$/, '')
+    .trim();
+}
+
+/**
+ * Camada 0 de confirmação (Fase 5c, docs/phase-5c-v3.md §4.3).
+ * Whitelist exata do enunciado inteiro normalizado — nunca por substring.
+ * Retorna 'SIM', 'NAO' ou null (quando ambíguo/não reconhecido, delegando para LLM).
+ */
+export function keywordConfirmation(transcript: string): 'SIM' | 'NAO' | null {
+  const n = normalizeConfirmation(transcript);
+  if (CONFIRM_YES_EXACT.has(n)) return 'SIM';
+  if (CONFIRM_NO_EXACT.has(n)) return 'NAO';
+  return null;
+}
 
 /**
  * Restrições universais de saída de voz + segurança (Fase 4) — aplicadas a QUALQUER
@@ -74,6 +138,8 @@ interface Session {
    * texto obsoleto no histórico do LLM.
    */
   lastTurnId: string | null;
+  armedMutation: ArmedMutation | null;
+  pendingMutation: PendingMutation | null;
 }
 
 /**
@@ -90,6 +156,8 @@ export class SessionManager {
   private readonly retriever: KnowledgeRetriever | null;
   /** Fase 5b: ferramentas do sistema registradas. */
   private readonly tools: readonly ITool[];
+  /** Fase 5c: ferramentas que mutam estado registradas. */
+  private readonly mutatingTools: readonly IMutatingTool[];
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -101,7 +169,8 @@ export class SessionManager {
     audioStore: AudioStore,
     agents: readonly IAgent[],
     retriever: KnowledgeRetriever | null = null,
-    tools: readonly ITool[] = []
+    tools: readonly ITool[] = [],
+    mutatingTools: readonly IMutatingTool[] = []
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
@@ -109,6 +178,7 @@ export class SessionManager {
     this.agents = agents;
     this.retriever = retriever;
     this.tools = tools;
+    this.mutatingTools = mutatingTools;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -166,7 +236,9 @@ export class SessionManager {
         sseRes: null,
         history: [],
         activeTurn: null,
-        lastTurnId: null
+        lastTurnId: null,
+        armedMutation: null,
+        pendingMutation: null
       };
       clearTimeout(session.idleTimer);
       this.touch(session);
@@ -255,6 +327,121 @@ export class SessionManager {
       this.emit(session, { type: 'transcript', turnId: turn.turnId, text: transcript });
       session.history.push({ role: 'user', content: transcript });
       this.trimHistory(session);
+
+      // Fase 5c: consumo de pendingMutation se houver
+      if (session.pendingMutation) {
+        const expired =
+          performance.now() - session.pendingMutation.askedAt >= VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
+        if (expired) {
+          session.pendingMutation = null;
+          // segue para o caminho normal abaixo, como se não houvesse pending
+        } else {
+          let confirmed = keywordConfirmation(transcript); // camada 0, whitelist exata (§4.3)
+          if (confirmed === null) {
+            try {
+              confirmed = await this.engine.detectConfirmation(turn.turnId, turn.epoch, transcript);
+            } catch (err) {
+              confirmed = 'NAO'; // fail closed
+              console.error('[mutation] detecção de confirmação falhou, assumindo NÃO:', err);
+            }
+          }
+          if (session.activeTurn !== turn) return;
+
+          const mutation = session.pendingMutation;
+          session.pendingMutation = null;
+
+          let text: string;
+          if (confirmed === 'SIM') {
+            const tool = selectMutatingToolByAction(mutation.kind, this.mutatingTools);
+            if (!tool) {
+              text = MUTATION_FAILURE_TEXT; // achado 4 — nunca chama .execute() em null
+            } else {
+              try {
+                text = tool.execute(mutation.kind, mutation.content); // achado 3 — kind completo
+              } catch (err) {
+                text = MUTATION_FAILURE_TEXT; // achado 7 — texto literal definido em voiceProtocol.ts
+                console.error('[mutation] execução falhou:', err);
+              }
+            }
+          } else {
+            text = MUTATION_CANCELLED_TEXT; // achado 7
+          }
+          console.log(`[mutation] turno=${turn.turnId} ação=${mutation.kind} confirmado=${confirmed}`);
+
+          this.emit(session, {
+            type: 'routing',
+            turnId: turn.turnId,
+            label: 'GERAL',
+            handled: true
+          });
+          this.emit(session, { type: 'state', state: 'falando' });
+
+          const clean = cleanTextForSpeech(text);
+          turn.expectedSentences.add(0);
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0));
+          await Promise.allSettled(turn.pendingSynthesis);
+
+          if (session.activeTurn === turn) {
+            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+            this.emit(session, { type: 'state', state: 'ouvindo' });
+            session.activeTurn = null;
+          }
+          return;
+        }
+      }
+
+      // Fase 5c: filtro de mutação (só chega aqui sem pending, ou com pending expirado)
+      if (this.mutatingTools.length > 0 && mightBeMutation(transcript)) {
+        let detected: [string, string | null] = ['NENHUMA', null];
+        try {
+          detected = await this.engine.detectMutation(turn.turnId, turn.epoch, transcript);
+        } catch (err) {
+          detected = ['NENHUMA', null];
+          console.error('[mutation] detecção falhou, seguindo pelo caminho normal:', err);
+        }
+        if (session.activeTurn !== turn) return;
+
+        const [action, content] = detected;
+        if (action !== 'NENHUMA') {
+          const tool = selectMutatingToolByAction(action, this.mutatingTools);
+          if (!tool) {
+            // Ferramenta ausente/indisponível — problema de ambiente, não desta requisição.
+            // Cai no caminho normal abaixo, como se não houvesse detecção (achado 4 da rodada 2).
+          } else {
+            let question: string;
+            let previewFailed = false;
+            try {
+              question = tool.preview(action as MutationName, content);
+            } catch (err) {
+              // Achado 5 da rodada 4 (Hermes) — preview() sem try/catch deixava uma falha subir
+              // até o catch externo de runTurn (state:'erro' cru).
+              question = MUTATION_FAILURE_TEXT;
+              previewFailed = true;
+              console.error('[mutation] preview falhou:', err);
+            }
+
+            this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+            this.emit(session, { type: 'state', state: 'falando' });
+
+            const clean = cleanTextForSpeech(question);
+            turn.expectedSentences.add(0);
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0));
+            await Promise.allSettled(turn.pendingSynthesis);
+
+            if (session.activeTurn === turn) {
+              if (!previewFailed) {
+                // Achado 1 (ALTA, rodada 3) — grava armedMutation, NUNCA pendingMutation
+                // diretamente; a promoção só acontece em markPlayed() (v4 §6.3, inalterado).
+                session.armedMutation = { kind: action as MutationName, content, turnId: turn.turnId };
+              }
+              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+              this.emit(session, { type: 'state', state: 'ouvindo' });
+              session.activeTurn = null;
+            }
+            return;
+          }
+        }
+      }
 
       // Fase 5b: três camadas — filtro permissivo, modelo decide, código responde.
       if (this.tools.length > 0 && mightBeTemporal(transcript)) {
@@ -421,6 +608,20 @@ export class SessionManager {
 
     session.history.push({ role: 'assistant', content: text });
     this.trimHistory(session);
+
+    // Achado 1 (ALTA) da rodada 3 — só agora, com reprodução confirmada pelo cliente, uma
+    // pergunta de mutação vira mutação pendente de resposta. Nada antes deste ponto podia
+    // ter certeza de que o usuário ouviu a pergunta.
+    if (session.armedMutation && session.armedMutation.turnId === turnId) {
+      session.pendingMutation = {
+        kind: session.armedMutation.kind,
+        content: session.armedMutation.content,
+        askedAtTurnId: turnId,
+        askedAt: performance.now() // achado 6 — monotônico, marcado na reprodução, não na emissão
+      };
+      session.armedMutation = null;
+    }
+
     return true;
   }
 

@@ -8,6 +8,7 @@ import { SessionManager } from './sessionManager.js';
 import { selectVoiceProvider } from './ttsProviders.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
 import { createSystemTools } from '../tools/systemTools.js';
+import { createMutatingTools } from '../tools/mutatingTools.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 
 export interface VoiceRuntime {
@@ -81,9 +82,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const tools = createSystemTools();
   for (const tool of tools) ExtensionRegistry.getInstance().registerTool(tool);
 
+  const dataDir = path.join(rootDir, 'data');
+  const mutatingTools = createMutatingTools(dataDir);
+  for (const mTool of mutatingTools) ExtensionRegistry.getInstance().registerMutatingTool(mTool);
+
   const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
   const sessionManager = new SessionManager(
-    engine, ttsProvider, audioStore, agents, retriever, tools
+    engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools
   );
 
   return {

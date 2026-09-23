@@ -1,4 +1,4 @@
-import type { ConversationMessage, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, VoiceEngine } from './engine.js';
 
 interface ClassifyGate {
@@ -7,6 +7,16 @@ interface ClassifyGate {
 }
 
 interface DetectToolGate {
+  resolve: () => void;
+  timer: NodeJS.Timeout | null;
+}
+
+interface DetectMutationGate {
+  resolve: () => void;
+  timer: NodeJS.Timeout | null;
+}
+
+interface DetectConfirmationGate {
   resolve: () => void;
   timer: NodeJS.Timeout | null;
 }
@@ -20,6 +30,8 @@ export class FakeVoiceEngine implements VoiceEngine {
   public generateCalls: Array<{ turnId: string; epoch: number; messages: ConversationMessage[] }> = [];
   public classifyCalls: Array<{ turnId: string; text: string }> = [];
   public detectToolCalls: Array<{ turnId: string; text: string }> = [];
+  public detectMutationCalls: Array<{ turnId: string; text: string }> = [];
+  public detectConfirmationCalls: Array<{ turnId: string; text: string }> = [];
   public cancelledTurnIds: string[] = [];
   public shutdownCalled = false;
 
@@ -42,6 +54,14 @@ export class FakeVoiceEngine implements VoiceEngine {
   public toolToReturn: ToolName = 'NENHUMA';
   public detectToolSettleDelayMs = 0;
   private detectToolGates = new Map<string, DetectToolGate>();
+
+  public mutationToReturn: [MutationName, string | null] = ['NENHUMA', null];
+  public detectMutationSettleDelayMs = 0;
+  private detectMutationGates = new Map<string, DetectMutationGate>();
+
+  public confirmationToReturn: 'SIM' | 'NAO' = 'NAO';
+  public detectConfirmationSettleDelayMs = 0;
+  private detectConfirmationGates = new Map<string, DetectConfirmationGate>();
 
   isReadySync(): boolean {
     return true;
@@ -120,6 +140,76 @@ export class FakeVoiceEngine implements VoiceEngine {
     return this.detectToolGates.has(turnId);
   }
 
+  async detectMutation(
+    turnId: string,
+    epoch: number,
+    text: string
+  ): Promise<[MutationName, string | null]> {
+    this.detectMutationCalls.push({ turnId, text });
+
+    await new Promise<void>((resolve) => {
+      let timer: NodeJS.Timeout | null = null;
+      if (this.detectMutationSettleDelayMs > 0) {
+        timer = setTimeout(resolve, this.detectMutationSettleDelayMs);
+      }
+      this.detectMutationGates.set(turnId, { resolve, timer });
+      if (this.detectMutationSettleDelayMs === 0) resolve();
+    });
+
+    this.detectMutationGates.delete(turnId);
+    if (this.cancelledSet.has(turnId)) {
+      throw new Error(`Detecção de mutação do turno ${turnId} cancelada.`);
+    }
+    return this.mutationToReturn;
+  }
+
+  releaseDetectMutationGate(turnId: string): void {
+    const gate = this.detectMutationGates.get(turnId);
+    if (!gate) return;
+    if (gate.timer) clearTimeout(gate.timer);
+    this.detectMutationGates.delete(turnId);
+    gate.resolve();
+  }
+
+  isDetectMutationPending(turnId: string): boolean {
+    return this.detectMutationGates.has(turnId);
+  }
+
+  async detectConfirmation(
+    turnId: string,
+    epoch: number,
+    text: string
+  ): Promise<'SIM' | 'NAO'> {
+    this.detectConfirmationCalls.push({ turnId, text });
+
+    await new Promise<void>((resolve) => {
+      let timer: NodeJS.Timeout | null = null;
+      if (this.detectConfirmationSettleDelayMs > 0) {
+        timer = setTimeout(resolve, this.detectConfirmationSettleDelayMs);
+      }
+      this.detectConfirmationGates.set(turnId, { resolve, timer });
+      if (this.detectConfirmationSettleDelayMs === 0) resolve();
+    });
+
+    this.detectConfirmationGates.delete(turnId);
+    if (this.cancelledSet.has(turnId)) {
+      throw new Error(`Detecção de confirmação do turno ${turnId} cancelada.`);
+    }
+    return this.confirmationToReturn;
+  }
+
+  releaseDetectConfirmationGate(turnId: string): void {
+    const gate = this.detectConfirmationGates.get(turnId);
+    if (!gate) return;
+    if (gate.timer) clearTimeout(gate.timer);
+    this.detectConfirmationGates.delete(turnId);
+    gate.resolve();
+  }
+
+  isDetectConfirmationPending(turnId: string): boolean {
+    return this.detectConfirmationGates.has(turnId);
+  }
+
   async generate(
     turnId: string,
     epoch: number,
@@ -161,6 +251,20 @@ export class FakeVoiceEngine implements VoiceEngine {
       if (detectToolGate.timer) clearTimeout(detectToolGate.timer);
       this.detectToolGates.delete(turnId);
       detectToolGate.resolve();
+    }
+
+    const detectMutationGate = this.detectMutationGates.get(turnId);
+    if (detectMutationGate) {
+      if (detectMutationGate.timer) clearTimeout(detectMutationGate.timer);
+      this.detectMutationGates.delete(turnId);
+      detectMutationGate.resolve();
+    }
+
+    const detectConfirmationGate = this.detectConfirmationGates.get(turnId);
+    if (detectConfirmationGate) {
+      if (detectConfirmationGate.timer) clearTimeout(detectConfirmationGate.timer);
+      this.detectConfirmationGates.delete(turnId);
+      detectConfirmationGate.resolve();
     }
   }
 

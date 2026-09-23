@@ -15,6 +15,19 @@ export function isToolName(v: unknown): v is ToolName {
   return typeof v === 'string' && (TOOL_NAMES as readonly string[]).includes(v);
 }
 
+/** Fase 5c — nomes de mutações suportadas pelo sistema e detecção. */
+export const MUTATION_NAMES = [
+  'LEMBRETE_CRIAR',
+  'LEMBRETE_APAGAR',
+  'NOTA_CRIAR',
+  'NOTA_APAGAR',
+  'NENHUMA'
+] as const;
+export type MutationName = (typeof MUTATION_NAMES)[number];
+export function isMutationName(v: unknown): v is MutationName {
+  return typeof v === 'string' && (MUTATION_NAMES as readonly string[]).includes(v);
+}
+
 export interface StateEvent {
   type: 'state';
   state: VoiceState;
@@ -98,10 +111,20 @@ export const VOICE_LIMITS = {
   TURN_TIMEOUT_MS: 60_000,
   CLASSIFY_TIMEOUT_MS: 10_000,
   DETECT_TOOL_TIMEOUT_MS: 10_000,
+  DETECT_MUTATION_TIMEOUT_MS: 10_000,
+  DETECT_CONFIRMATION_TIMEOUT_MS: 10_000,
+  PENDING_MUTATION_TTL_MS: 60_000,
   WARMUP_TIMEOUT_MS: 120_000,
   IDLE_TIMEOUT_MS: 10 * 60_000,
   WORKER_SHUTDOWN_GRACE_MS: 3_000
 } as const;
+
+export const MAX_MUTATION_CONTENT_CHARS = 200;
+export const DETECT_MUTATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_MUTATION_TIMEOUT_MS;
+export const DETECT_CONFIRMATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_CONFIRMATION_TIMEOUT_MS;
+export const PENDING_MUTATION_TTL_MS = VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
+export const MUTATION_FAILURE_TEXT = 'Não consegui salvar isso agora.';
+export const MUTATION_CANCELLED_TEXT = 'Tudo bem, não fiz nada.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */
 export const KNOWLEDGE_LIMITS = {

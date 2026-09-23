@@ -1,6 +1,6 @@
 import type { IVoiceProvider } from './voice.js';
 import type { IAgent } from './agents.js';
-import type { ITool } from './tools.js';
+import type { ITool, IMutatingTool } from './tools.js';
 import type { ModuleStatus } from '../types.js';
 
 /**
@@ -14,6 +14,7 @@ export class ExtensionRegistry {
   private readonly voiceProviders: IVoiceProvider[] = [];
   private readonly agents: IAgent[] = [];
   private readonly tools: ITool[] = [];
+  private readonly mutatingTools: IMutatingTool[] = [];
   /** Fase 5a: nº de trechos de referência carregados. 0 = corpus ausente => módulo indisponível. */
   private knowledgeChunkCount = 0;
 
@@ -63,6 +64,19 @@ export class ExtensionRegistry {
     this.tools.push(tool);
   }
 
+  public getMutatingTools(): readonly IMutatingTool[] {
+    return this.mutatingTools;
+  }
+
+  /**
+   * Fase 5c: registra ferramentas que mutam estado.
+   * Idempotente por name — registrar a mesma ferramenta duas vezes não duplica.
+   */
+  public registerMutatingTool(tool: IMutatingTool): void {
+    if (this.mutatingTools.some((t) => t.name === tool.name)) return;
+    this.mutatingTools.push(tool);
+  }
+
   /** Fase 5a: registra quantos trechos de referência foram carregados. */
   public registerKnowledge(chunkCount: number): void {
     this.knowledgeChunkCount = chunkCount;
@@ -73,6 +87,7 @@ export class ExtensionRegistry {
     this.voiceProviders.length = 0;
     this.agents.length = 0;
     this.tools.length = 0;
+    this.mutatingTools.length = 0;
     this.knowledgeChunkCount = 0;
   }
 

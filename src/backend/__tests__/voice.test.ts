@@ -11,9 +11,12 @@ import { FakeVoiceEngine } from '../voice/fakeEngine.js';
 import { KnowledgeRetriever, chunkMarkdown, KNOWLEDGE_PREAMBLE } from '../knowledge/index.js';
 import { SessionManager } from '../voice/sessionManager.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
-import type { ITool } from '../../shared/extensions/tools.js';
+import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { createSystemTools, TOOL_FAILURE_TEXT, HoraAtualTool } from '../tools/index.js';
+import { createMutatingTools } from '../tools/index.js';
+import { JsonStore } from '../storage/jsonStore.js';
+import { VOICE_LIMITS, MUTATION_FAILURE_TEXT, MUTATION_CANCELLED_TEXT } from '../../shared/voiceProtocol.js';
 
 function buildTestWav(durationSeconds = 0.2, sampleRate = 16000): Buffer {
   const totalSamples = Math.round(durationSeconds * sampleRate);
@@ -67,7 +70,8 @@ interface Harness {
 
 async function setupHarness(
   retriever: KnowledgeRetriever | null = null,
-  tools: readonly ITool[] = []
+  tools: readonly ITool[] = [],
+  mutatingTools: readonly IMutatingTool[] = []
 ): Promise<Harness> {
   const testConfig: AppConfig = { port: 0, host: '127.0.0.1', clientPort: 0 };
   // porta 0 -> o SO escolhe uma porta livre; startServer atual exige config.port fixo,
@@ -79,7 +83,15 @@ async function setupHarness(
   const engine = new FakeVoiceEngine();
   const tts = new FakeVoiceProvider();
   const audioStore = new AudioStore(tmpDir);
-  const sessionManager = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), retriever, tools);
+  const sessionManager = new SessionManager(
+    engine,
+    tts,
+    audioStore,
+    createSpecialistAgents(),
+    retriever,
+    tools,
+    mutatingTools
+  );
 
   const server = await startServer(config, undefined, { config, sessionManager, audioStore });
 
@@ -87,6 +99,8 @@ async function setupHarness(
 }
 
 async function teardownHarness(h: Harness): Promise<void> {
+  if ((h as any)._tornDown) return;
+  (h as any)._tornDown = true;
   // Cada sessão criada arma um setTimeout de 10min (idle timeout) que mantém o processo
   // vivo se nada o limpar — shutdownAll() encerra a sessão atual e cancela esse timer
   // (é o que voiceRuntime.shutdown() já faz em produção antes de fechar o servidor HTTP).
@@ -842,6 +856,492 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
 
     sse.close();
     await teardownHarness(h);
+  });
+
+  describe('Ferramentas Mutantes (Fase 5c) — integração com o turno de voz', () => {
+    let tmpDataDir: string;
+    let currentH: Harness | null = null;
+    let currentSse: ReturnType<typeof readSse> | null = null;
+
+    beforeEach(() => {
+      tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-voice-mutating-test-'));
+    });
+
+    afterEach(async () => {
+      try {
+        currentSse?.close();
+      } catch {}
+      if (currentH) {
+        await teardownHarness(currentH);
+        currentH = null;
+      }
+      currentSse = null;
+      try {
+        fs.rmSync(tmpDataDir, { recursive: true, force: true });
+      } catch {}
+    });
+
+    it('Fase 5c: detectMutation detecta intenção, sintetiza pergunta e arma armedMutation (pendingMutation continua null)', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar café';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar café'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1); // state: ouvindo
+
+        const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId } = (await audioRes.json()) as { turnId: string };
+
+        // attach(1) + processando(2) + transcript(3) + routing(4) + falando(5) + sentence_audio_ready(6) + turn_done(7) + ouvindo(8)
+        await sse.waitFor(8, 5000);
+
+        const routingEvent = sse.events.find((e) => (e as { type: string }).type === 'routing') as
+          | { type: 'routing'; turnId: string; label: string; handled: boolean }
+          | undefined;
+        assert.equal(routingEvent?.label, 'GERAL');
+        assert.equal(routingEvent?.handled, true);
+
+        const audioEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+          | { type: 'sentence_audio_ready'; text: string }
+          | undefined;
+        assert.equal(audioEvent?.text, 'Posso criar o lembrete: comprar café?');
+
+        const session = (h.sessionManager as any).current;
+        assert.ok(session.armedMutation, 'armedMutation deve estar definido');
+        assert.equal(session.armedMutation.kind, 'LEMBRETE_CRIAR');
+        assert.equal(session.armedMutation.content, 'comprar café');
+        assert.equal(session.armedMutation.turnId, turnId);
+        assert.equal(session.pendingMutation, null, 'pendingMutation deve continuar null antes de markPlayed()');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c: markPlayed() com turnId correto promove armedMutation para pendingMutation com askedAt monotônico', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar café';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar café'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId } = (await audioRes.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        const beforePlayed = performance.now();
+        const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId, text: 'Posso criar o lembrete: comprar café?' })
+        });
+        assert.equal(playedRes.status, 200);
+
+        const session = (h.sessionManager as any).current;
+        assert.equal(session.armedMutation, null, 'armedMutation deve ser consumido na promoção');
+        assert.ok(session.pendingMutation, 'pendingMutation deve ser preenchido');
+        assert.equal(session.pendingMutation.kind, 'LEMBRETE_CRIAR');
+        assert.equal(session.pendingMutation.content, 'comprar café');
+        assert.equal(session.pendingMutation.askedAtTurnId, turnId);
+        assert.ok(session.pendingMutation.askedAt >= beforePlayed, 'askedAt deve ser monotônico (performance.now)');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c (Achado 1 / v4 §7): turno superado por barge-in nunca promove armedMutation para pendingMutation', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar café';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar café'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        // Turno 1: pergunta sobre o lembrete
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        // Barge-in: Turno 2 inicia ANTES de o cliente chamar /played para o Turno 1
+        h.engine.mutationToReturn = ['NENHUMA', null];
+        h.engine.fixedTranscript = 'Que horas são?';
+        const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes2.status, 200);
+
+        // Cliente tenta tarde demais chamar /played do Turno 1
+        const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar café?' })
+        });
+        // Deve recusar (401) porque turnId1 != lastTurnId (markPlayed retorna false e routes.ts envia 401)
+        assert.equal(playedRes.status, 401);
+
+        const session = (h.sessionManager as any).current;
+        assert.equal(session.pendingMutation, null, 'pendingMutation nunca deve ser promovido após barge-in');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c: confirmação com Sim executa mutação, sintetiza sucesso e persiste dado', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar pão';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar pão'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        // Turno 1: gera pergunta
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        // Cliente toca até o fim e chama /played
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar pão?' })
+        });
+
+        // Turno 2: usuário responde "Sim"
+        h.engine.fixedTranscript = 'Sim!';
+        const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId2 } = (await audioRes2.json()) as { turnId: string };
+        assert.ok(turnId2);
+
+        // Espera eventos do turno 2
+        await sse.waitFor(15, 5000);
+
+        const audioEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(audioEvent.text, 'Lembrete criado.');
+
+        const session = (h.sessionManager as any).current;
+        assert.equal(session.pendingMutation, null, 'pendingMutation deve ser limpo após execução');
+
+        // Confirma que o arquivo em tmpDataDir realmente contém o lembrete
+        const store = new JsonStore<{ id: string; text: string }>(tmpDataDir, 'lembretes.json');
+        const data = store.read();
+        assert.equal(data.items.length, 1);
+        assert.equal(data.items[0].text, 'comprar pão');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c: negação com Não cancela mutação e sintetiza MUTATION_CANCELLED_TEXT sem persistir', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar leite';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar leite'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar leite?' })
+        });
+
+        // Turno 2: "Não"
+        h.engine.fixedTranscript = 'Não';
+        await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        await sse.waitFor(15, 5000);
+
+        const audioEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(audioEvent.text, MUTATION_CANCELLED_TEXT);
+
+        const session = (h.sessionManager as any).current;
+        assert.equal(session.pendingMutation, null);
+
+        // Nada gravado
+        const store = new JsonStore<{ id: string; text: string }>(tmpDataDir, 'lembretes.json');
+        const data = store.read();
+        assert.equal(data.items.length, 0);
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c: resposta ambígua consulta detectConfirmation e executa se confirmar', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: lavar o carro';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'lavar o carro'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: lavar o carro?' })
+        });
+
+        // Frase fora da whitelist exata -> cai para Camada 1
+        h.engine.fixedTranscript = 'Acho uma boa ideia sim';
+        h.engine.confirmationToReturn = 'SIM';
+
+        await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        await sse.waitFor(15, 5000);
+
+        assert.equal(h.engine.detectConfirmationCalls.length, 1, 'detectConfirmation deve ter sido acionado');
+        const audioEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(audioEvent.text, 'Lembrete criado.');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c: TTL de 60s expira pendingMutation e enunciado seguinte segue caminho normal', async (t) => {
+      const mutatingTools = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar água';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar água'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar água?' })
+        });
+
+        const session = (h.sessionManager as any).current;
+        assert.ok(session.pendingMutation);
+        // Simula expiração de TTL (>= 60_000ms)
+        session.pendingMutation.askedAt = performance.now() - 60_001;
+
+        // Próximo turno: pergunta normal
+        h.engine.mutationToReturn = ['NENHUMA', null];
+        h.engine.fixedTranscript = 'Explique a virtude da coragem';
+        h.engine.classificationToReturn = 'GERAL';
+
+        await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        await sse.waitFor(16, 5000);
+
+        assert.equal(session.pendingMutation, null, 'pendingMutation expirado deve ser descartado');
+        assert.equal(h.engine.classifyCalls.length, 1, 'deve ter seguido para classificação normal');
+        assert.equal(h.engine.generateCalls.length, 1, 'deve ter seguido para geração normal');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('Fase 5c (Achado 5 / v5 §6.3): preview() que lança fala MUTATION_FAILURE_TEXT sem armar nada', async (t) => {
+      const brokenTool: IMutatingTool = {
+        name: 'LEMBRETE',
+        description: 'Ferramenta com erro em preview',
+        isAvailable: () => true,
+        preview: () => {
+          throw new Error('Falha simulada em preview()');
+        },
+        execute: () => 'Lembrete criado.'
+      };
+
+      const h = await setupHarness(null, [], [brokenTool]);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Lembrete: comprar pão';
+        h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar pão'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes.status, 200);
+        await sse.waitFor(8, 5000);
+
+        const audioEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+          | { type: 'sentence_audio_ready'; text: string }
+          | undefined;
+        assert.equal(audioEvent?.text, MUTATION_FAILURE_TEXT);
+
+        const session = (h.sessionManager as any).current;
+        assert.equal(session.armedMutation, null, 'armedMutation NÃO deve ser armado quando preview falha');
+        assert.equal(session.pendingMutation, null);
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
   });
 });
 

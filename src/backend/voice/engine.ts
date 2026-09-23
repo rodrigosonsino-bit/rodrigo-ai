@@ -1,4 +1,4 @@
-import type { ConversationMessage, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 
 export interface GenerateCallbacks {
   onSentence: (text: string, index: number) => void;
@@ -28,6 +28,23 @@ export interface VoiceEngine {
    * indisponível) — mesma semântica de classify().
    */
   detectTool(turnId: string, epoch: number, text: string): Promise<ToolName>;
+  /**
+   * Fase 5c: decide se o texto pede para CRIAR ou APAGAR um LEMBRETE ou uma NOTA.
+   * Formato inesperado ou não reconhecimento degrada para ['NENHUMA', null].
+   */
+  detectMutation(
+    turnId: string,
+    epoch: number,
+    text: string
+  ): Promise<[MutationName, string | null]>;
+  /**
+   * Fase 5c: decide se a fala confirma (SIM) ou nega/cancela (NAO) a pergunta de confirmação.
+   */
+  detectConfirmation(
+    turnId: string,
+    epoch: number,
+    text: string
+  ): Promise<'SIM' | 'NAO'>;
   /**
    * Gera a resposta de um turno. Resolve quando a geração termina (ou é cancelada).
    * Frases completas são emitidas incrementalmente via callbacks.onSentence.

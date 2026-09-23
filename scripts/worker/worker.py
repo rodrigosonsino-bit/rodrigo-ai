@@ -103,6 +103,81 @@ def parse_tool_output(raw: str) -> str:
     return normalized if normalized in TOOL_NAMES else "NENHUMA"
 
 
+MUTATION_NAMES = {"LEMBRETE_CRIAR", "LEMBRETE_APAGAR", "NOTA_CRIAR", "NOTA_APAGAR", "NENHUMA"}
+MAX_MUTATION_CONTENT_CHARS = 200
+
+DETECT_MUTATION_SYSTEM_PROMPT = (
+    "Você decide se a frase do usuário pede para CRIAR ou APAGAR um LEMBRETE ou uma NOTA, ou "
+    "NENHUMA das quatro. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR (o texto "
+    "exato do que deve ser lembrado/anotado, sem aspas, sem explicação extra).\n"
+    "LEMBRETE_CRIAR: um compromisso, tarefa ou coisa temporária a fazer — 'lembra de', 'não "
+    "deixa eu esquecer', 'anota aí que eu preciso', 'bota um lembrete pra'.\n"
+    "NOTA_CRIAR: uma ideia, observação, ou texto livre pra guardar — 'guarda essa ideia', "
+    "'escreve isso pra mim', 'salva essa observação', 'registra que'.\n"
+    "LEMBRETE_APAGAR: pede pra apagar/cancelar o lembrete mais recente — 'apaga o lembrete', "
+    "'cancela aquele lembrete', 'esquece o que eu pedi pra lembrar'.\n"
+    "NOTA_APAGAR: pede pra apagar a nota mais recente — 'apaga essa nota', 'joga fora a "
+    "anotação'.\n"
+    "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum, e qualquer "
+    "menção a lembrar/anotar que não seja um pedido direto de ação (ex.: 'eu lembro que você "
+    "me falou isso' é NENHUMA, é o usuário lembrando de algo, não pedindo pra você lembrar).\n"
+    "Exemplos:\n"
+    "Lembra de ligar pro dentista amanhã de manhã -> LEMBRETE_CRIAR|Ligar pro dentista amanhã de manhã\n"
+    "Não deixa eu esquecer de pagar a conta de luz -> LEMBRETE_CRIAR|Pagar a conta de luz\n"
+    "Guarda essa ideia: usar madeira de demolição no projeto -> NOTA_CRIAR|Usar madeira de demolição no projeto\n"
+    "Escreve aí que a reunião de terça foi produtiva -> NOTA_CRIAR|A reunião de terça foi produtiva\n"
+    "Apaga o lembrete que eu acabei de pedir -> LEMBRETE_APAGAR\n"
+    "Cancela essa nota, joga fora -> NOTA_APAGAR\n"
+    "Eu lembro que você me falou sobre isso semana passada -> NENHUMA\n"
+    "Você consegue lembrar de coisas entre sessões? -> NENHUMA\n"
+)
+
+DETECT_CONFIRMATION_SYSTEM_PROMPT = (
+    "O usuário acabou de ouvir uma pergunta perguntando se ele confirma uma ação (criar ou "
+    "apagar algo). Responda em UMA PALAVRA: SIM se a resposta confirma a ação, NAO se nega, "
+    "cancela, ou não é claramente uma confirmação.\n"
+    "Exemplos:\n"
+    "Isso mesmo, pode confirmar -> SIM\n"
+    "Perfeito, é isso -> SIM\n"
+    "Não, deixa pra lá -> NAO\n"
+    "Melhor não, esquece -> NAO\n"
+    "Na verdade eu quis dizer outra coisa -> NAO\n"
+    "Isso aí tá errado -> NAO\n"
+)
+
+
+def parse_mutation_output(raw: str, truncated: bool) -> tuple[str, str | None]:
+    """Função PURA — testada em scripts/worker/test_mutation_parser.py.
+
+    `truncated` (achado 9): True quando a geração atingiu max_tokens sem terminar
+    naturalmente — conteúdo pode estar cortado no meio de uma palavra, sintaticamente
+    válido pro parser mas semanticamente incompleto. Degrada para NENHUMA nesse caso,
+    mesma filosofia de 'melhor pedir de novo do que gravar errado' do resto da fase.
+    """
+    if truncated:
+        return ("NENHUMA", None)
+    text = (raw or "").strip()
+    sep = text.find("|")
+    action = (text if sep == -1 else text[:sep]).strip().upper()
+    content = None if sep == -1 else text[sep + 1:].strip()
+
+    if action not in MUTATION_NAMES:
+        return ("NENHUMA", None)
+    if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR"):
+        if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
+            return ("NENHUMA", None)
+        return (action, content)
+    return (action, None)
+
+
+def parse_confirmation_output(raw: str) -> str:
+    """Função PURA — testada em scripts/worker/test_mutation_parser.py.
+    Formato inesperado degrada para NAO — fail closed em ação que muta estado.
+    """
+    normalized = (raw or "").strip().upper().strip(".!? \n")
+    return "SIM" if normalized == "SIM" else "NAO"
+
+
 STT_MODEL_ID = "mlx-community/whisper-small-mlx"
 MAX_TURN_TOKENS = 160
 
@@ -402,6 +477,117 @@ class Worker:
             if self._mx is not None:
                 self._mx.clear_cache()
 
+    def handle_detect_mutation(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        turn_id = msg["turnId"]
+        epoch = msg["epoch"]
+        text = msg["text"]
+
+        if not text or not text.strip():
+            emit({"event": "mutation_detection", "reqId": req_id, "turnId": turn_id, "action": "NENHUMA", "content": None})
+            return
+
+        handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
+        with self._current_lock:
+            self._current = handle
+
+        try:
+            messages = [
+                {"role": "system", "content": DETECT_MUTATION_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ]
+            prompt = self._llm_tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
+            )
+
+            from mlx_lm.generate import stream_generate
+            from mlx_lm.sample_utils import make_sampler
+
+            sampler = make_sampler(temp=0.0)
+            raw = ""
+            token_count = 0
+            max_tokens = 96
+            for response in stream_generate(
+                self._llm, self._llm_tokenizer, prompt, max_tokens=max_tokens, sampler=sampler
+            ):
+                if handle.cancel_event.is_set():
+                    log_diag(f"Detecção de mutação cancelada pelo worker (turnId={turn_id}).")
+                    return
+                raw += response.text
+                token_count += 1
+
+            truncated = token_count >= max_tokens
+            action, content = parse_mutation_output(raw, truncated=truncated)
+            emit({
+                "event": "mutation_detection",
+                "reqId": req_id,
+                "turnId": turn_id,
+                "action": action,
+                "content": content,
+            })
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na detecção de mutação: {exc}\n{traceback.format_exc()}")
+            emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar mutação."})
+        finally:
+            with self._current_lock:
+                if self._current is handle:
+                    self._current = None
+            if self._mx is not None:
+                self._mx.clear_cache()
+
+    def handle_detect_confirmation(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        turn_id = msg["turnId"]
+        epoch = msg["epoch"]
+        text = msg["text"]
+
+        if not text or not text.strip():
+            emit({"event": "confirmation_detection", "reqId": req_id, "turnId": turn_id, "confirmation": "NAO"})
+            return
+
+        handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
+        with self._current_lock:
+            self._current = handle
+
+        try:
+            messages = [
+                {"role": "system", "content": DETECT_CONFIRMATION_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ]
+            prompt = self._llm_tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
+            )
+
+            from mlx_lm.generate import stream_generate
+            from mlx_lm.sample_utils import make_sampler
+
+            sampler = make_sampler(temp=0.0)
+            raw = ""
+            for response in stream_generate(
+                self._llm, self._llm_tokenizer, prompt, max_tokens=6, sampler=sampler
+            ):
+                if handle.cancel_event.is_set():
+                    log_diag(f"Detecção de confirmação cancelada pelo worker (turnId={turn_id}).")
+                    return
+                raw += response.text
+
+            confirmation = parse_confirmation_output(raw)
+            emit({
+                "event": "confirmation_detection",
+                "reqId": req_id,
+                "turnId": turn_id,
+                "confirmation": confirmation,
+            })
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na detecção de confirmação: {exc}\n{traceback.format_exc()}")
+            emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar confirmação."})
+        finally:
+            with self._current_lock:
+                if self._current is handle:
+                    self._current = None
+            if self._mx is not None:
+                self._mx.clear_cache()
+
     def handle_generate(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
         turn_id = msg["turnId"]
@@ -526,6 +712,10 @@ class Worker:
                     self.handle_classify(msg)
                 elif cmd == "detect_tool":
                     self.handle_detect_tool(msg)
+                elif cmd == "detect_mutation":
+                    self.handle_detect_mutation(msg)
+                elif cmd == "detect_confirmation":
+                    self.handle_detect_confirmation(msg)
                 elif cmd == "generate":
                     self.handle_generate(msg)
             except Exception as exc:  # noqa: BLE001
@@ -550,7 +740,7 @@ class Worker:
                 self.handle_cancel(msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
-            elif cmd in ("transcribe", "classify", "generate", "detect_tool"):
+            elif cmd in ("transcribe", "classify", "generate", "detect_tool", "detect_mutation", "detect_confirmation"):
                 # Fila de tamanho 1: se algo estiver esperando (não deveria, pois o Node só
                 # envia um novo comando após cancelar o anterior), descarta o mais antigo.
                 try:

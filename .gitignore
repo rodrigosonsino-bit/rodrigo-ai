@@ -7,5 +7,6 @@ dist
 *.log
 !docs/audits/*.log
 .runtime
+data/
 __pycache__
 *.pyc
