@@ -1,0 +1,207 @@
+# Relatório de Auditoria Adversarial: `docs/phase-5c-v7.md`
+
+**Auditor:** Agente Adversarial de Auditoria de Código de Produção  
+**Data:** 2026-09-23  
+**Objeto:** [docs/phase-5c-v7.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md)  
+**Arquivos de Referência Inspecionados:**
+- [src/backend/voice/sessionManager.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts)
+- [scripts/worker/worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py)
+- [src/backend/tools/mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts)
+- [src/backend/__tests__/mutatingTools.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts)
+- [src/backend/__tests__/voice.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts)
+- [docs/implementation-phase-5c.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/implementation-phase-5c.md)
+- [docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md)
+- [docs/audits/phase-5c-v6-result-2026-09-23.json](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-result-2026-09-23.json)
+
+---
+
+## Achados Estruturados
+
+### ACHADO 1: Quebra da Camada 0 (Whitelist Exata) — Premissa Factual Falsa Rebaixa `"com certeza"` para `NAO`
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L102-L105](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L102-L105):
+    > *"Nota de desenho: a camada 0 (`keywordConfirmation`) já é um subconjunto dos marcadores afirmativos (`sim`, `claro`, `confirmo`, `certo`, `exato`, `exatamente`, `positivo`, `isso mesmo`, `pode confirmar`, `com certeza`) — todo SIM que sai da camada 0 automaticamente teria marcador. O gate só tem efeito real sobre SIM vindo da camada 1 (LLM)."*
+  - [src/backend/voice/sessionManager.ts#L34-L45](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L34-L45):
+    `'com certeza'` está explicitamente registrado no conjunto `CONFIRM_YES_EXACT`.
+  - [src/backend/__tests__/mutatingTools.test.ts#L197-L201](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L197-L201):
+    `'Com certeza'` é coberto por teste unitário que exige retorno `'SIM'`.
+  - [docs/phase-5c-v7.md#L64-L68](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L64-L68):
+    `AFFIRMATIVE_MARKERS` **não** contém `'com certeza'` nem `'certeza'`.
+  - [docs/phase-5c-v7.md#L92-L95](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L92-L95):
+    O pseudocódigo posiciona o gate **fora** do bloco `if (confirmed === null)`, avaliando `if (confirmed === 'SIM' && !hasAffirmativeMarker(transcript))` para **todo** `SIM`, inclusive os originados na Camada 0.
+- **GRAVIDADE:** **CRÍTICA**
+- **CONFIANÇA:** **100%**
+- **IMPACTO:**
+  A afirmação de que a Camada 0 é um subconjunto de `AFFIRMATIVE_MARKERS` é **demonstravelmente falsa**. Se o usuário responder `"Com certeza"`, a Camada 0 reconhece legitimamente como `'SIM'`, mas em seguida o gate executa `hasAffirmativeMarker("Com certeza")`. Como nenhum dos 19 marcadores dá match em `"com certeza"` (o marcador `"certo"` exige fronteira de palavra `\bcerto\b`, não casando `"certeza"`), a função retorna `false`. O gate **rebaixa o SIM da Camada 0 para NAO**, descartando a mutação (`pendingMutation = null`) e sintetizando `"Tudo bem, não fiz nada"`. Isso introduz uma quebra funcional em código já auditado da Fase 5c.
+- **AÇÃO RECOMENDADA:**
+  1. O gate deve ser restrito **estritamente à Camada 1**, posicionado dentro do bloco `if (confirmed === null)`, logo após `this.engine.detectConfirmation(...)`, nunca fora dele.
+  2. Adicionar `'certeza'` e/ou `'com certeza'` a `AFFIRMATIVE_MARKERS` como defesa em profundidade.
+
+---
+
+### ACHADO 2: Marcadores Ambíguos em Negações Reais (`"isso"`, `"pode"`, `"vale/valendo"`) Criam Falsos Positivos de Segurança
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L64-L68](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L64-L68):
+    Inclusão de `'isso'`, `'pode'`, `'vale'`, `'valendo'`.
+  - [docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md#L52](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md#L52):
+    Caso #14 real da bateria: `"[NAO] pera, cancela isso"`.
+  - [src/backend/voice/sessionManager.ts#L54](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L54):
+    `CONFIRM_NO_EXACT` contém `'esquece isso'`.
+  - [src/backend/__tests__/mutatingTools.test.ts#L225](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L225):
+    `'Pode esquecer'` é explicitamente delegado ao LLM.
+- **GRAVIDADE:** **ALTA**
+- **CONFIANÇA:** **95%**
+- **IMPACTO:**
+  O plano propõe que o gate atue como salvaguarda determinística quando o STT sofre degradação ou quando o classificador LLM erra. Porém, vários marcadores da lista são pronomes ou verbos auxiliares onipresentes em negações coloquiais:
+  1. **`"isso"`**: É um pronome demonstrativo que compõe dezenas de recusas naturais: *"cancela isso"* (caso #14 real), *"esquece isso"*, *"não quero isso"*, *"tira isso"*, *"nada disso"*, *"não é isso"*, *"para com isso"*. Se o STT degradar a palavra de recusa (ex.: "cancela", "esquece") ou se o LLM se confundir e responder `SIM`, o gate encontra `\bisso\b`, avalia como `true` e deixa o falso SIM passar para execução. A Camada 0 congelou `'isso mesmo'` justamente para não aceitar `'isso'` solto. A v7 regrediu essa cautela.
+  2. **`"pode"`**: No design da Camada 0, `'pode'` solto foi expressamente excluído da whitelist (delegado ao LLM em [mutatingTools.test.ts#L233](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L233)). Frases como *"pode cancelar"*, *"pode esquecer"*, *"pode parar"*, *"pode ser que não"* e *"não pode"* casam `\bpode\b`. Se o Whisper engolir o monossílabo "Não" em *"Não pode"* (o mesmo padrão do caso #18), a transcrição residual *"Pode."* terá sinal verde imediato do gate.
+  3. **`"vale"` / `"valendo"`**: Frases como *"não vale a pena"*, *"não vale"* ou *"deixa, não tá valendo"* contêm o marcador.
+  4. **Negações com marcadores afirmativos explícitos**: Frases como *"claro que não"*, *"não confirmo"*, *"não tá certo"*, *"jamais confirma"* possuem marcadores ("claro", "confirmo", "certo", "confirma"). Se o LLM alucinar SIM, o gate avalia `true` e a mutação é executada. O gate não implementa nenhuma verificação de veto sobre tokens negativos na mesma sentença.
+- **AÇÃO RECOMENDADA:**
+  1. Remover `'isso'` isolado da lista e substituí-lo por compostos inequívocos (ex.: `'isso mesmo'`, `'e isso'`).
+  2. Remover `'pode'` isolado ou substituí-lo por expressões verbais afirmativas completas (ex.: `'pode criar'`, `'pode marcar'`, `'pode fazer'`, `'pode sim'`).
+  3. Remover `'vale'` / `'valendo'` ou exigir `'ta valendo'`.
+  4. Implementar veto de colisão: se a transcrição contiver marcadores de negação inequívocos (`\b(nao|nem|nunca|jamais|cancela|cancelar|esquece|esquecer|tira|tirar)\b`), o gate nunca deve considerar o marcador afirmativo como isoladamente suficiente.
+
+---
+
+### ACHADO 3: Falsos Negativos Massivos (Regressão de Cobertura) por Overfitting da Lista aos 9 Casos Conhecidos
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L132-L135](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L132-L135):
+    > *"Nota de proveniência da lista: os 9 marcadores centrais (sim, pode, manda, isso, bora, confirma, certo, beleza, fechou, valendo) foram extraídos por inspeção da amostra de 18 frases já coletada e medida"*
+  - [scripts/worker/worker.py#L141](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L141):
+    Exemplo oficial do prompt do worker: `"Perfeito, é isso -> SIM"`.
+- **GRAVIDADE:** **ALTA**
+- **CONFIANÇA:** **95%**
+- **IMPACTO:**
+  A lista de 19 marcadores foi desenhada para cobrir exatamente as 9 frases afirmativas que o autor observou na medição de 2026-09-23. Ao testar o gate contra confirmações naturais em português do Brasil que não estavam naquela amostra específica, constata-se que o gate rebaixará para `NAO` respostas perfeitamente válidas que o LLM classifica como `SIM`:
+  - `"Tá bom"` / `"Ta bom"` / `"Bom"`
+  - `"Perfeito"`
+  - `"Combinado"`
+  - `"Ótimo"` / `"Otimo"`
+  - `"Maravilha"`
+  - `"Show"` / `"Show de bola"`
+  - `"Joia"` / `"Jóia"`
+  - `"Certinho"`
+  - `"De acordo"`
+  - `"Vai fundo"` (parte do caso #3 da amostra; se dito isoladamente, falha)
+  - Respostas imperativas à pergunta "Posso criar o lembrete?": `"Cria aí"`, `"Anota aí"`, `"Salva aí"`, `"Faz aí"`.
+  Quando o LLM responder `SIM` para qualquer uma dessas falas, o gate v7 forçará `NAO`, destruirá o `pendingMutation`, falará `"Tudo bem, não fiz nada"` e registrará falso negativo. Se a nova amostra hold-out independente contiver apenas 2 dessas expressões coloquiais normais entre seus ~10 casos de SIM, a taxa de H-confirmação cairá imediatamente abaixo da meta de ≥90%, reprovando a bateria.
+- **AÇÃO RECOMENDADA:**
+  Expandir a lista de marcadores para incluir confirmações canônicas do português falado (`perfeito`, `combinado`, `otimo`, `maravilha`, `show`, `joia`, `ta bom`, `vai fundo`) antes de congelar a implementação.
+
+---
+
+### ACHADO 4: Incoerência Textual e Omissão Metodológica nos Critérios de Aceite e Congelamento do §6
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L158-L161](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L158-L161):
+    > *"Bloqueante — protocolo de congelamento... este plano é commitado ANTES de qualquer amostra nova ser pedida ou vista. Só depois do commit, solicitar duas amostras hold-out novas e independentes (não reaproveitar as 18+17 frases já vistas...)"*
+  - [docs/phase-5c-v7.md#L162-L167](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L162-L167):
+    Apresenta apenas um subitem: amostra de confirmação.
+  - [docs/phase-5c-v7.md#L168-L169](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L168-L169):
+    > *"4. H-mutação não é remedida por este plano (fora de escopo, §0) — permanece 76,5%, gap reconhecido e não resolvido aqui."*
+  - [docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md#L58-L83](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md#L58-L83):
+    Na v6, o prompt de geração da amostra foi congelado textualmente.
+- **GRAVIDADE:** **MÉDIA**
+- **CONFIANÇA:** **90%**
+- **IMPACTO:**
+  1. **Contradição textual direta:** O texto exige solicitar *"duas amostras hold-out novas e independentes"*, mas lista apenas a amostra de confirmação e no item seguinte declara formalmente que H-mutação não será remedida. Isso é resíduo de edição descuidado.
+  2. **Prompt de geração não congelado:** O plano estipula que a nova amostra deve ter *"ênfase em negações onde o STT plausivelmente perderia a palavra de negação"*, mas não fornece o prompt exato a ser submetido ao Hermes Agent. Sem congelar o prompt do gerador no plano, perde-se a reprodutibilidade e abre-se margem para ajustes manuais direcionados.
+  3. **Congelamento incompleto da cadeia:** O plano diz que ele próprio deve ser commitado antes de pedir a amostra, mas não formaliza que o **código implementado e seus testes unitários** devem estar commitados e auditados antes da coleta/medição da amostra hold-out (evitando que o código seja modificado após ver as frases geradas).
+- **AÇÃO RECOMENDADA:**
+  1. Corrigir o texto do §6 para declarar explicitamente **uma** amostra hold-out (H-confirmação, 18-20 frases).
+  2. Congelar verbatim no §6 o prompt exato que será enviado ao Hermes para gerar as frases.
+  3. Deixar claro que a ordem obrigatória é: Plano commitado -> Código implementado e auditado commitado -> Amostra solicitada e congelada -> Medição com MLX executada.
+
+---
+
+### ACHADO 5: Ineficiência de Execução e Fragilidade com Espaços Internos em `hasAffirmativeMarker`
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L70-L73](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L70-L73):
+    ```ts
+    export function hasAffirmativeMarker(transcript: string): boolean {
+      const n = normalizeConfirmation(transcript);
+      return AFFIRMATIVE_MARKERS.some((m) => new RegExp(`\\b${m}\\b`).test(n));
+    }
+    ```
+  - [src/backend/voice/sessionManager.ts#L58-L65](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L58-L65):
+    `normalizeConfirmation` executa `.trim()`, mas não colapsa múltiplos espaços em branco (`.replace(/\s+/g, ' ')`).
+- **GRAVIDADE:** **MÉDIA**
+- **CONFIANÇA:** **95%**
+- **IMPACTO:**
+  1. Instanciar até 19 objetos `RegExp` em runtime a cada turno de confirmação via `.some((m) => new RegExp(...))` é uma implementação ineficiente e contrária aos padrões do Node.js/V8.
+  2. Se forem inseridos marcadores com mais de uma palavra (ex.: `"com certeza"`, `"isso mesmo"`, `"pode confirmar"`), a busca `\bcom certeza\b` falhará caso o STT transcreva espaços múltiplos ou quebras de linha (`"com  certeza"`), pois `normalizeConfirmation` não normaliza espaços internos.
+- **AÇÃO RECOMENDADA:**
+  1. Pré-compilar um único `RegExp` com alternância:
+     ```ts
+     const AFFIRMATIVE_REGEX = new RegExp(`\\b(?:${AFFIRMATIVE_MARKERS.join('|')})\\b`);
+     ```
+  2. Garantir que `normalizeConfirmation` colapse espaços repetidos com `.replace(/\s+/g, ' ')`.
+
+---
+
+### ACHADO 6: Localização Inconsistente dos Testes Unitários no §5
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L145](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L145):
+    Indica `src/backend/__tests__/voice.test.ts (ou arquivo de teste dedicado)` como destino dos testes da função pura.
+  - [src/backend/__tests__/mutatingTools.test.ts#L182-L251](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L182-L251):
+    Os testes existentes de `normalizeConfirmation` e `keywordConfirmation` (Camada 0) residem em `mutatingTools.test.ts`.
+- **GRAVIDADE:** **BAIXA**
+- **CONFIANÇA:** **100%**
+- **IMPACTO:**
+  `voice.test.ts` é uma suíte extensa de integração E2E (~1350 linhas, 59 KB) com ciclos HTTP e SSE assíncronos. Misturar testes unitários de funções puras nele fragmenta a organização do repositório, onde `mutatingTools.test.ts` já concentra todos os testes unitários de funções de mutação e confirmação sem overhead de rede.
+- **AÇÃO RECOMENDADA:**
+  Determinar explicitamente `src/backend/__tests__/mutatingTools.test.ts` (ou um novo `src/backend/__tests__/confirmationGate.test.ts`) como o arquivo oficial para os testes unitários da nova função pura.
+
+---
+
+### ACHADO 7: Semântica Inadequada de Log com `console.error` em Fluxo Operacional Normal
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v7.md#L94](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v7.md#L94):
+    `console.error('[mutation] SIM sem marcador afirmativo no texto original, rebaixado para NAO (fail-closed).');`
+  - [src/backend/voice/sessionManager.ts#L369](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L369):
+    Logs de decisão do pipeline de mutação usam `console.log`.
+- **GRAVIDADE:** **BAIXA**
+- **CONFIANÇA:** **95%**
+- **IMPACTO:**
+  No backend Node.js, `console.error` emite para `stderr`. Na convenção do projeto, `console.error` é reservado para exceções e falhas técnicas (ex.: [sessionManager.ts#L345](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L345)). O rebaixamento pelo gate determinístico é uma decisão de negócio legítima e esperada (fail-closed), não um erro de software. Usar `console.error` gera alarmes falsos em ferramentas de monitoramento que rastreiam `stderr`.
+- **AÇÃO RECOMENDADA:**
+  Utilizar `console.warn` ou `console.log` com prefixo claro (ex.: `[mutation] [gate] ...`).
+
+---
+
+## Respostas às 8 Investigações Ativas
+
+| # | Ponto Investigado | Resultado Adversarial |
+|---|---|---|
+| **1** | **Adequação de `AFFIRMATIVE_MARKERS`** | **Inadequada.** Marcadores como `"isso"`, `"pode"` e `"vale"` criam vulnerabilidade a falsos positivos em negações como *"cancela isso"*, *"pode esquecer"* e *"não vale"*. Inversamente, causa falsos negativos em confirmações comuns como *"tá bom"*, *"perfeito"*, *"combinado"* e *"ótimo"*. |
+| **2** | **Ordem de aplicação do gate vs fluxo real** | **Incorreta.** No pseudocódigo do §2 (linhas 80-95), o gate foi inserido após o bloco `if (confirmed === null)`. Como consequência, ele atua sobre o resultado da Camada 0 e rebaixa confirmações de whitelist legítimas como `"com certeza"`. Deveria estar contido estritamente dentro do `if (confirmed === null)`. As linhas citadas no código real ([sessionManager.ts:339-351](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L339-L351)) estão ativas e inalteradas. |
+| **3** | **Integridade da variável `transcript`** | **Confirmada.** No ponto exato de aplicação ([sessionManager.ts:348](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L348)), `transcript` é a constante original retornada por `this.engine.transcribe(audioPath)`, sem truncamento prévio. |
+| **4** | **Interação com Camada 0 (`CONFIRM_YES_EXACT`)** | **Quebrada.** A afirmação de que toda a Camada 0 é um subconjunto de `AFFIRMATIVE_MARKERS` é falsa. `'com certeza'` está na Camada 0 mas foi esquecida na lista de marcadores da v7, sendo rebaixada indevidamente para `NAO`. |
+| **5** | **Regex com `\b` sobre texto normalizado** | **Funcional para palavras simples, mas frágil.** `\b` funciona bem em ASCII gerado por NFD, mas falha se houver pontuação não-alfanumérica acoplada (ex.: `ok!`), colapsa com espaços duplos em expressões compostas, e a criação dinâmica de 19 `new RegExp` por turno é ineficiente. |
+| **6** | **Protocolo de congelamento do §6** | **Incompleto e incoerente.** Menciona solicitar "duas amostras" mas só define uma e veta a segunda; não congela o prompt do gerador; e não estabelece que a implementação deve estar commitada antes de coletar as frases. |
+| **7** | **Risco a garantias existentes da Fase 5c** | **Garantias de `markPlayed()` e TTL preservadas; garantia de Camada 0 violada.** Não afeta `markPlayed()` nem TTL, mas rompe a garantia de whitelist imediata da Camada 0 para `"com certeza"`. |
+| **8** | **Escopo declarado vs Escopo real** | **Transbordamento não-declarado.** Ao rebaixar confirmações naturais sem marcadores da v7, o plano introduz uma regressão severa de usabilidade/cobertura em turnos onde o LLM acertaria `SIM`, excedendo o escopo estrito de mitigação de falso SIM. |
+
+---
+
+## Veredito Final
+
+### **REJEITADO**
+
+### O que precisa mudar antes da próxima rodada (v8):
+
+1. **Correção arquitetural do ponto de inserção do gate:**
+   O gate **deve** ser movido para o interior do bloco `if (confirmed === null)`, operando **exclusivamente** sobre a saída de `this.engine.detectConfirmation(...)`. Sob nenhuma hipótese o gate pode interceptar ou rebaixar um veredito emitido pela Camada 0 (`keywordConfirmation`).
+2. **Saneamento e expansão da lista `AFFIRMATIVE_MARKERS`:**
+   - **Remover** o pronome ambíguo `'isso'` isolado e o verbo modal `'pode'` isolado, substituindo-os por locuções afirmativas inequívocas (ex.: `'isso mesmo'`, `'e isso'`, `'pode sim'`, `'pode criar'`, `'pode marcar'`).
+   - **Adicionar** confirmações frequentes em português falado para evitar colapso de cobertura: `'certeza'`, `'com certeza'`, `'perfeito'`, `'combinado'`, `'otimo'`, `'maravilha'`, `'ta bom'`, `'show'`, `'joia'`.
+   - Adicionar mecanismo de desempate/veto caso haja marcadores de negação explícita concomitantes na mesma fala.
+3. **Otimização de implementação:**
+   Substituir o loop de `new RegExp` dinâmicos por um único `RegExp` pré-compilado e garantir que `normalizeConfirmation` execute colapso de múltiplos espaços internos (`.replace(/\s+/g, ' ')`).
+4. **Alinhamento e congelamento do §6:**
+   - Corrigir a referência a "duas amostras" para **uma única amostra hold-out de confirmação** (~18 a 20 frases).
+   - Congelar textualmente o prompt exato que será enviado ao Hermes para gerar as frases.
+   - Definir a ordem estrita de execução: aprovação do plano v8 -> commit do plano -> implementação e testes unitários locais -> commit da implementação -> solicitação e congelamento da amostra hold-out -> medição com MLX.
+5. **Ajuste de arquivos afetados:**
+   Definir [src/backend/__tests__/mutatingTools.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts) como o local oficial dos testes unitários da nova função pura, mantendo a coerência com os testes da Camada 0.
