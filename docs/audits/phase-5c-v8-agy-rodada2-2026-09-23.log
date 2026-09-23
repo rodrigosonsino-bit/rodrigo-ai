@@ -1,0 +1,275 @@
+Estou executando a suíte de testes existente do repositório para verificar a linha de base antes de prosseguir com a conferência detalhada dos itens. Aguardo a conclusão da execução.
+# Relatório de Auditoria Adversarial (Rodada 2) — `docs/phase-5c-v8.md`
+
+**Auditor:** Agente Adversarial de Auditoria de Código de Produção  
+**Data:** 2026-09-23  
+**Objeto Auditado:** [docs/phase-5c-v8.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md)  
+**Arquivos de Referência do Repositório Inspecionados Diretamente:**
+- [src/backend/voice/sessionManager.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts) (linhas 25–80 e 320–380)
+- [src/backend/tools/mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts) (linhas 1–120)
+- [src/backend/__tests__/mutatingTools.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts) (linhas 180–252)
+- [docs/audits/phase-5c-v7-agy-rodada1-2026-09-23.log](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v7-agy-rodada1-2026-09-23.log)
+- [docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md)
+- [docs/audits/phase-5c-v6-result-2026-09-23.json](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-result-2026-09-23.json)
+
+---
+
+## 1. Rechecagem dos 7 Achados da Rodada 1
+
+---
+
+### ACHADO 1 (Rodada 1): Quebra da Camada 0 (Whitelist Exata) — Gate fora do bloco `if (confirmed === null)`
+- **STATUS:** **RESOLVIDO**
+- **EVIDÊNCIA:**
+  - Código real: [src/backend/voice/sessionManager.ts:339-348](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L339-L348)
+  - Pseudocódigo v8: [docs/phase-5c-v8.md:113-128](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L113-L128)
+- **GRAVIDADE ORIGINAL:** CRÍTICA
+- **CONFIANÇA:** 100%
+- **VERIFICAÇÃO ADVERSARIAL:**
+  Na v7, o gate era executado após o fechamento do bloco `if (confirmed === null)` e após o check de preempção. Na v8, o pseudocódigo foi verificado linha por linha:
+  ```ts
+  113: let confirmed = keywordConfirmation(transcript); // camada 0, inalterada — gate NÃO se aplica aqui
+  114: if (confirmed === null) {
+  115:   try {
+  116:     confirmed = await this.engine.detectConfirmation(turn.turnId, turn.epoch, transcript);
+  117:   } catch (err) {
+  118:     confirmed = 'NAO';
+  119:     console.error('[mutation] detecção de confirmação falhou, assumindo NÃO:', err);
+  120:   }
+  121: 
+  122:   // Fase 5c v8 — camada 2: só sobre o resultado da Camada 1 (LLM), nunca da Camada 0.
+  123:   if (confirmed === 'SIM' && !hasAffirmativeMarker(transcript)) {
+  124:     confirmed = 'NAO';
+  125:     console.warn('[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).');
+  126:   }
+  127: }
+  128: if (session.activeTurn !== turn) return;
+  ```
+  O gate está **inequivocamente posicionado dentro das chaves de `if (confirmed === null)`** (linhas 123–126). Se o usuário disser `"Com certeza"`, `keywordConfirmation` em [sessionManager.ts:44,74](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L44) resolve para `'SIM'`. Como `confirmed !== null`, o bloco inteiro é ignorado e a mutação é executada sem passar perto do gate. A inclusão adicional de `'certeza'` em `AFFIRMATIVE_MARKERS` funciona como defesa em profundidade redundante e válida.
+- **AÇÃO RECOMENDADA:** Nenhuma adicional. Manter o teste de regressão especificado em §6.3.
+
+---
+
+### ACHADO 2 (Rodada 1): Marcadores Ambíguos em Negações Reais (`"isso"`, `"pode"`, `"vale"`)
+- **STATUS:** **RESOLVIDO**
+- **EVIDÊNCIA:**
+  - Definições da v8: [docs/phase-5c-v8.md:63-80](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L63-L80)
+- **GRAVIDADE ORIGINAL:** ALTA
+- **CONFIANÇA:** 100%
+- **VERIFICAÇÃO ADVERSARIAL (EXECUÇÃO REAL EM NODE.JS):**
+  A v8 removeu os tokens isolados `'isso'`, `'pode'`, `'vale'`, `'valendo'` e introduziu `NEGATION_MARKERS` com veto determinístico (`AFFIRMATIVE_REGEX.test(n) && !NEGATION_REGEX.test(n)`).
+  Executamos a rotina exata contra casos de colisão e sentenças reais:
+  1. `"claro que não"`: Normaliza para `"claro que nao"`. `AFFIRMATIVE_REGEX` dá match em `"claro"`, mas `NEGATION_REGEX` dá match em `"nao"`. Resultado: `hasAffirmativeMarker === false` (VETO EFETIVO).
+  2. `"não pode"`: Normaliza para `"nao pode"`. Nenhum marcador afirmativo dá match (`"pode"` solto não existe mais) e `NEGATION_REGEX` dá match em `"nao"`. Resultado: `false`.
+  3. `"pode ser que eu não queira"`: `AFFIRMATIVE_REGEX` é `false`, `NEGATION_REGEX` dá match em `"nao"`. Resultado: `false`.
+  4. `"nunca vou confirmar isso"`: `NEGATION_REGEX` dá match em `"nunca"`. Além disso, `"confirmar"` não casa `\bconfirma\b` e `"isso"` solto não existe mais. Resultado: `false`.
+  5. `"cancela isso"` (caso #14 real): `AFFIRMATIVE_REGEX` é `false`, `NEGATION_REGEX` casa `"cancela"`. Resultado: `false`.
+  6. `"pode esquecer"`: `AFFIRMATIVE_REGEX` é `false`, `NEGATION_REGEX` casa `"esquecer"`. Resultado: `false`.
+  7. `"não vale"`: `AFFIRMATIVE_REGEX` é `false`, `NEGATION_REGEX` casa `"nao"`. Resultado: `false`.
+  8. `"deixa, não tá valendo"`: `AFFIRMATIVE_REGEX` casa `"ta valendo"`, mas `NEGATION_REGEX` casa `"nao"`. Resultado: `false` (VETO EFETIVO).
+  9. `"E, depois eu faço."` (caso #18 com STT degradado que causou a reprovação da v6): `AFFIRMATIVE_REGEX` é `false`. O gate rebaixa o falso SIM da LLM para `NAO`.
+- **AÇÃO RECOMENDADA:** Manter a implementação. (Ver Novo Achado 2 abaixo sobre a falta de `'nada'` em `NEGATION_MARKERS`).
+
+---
+
+### ACHADO 3 (Rodada 1): Falsos Negativos Massivos por Overfitting aos 9 Casos Conhecidos
+- **STATUS:** **NÃO RESOLVIDO NO CÓDIGO** (Decisão de risco formalizada e assumida pelo autor via consulta ao Jev)
+- **EVIDÊNCIA:**
+  - Decisão e justificativa: [docs/phase-5c-v8.md:42-52](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L42-L52) e [docs/phase-5c-v8.md:214-216](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L214-L216)
+  - Prompt congelado para a LLM geradora: [docs/phase-5c-v8.md:190-192](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L190-L192)
+  - Exemplo do prompt do worker: [scripts/worker/worker.py:141](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L141)
+- **GRAVIDADE:** **ALTA** (Risco iminente de reprovação da bateria hold-out)
+- **CONFIANÇA:** 95%
+- **AVALIAÇÃO ADVERSARIAL DOS DOIS LADOS:**
+  - **Lado A (Em defesa da v8 / Decisão de Engenharia de Produto):**
+    O autor argumenta que expandir a lista de marcadores puramente por intuição linguística ("palpite") incorre no mesmo vício metodológico que gerou os marcadores ambíguos da v7. Consultou o Jev (`choice: lista_minima_e_medir`, confiança 0,99) e adotou uma postura de segurança assimétrica: um falso SIM (mutação não autorizada executada) destrói a confiança do usuário e corrompe o estado; já um falso NÃO (o assistente dizer "não fiz nada" para um "tá bom") é conservador e seguro (fail-closed). Sob essa ótica, manter a lista restrita e submetê-la a uma medição empírica hold-out é um método defensável para coletar dados reais antes de abrir o filtro.
+  - **Lado B (Crítica Técnica Adversarial / Incoerência com o Protocolo):**
+    Essa postura é sabotada pelo próprio documento no §6. O autor congelou um prompt no §6 (linhas 190–192) que **instrui expressamente** o gerador Hermes a produzir:
+    `"...incluindo formas coloquiais comuns fora do óbvio ('tá bom', 'perfeito', 'combinado', 'beleza', 'fechou', 'manda ver')."`
+    Ou seja: o plano solicita ao Hermes frases com `"tá bom"`, `"perfeito"` e `"combinado"`, mas a lista do gate **não contém nenhum desses três termos**.
+    Vejamos a consequência matemática:
+    - Se o Hermes gerar 9 frases de SIM e 2 delas forem respostas curtas como `"Perfeito"` ou `"Tá bom, anota"`:
+      1. A Camada 0 (`keywordConfirmation`) devolve `null` (nenhuma delas está na whitelist exata de [sessionManager.ts:34-45](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L34-L45)).
+      2. A Camada 1 (MLX) classifica acertadamente como `SIM`.
+      3. O gate da v8 avalia `hasAffirmativeMarker("perfeito") === false` e rebaixa para `NAO`.
+      4. Resultado: 2 falsos negativos em 18 frases.
+      5. Acurácia máxima possível: 16/18 = **88,89%**.
+      6. Critério de corte em §6.5: **≥90% geral**.
+    Portanto, a recusa em incluir palavras inequívocas como `"perfeito"`, `"combinado"` e `"ta bom"` (que agora contam com o veto de negação como salvaguarda contra `"não tá bom"` ou `"nada combinado"`) cria uma armadilha que levará à reprovação estatística da Fase 5c na execução com MLX.
+- **AÇÃO RECOMENDADA:**
+  Para evitar um retrabalho garantido numa rodada v9, o plano deve resolver essa contradição: ou inclui os 3 marcadores canônicos (`'perfeito'`, `'combinado'`, `'ta bom'`) antes de congelar o código, ou remove esses 3 exemplos do prompt do gerador no §6.
+
+---
+
+### ACHADO 4 (Rodada 1): Incoerência Textual e Omissão Metodológica no §6
+- **STATUS:** **RESOLVIDO**
+- **EVIDÊNCIA:**
+  - Reescrita do §6: [docs/phase-5c-v8.md:152-206](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L152-L206)
+- **GRAVIDADE ORIGINAL:** MÉDIA
+- **CONFIANÇA:** 100%
+- **VERIFICAÇÃO ADVERSARIAL:**
+  1. A contradição textual de "duas amostras" foi eliminada: o item 5 declara expressamente *"Uma única amostra hold-out nova"* e o item 6 reitera que H-mutação permanece fora de escopo.
+  2. O prompt de geração destinado ao Hermes Agent está congelado verbatim no corpo do documento (linhas 175–200).
+  3. A cadeia de congelamento e a ordem de precedência foram formalmente sequenciadas (linhas 159–166): Plano aprovado → Plano commitado → Código + Testes escritos → Auditoria de código → Código commitado → Amostra solicitada/congelada → Medição MLX.
+- **AÇÃO RECOMENDADA:** Nenhuma. O protocolo está íntegro.
+
+---
+
+### ACHADO 5 (Rodada 1): Ineficiência de Execução e Fragilidade com Espaços Internos
+- **STATUS:** **RESOLVIDO**
+- **EVIDÊNCIA:**
+  - Regex no módulo: [docs/phase-5c-v8.md:74-75](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L74-L75)
+  - Normalização: [docs/phase-5c-v8.md:106-108](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L106-L108) e [src/backend/voice/sessionManager.ts:58-65](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L58-L65)
+- **GRAVIDADE ORIGINAL:** MÉDIA
+- **CONFIANÇA:** 100%
+- **VERIFICAÇÃO ADVERSARIAL:**
+  1. `AFFIRMATIVE_REGEX` e `NEGATION_REGEX` agora são constantes compiladas no escopo do módulo com alternância `(?:...)`, eliminando as 19 alocações dinâmicas de `RegExp` por turno.
+  2. `normalizeConfirmation` ganha `.replace(/\s+/g, ' ')`. Verificamos contra o código real de `sessionManager.ts` e suíte de testes: nenhum teste existente de `CONFIRM_YES_EXACT` ou `CONFIRM_NO_EXACT` é impactado, e entradas com múltiplos espaços intermediários (ex.: `"isso   mesmo"`) colapsam para casamento exato com as locuções compostas.
+- **AÇÃO RECOMENDADA:** Nenhuma.
+
+---
+
+### ACHADO 6 (Rodada 1): Localização Inconsistente dos Testes Unitários no §5
+- **STATUS:** **RESOLVIDO**
+- **EVIDÊNCIA:**
+  - Seção 5 da v8: [docs/phase-5c-v8.md:141-148](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L141-L148)
+  - Arquivo de testes real: [src/backend/__tests__/mutatingTools.test.ts:182-251](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L182-L251)
+- **GRAVIDADE ORIGINAL:** BAIXA
+- **CONFIANÇA:** 100%
+- **VERIFICAÇÃO ADVERSARIAL:**
+  A v8 removeu `voice.test.ts` como destino primário dos testes das funções puras e apontou expressamente `src/backend/__tests__/mutatingTools.test.ts`. Conferido no arquivo real: é exatamente onde vive a suíte `describe('keywordConfirmation (Camada 0 — Whitelist Exata)', ...)` e onde os novos testes da Camada 2 devem ser acoplados. O plano também especifica teste de integração do fluxo no SessionManager.
+- **AÇÃO RECOMENDADA:** Nenhuma.
+
+---
+
+### ACHADO 7 (Rodada 1): Semântica Inadequada de Log com `console.error`
+- **STATUS:** **RESOLVIDO**
+- **EVIDÊNCIA:**
+  - Pseudocódigo v8: [docs/phase-5c-v8.md:126](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L126)
+- **GRAVIDADE ORIGINAL:** BAIXA
+- **CONFIANÇA:** 100%
+- **VERIFICAÇÃO ADVERSARIAL:**
+  O log da decisão fail-closed foi alterado para:
+  `console.warn('[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).');`
+  Evita poluição de `stderr` com falso alarme operacional em fluxos de decisão esperados.
+- **AÇÃO RECOMENDADA:** Nenhuma.
+
+---
+
+## 2. Investigação de Problemas Novos na v8
+
+Inspecionamos ativamente a reescrita da v8, a tabela de verificação das 9 frases, a sintaxe de regex com alternância multi-palavra, e o comportamento contra o código real do repositório. Identificamos **3 achados novos**:
+
+---
+
+### NOVO ACHADO 1: Assimetria de Ferramentas Mutantes em `AFFIRMATIVE_MARKERS` — Overfitting Severo ao Lembrete em Detrimento de Notas e Remoções
+- **EVIDÊNCIA:**
+  - `AFFIRMATIVE_MARKERS` na v8 ([docs/phase-5c-v8.md:66](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L66)):
+    `'pode sim', 'pode criar', 'pode marcar', 'pode fazer'`
+  - Ferramentas reais do sistema:
+    - [src/backend/tools/mutatingTools.ts:25-27](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L25-L27):
+      `LEMBRETE_APAGAR`: preview pergunta `"Posso apagar o lembrete mais recente?"`
+    - [src/backend/tools/mutatingTools.ts:79](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L79):
+      `NOTA_CRIAR`: preview pergunta `"Posso guardar a nota: ...?"`
+    - [src/backend/tools/mutatingTools.ts:82](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L82):
+      `NOTA_APAGAR`: preview pergunta `"Posso apagar a nota mais recente?"`
+  - Prompt congelado no §6 ([docs/phase-5c-v8.md:177](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L177)):
+    `"...pergunta de confirmação do tipo 'Posso criar esse lembrete?' ou 'Posso apagar essa nota?'..."`
+- **GRAVIDADE:** **ALTA**
+- **CONFIANÇA:** 95%
+- **IMPACTO:**
+  Ao substituir o verbo ambíguo `"pode"` isolado por locuções verbais compostas, o autor incluiu apenas locuções observadas na amostra de 9 frases (`pode criar`, `pode marcar`, `pode fazer`). No entanto, o sistema possui duas ferramentas mutantes ativas (`LembreteTool` e `NotaTool`), cujas perguntas diretas são *"Posso apagar o lembrete?"*, *"Posso guardar a nota?"* e *"Posso apagar essa nota?"*.
+  Se o assistente perguntar *"Posso apagar a nota mais recente?"* e o usuário responder:
+  - `"Pode apagar"` → **Rebaixado para NAO** (`pode apagar` não está na lista).
+  - `"Pode guardar"` → **Rebaixado para NAO**.
+  - `"Pode salvar"` → **Rebaixado para NAO**.
+  - `"Pode anotar"` → **Rebaixado para NAO**.
+  - `"Pode excluir"` → **Rebaixado para NAO**.
+  Como o próprio prompt de teste hold-out no §6 menciona explicitamente *"Posso apagar essa nota?"*, o gerador Hermes naturalmente criará respostas afirmativas como `"Pode apagar"`, que serão todas descartadas pelo gate.
+- **AÇÃO RECOMENDADA:**
+  Adicionar a `AFFIRMATIVE_MARKERS` as locuções correspondentes às ações reais das ferramentas do repositório:
+  `'pode apagar'`, `'pode guardar'`, `'pode salvar'`, `'pode anotar'`.
+
+---
+
+### NOVO ACHADO 2: Omissão de `'nada'` em `NEGATION_MARKERS` Permite Falso Positivo com Marcador Afirmativo
+- **EVIDÊNCIA:**
+  - [docs/phase-5c-v8.md:70-72](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L70-L72):
+    `const NEGATION_MARKERS = ['nao', 'nem', 'nunca', 'jamais', 'cancela', 'cancelar', 'esquece', 'esquecer', 'tira', 'tirar'];`
+- **GRAVIDADE:** **MÉDIA**
+- **CONFIANÇA:** 90%
+- **IMPACTO:**
+  A palavra `"nada"` é um dos pronomes negativos mais comuns da língua portuguesa em recusas enfáticas.
+  Testamos a sentença de recusa:
+  `"nada tá certo"`
+  - `AFFIRMATIVE_REGEX.test("nada ta certo")` → `true` (encontra `\bcerto\b`).
+  - `NEGATION_REGEX.test("nada ta certo")` → `false` (`"nada"` não consta na lista de veto).
+  - Resultado: `hasAffirmativeMarker("nada tá certo") === true`.
+  Se o classificador da Camada 1 se confundir e retornar `SIM` para `"nada tá certo"`, o gate da v8 concederá sinal verde e executará a mutação, violando a promessa de "zero falso SIM sobre negação clara".
+- **AÇÃO RECOMENDADA:**
+  Incluir `'nada'` na lista `NEGATION_MARKERS`.
+
+---
+
+### NOVO ACHADO 3: Fragilidade de Transcrição Whisper na Expansão de `"tá valendo"` para `"está valendo"`
+- **EVIDÊNCIA:**
+  - Amostra real e resultado v6: [docs/audits/phase-5c-v6-result-2026-09-23.json:235](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-5c-v6-result-2026-09-23.json#L235)
+    Caso #9: Áudio dizia `"anota sim, tá valendo"`. Transcrição Whisper gerou `"A nota sim, está valendo."`.
+  - Tabela v8: [docs/phase-5c-v8.md:93](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-5c-v8.md#L93)
+- **GRAVIDADE:** **BAIXA**
+- **CONFIANÇA:** 90%
+- **IMPACTO:**
+  O Whisper frequentemente desfaz contrações coloquiais em português, transcrevendo o falado `"tá"` como o gramatical `"está"`. No caso #9, a frase só não falhou porque continha a palavra `"sim"`. Se um usuário disser apenas `"Anota aí, tá valendo"`, o Whisper transcreverá `"Anota aí, está valendo."`. O marcador `'ta valendo'` não casará `\bta valendo\b` em `"esta valendo"`, causando rebaixamento desnecessário para `NAO`.
+- **AÇÃO RECOMENDADA:**
+  Incluir `'esta valendo'` ao lado de `'ta valendo'` em `AFFIRMATIVE_MARKERS`.
+
+---
+
+## 3. Verificação Técnica Detalhada: Regex e Amostra dos 9 Casos
+
+1. **A tabela de verificação da v8 bate com a amostra real?**
+   **Sim.** Auditamos as 9 frases afirmativas contra `docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md` e os resultados em `docs/audits/phase-5c-v6-result-2026-09-23.json`.
+   - Na frase 7, a v8 anotou a transcrição Whisper degradada (`"Beleza? Deixe a registrado."`), que casa com o marcador `beleza`. Na frase original (`"beleza, deixa registrado"`), também casa com `beleza`.
+   - Na frase 9, a v8 apontou que o match se dá por `sim` (pois `"está valendo"` não casa com `'ta valendo'`). Na frase original (`"anota sim, tá valendo"`), casaria com ambos.
+   - Nenhuma das 9 frases contém palavras de `NEGATION_MARKERS`.
+2. **A sintaxe de regex com alternância multi-palavra `\b(?:...)\b` funciona em JavaScript?**
+   **Sim, funciona com precisão.**
+   Como `normalizeConfirmation` aplica `normalize('NFD').replace(/[\u0300-\u036f]/g, '')`, todas as vogais acentuadas e a cedilha são transformadas em caracteres ASCII puros (`é` → `e`, `ç` → `c`, etc.).
+   Em JavaScript, `\w` é `[a-zA-Z0-9_]`. Todas as palavras das listas iniciam e terminam com letras ASCII. Logo:
+   - Em locuções como `\b(?:...|pode fazer|...)\b`, a fronteira `\b` exige fronteira de palavra antes do `'p'` e depois do `'r'`. O espaço intermediário é literal e casa com o espaço único normalizado (`\s+` colapsado para um único espaço).
+   - Testamos: `"isso, pode fazer"` casa com sucesso; `"pode esquecer"` não casa; `"embora"` não casa `bora`; `"incerto"` não casa `certo`.
+
+---
+
+## 4. Tabela Consolidada de Status dos 7 Achados da Rodada 1
+
+| # | Achado Original | Gravidade | Status na Rodada 2 | Comentário do Auditor |
+|---|---|---|---|---|
+| **1** | Gate fora do bloco `if (confirmed === null)` | **CRÍTICA** | **RESOLVIDO** | Gate movido para o interior do bloco. Camada 0 completamente blindada. |
+| **2** | Marcadores ambíguos colidindo com negações | **ALTA** | **RESOLVIDO** | Monossílabos soltos removidos; veto de colisão `!NEGATION_REGEX.test(n)` validado e funcional. |
+| **3** | Overfitting aos 9 casos / Falsos negativos | **ALTA** | **NÃO RESOLVIDO NO CÓDIGO** | Assumido pelo autor como decisão de produto via Jev. Gera risco estatístico iminente contra o prompt do §6. |
+| **4** | Contradição textual e congelamento do §6 | **MÉDIA** | **RESOLVIDO** | 1 amostra declarada, prompt congelado verbatim e ordem de commit estipulada. |
+| **5** | Ineficiência de regex e espaços internos | **MÉDIA** | **RESOLVIDO** | Regexes pré-compilados no módulo e `.replace(/\s+/g, ' ')` implementado. |
+| **6** | Teste unitário no arquivo errado | **BAIXA** | **RESOLVIDO** | Localização corrigida para `src/backend/__tests__/mutatingTools.test.ts`. |
+| **7** | `console.error` em fluxo normal | **BAIXA** | **RESOLVIDO** | Substituído por `console.warn`. |
+
+---
+
+## 5. Veredito Final
+
+### **APROVADO COM RESSALVAS**
+
+### Justificativa:
+O plano `docs/phase-5c-v8.md` resolveu com total precisão técnica e arquitetural o achado crítico que causou a rejeição na Rodada 1: o gate foi movido para o escopo correto dentro de `if (confirmed === null)`, preservando a integridade da Camada 0 já auditada em produção. A remoção de monossílabos soltos e a implementação do veto de negação eliminaram a vulnerabilidade de falso SIM em sentenças como *"claro que não"* e *"não pode"*. A cadeia de congelamento e os testes unitários agora estão metodologicamente corretos.
+
+No entanto, o plano **não pode ser aprovado de forma irrestrita** porque a insistência em manter a lista de marcadores ultrarestrita aos 9 casos conhecidos — somada à omissão dos verbos reais de outras ferramentas do sistema (`apagar`, `guardar`) e à ausência de `'nada'` no veto — criará falhas previsíveis na execução do teste hold-out.
+
+### Ressalvas Vinculantes (a serem aplicadas no documento/código antes do commit de implementação):
+1. **Adicionar os verbos das ferramentas ativas do sistema a `AFFIRMATIVE_MARKERS`:**
+   Incluir `'pode apagar'`, `'pode guardar'`, `'pode salvar'`, `'pode anotar'`, evitando a rejeição cega em turnos de remoção de lembrete e manipulação de notas ([mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts)).
+2. **Adicionar `'nada'` a `NEGATION_MARKERS`:**
+   Garantir veto automático em recusas como *"nada tá certo"*.
+3. **Adicionar `'esta valendo'` a `AFFIRMATIVE_MARKERS`:**
+   Prevenir descarte por descontratamento fonético do Whisper.
+4. **Resolver a discrepância entre §2 e o prompt do §6:**
+   Incluir `'perfeito'`, `'combinado'` e `'ta bom'` em `AFFIRMATIVE_MARKERS` (o veto de colisão agora existente garante que eles são seguros contra negação), garantindo que a hold-out atinja a meta estipulada de **≥90%**.
