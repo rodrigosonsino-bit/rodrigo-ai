@@ -1,0 +1,42 @@
+ACHADO: Blast radius da mudança de assinatura de `createMutatingTools` não é reconhecido no plano — 12 call sites existentes quebram silenciosamente
+EVIDÊNCIA: docs/phase-6-v2.md:559-579 (nova assinatura `createMutatingTools(baseDir, customScheduler?): MutatingToolsResult`); src/backend/__tests__/mutatingTools.test.ts:86,118,155 (`const tools = createMutatingTools(tmpDir)`); src/backend/__tests__/voice.test.ts:885,939,989,1046,1115,1177,1234,1297,1361 (`const mutatingTools = createMutatingTools(tmpDataDir)`); src/backend/voice/voiceRuntime.ts:92 (call site de produção atual ainda espera `IMutatingTool[]` diretamente, não `{ tools, scheduler }`)
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O plano deve listar explicitamente os 12 call sites em `__tests__` que precisam ser atualizados para `const { tools } = createMutatingTools(...)` ou `const { tools, scheduler } = createMutatingTools(...)`, além do call site de produção em `voiceRuntime.ts:92`. Sem isso, o build quebra no primeiro `npm test` após a implementação.
+
+---
+
+ACHADO: `bootstrap()` promete notificações "sequenciadas com pequeno intervalo" mas dispara todos os `osascript` simultaneamente
+EVIDÊNCIA: docs/phase-6-v2.md:71-72 ("sequenciados com pequeno intervalo para evitar sobrecarga de processos"); docs/phase-6-v2.md:454-462 (loop `for` chama `this.notify(item, { late: true })` sem nenhum `setTimeout`, delay ou `await` entre itens)
+GRAVIDADE: MÉDIA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: Implementar um delay exponencial ou sequencial entre as chamadas `notify()` no loop de itens atrasados (ex.: `await new Promise(r => setTimeout(r, 200 * i))` dentro do loop, ou usar uma fila de disparos). Caso contrário, 50 itens atrasados disparam 50 processos `osascript` simultâneos no boot, o que é a sobrecarga que o plano diz evitar.
+
+---
+
+ACHADO: `bootstrap()` não persiste `notifiedAt` de itens expirados (>24h) se houver exceção no loop
+EVIDÊNCIA: docs/phase-6-v2.md:454-479 (mutação `item.notifiedAt = ...` em memória + `this.store.write({ items })` apenas no final, fora do loop); se `this.schedule()` ou `new Date(item.dueAt)` lançar no item N, os itens 0..N-1 que já foram marcados como `notifiedAt` não são persistidos
+GRAVIDADE: MÉDIA
+CONFIANÇA: 85%
+AÇÃO RECOMENDADA: Ou persistir a cada item expirado individualmente dentro do loop, ou coletar os IDs exporados e persistir em bloco antes de qualquer operação que possa falhar, ou usar try/catch por item com log de erro e continuação do loop.
+
+---
+
+ACHADO: Cache `lastParsed` em `LembreteTool` é frágil se houver múltiplas sessões ou intercalação de `preview()` entre turnos
+EVIDÊNCIA: docs/phase-6-v2.md:303-311 (campo de instância `private lastParsed` compartilhado entre todas as chamadas); o fallback em `execute()` mitiga cache miss, mas o plano não documenta como premissa que apenas uma mutação pode estar armada por vez e que `preview()` não pode ser chamado entre o armamento e a execução
+GRAVIDADE: BAIXA
+CONFIANÇA: 75%
+AÇÃO RECOMENDADA: Documentar explicitamente no plano que o design assume single-session/single-armed-mutation por vez (o que é verdade dado o `SessionManager` atual, mas não é uma garantia estrututal do `LembreteTool`). No futuro, se múltiplas sessões forem permitidas, esse cache precisará ser movido para o `SessionManager` (que já guarda `armedMutation`).
+
+---
+
+ACHADO: `notify()` assíncrono permite condição de corrida entre `fire()` e `cancel()` em `LEMBRETE_APAGAR`
+EVIDÊNCIA: docs/phase-6-v2.md:517-546 (`notify()` chama `execFile` com callback assíncrono; o `notifiedAt` é gravado dentro do callback); docs/phase-6-v2.md:405-408 (`LEMBRETE_APAGAR` chama `this.scheduler.cancel(removed.id)` antes de remover o item, mas se o timer já disparou e o callback de `notify()` está em voo, `notifiedAt` pode ser gravado após o item ter sido removido do store)
+GRAVIDADE: BAIXA
+CONFIANÇA: 70%
+AÇÃO RECOMENDADA: Dentro do callback de sucesso de `notify()`, verificar se o item ainda existe no store antes de gravar `notifiedAt` (`if (idx !== -1)` já faz isso, mas o store pode ter sido re-criado sem o item; a verificação é correta mas deveria ser documentada como garantia).
+
+---
+
+VEREDITO: APROVADO COM RESSALVAS
+JUSTIFICATIVA: Os 12 achados originais da rodada 1 foram de fato resolvidos no pseudocódigo do v2 (cada um tem correspondência clara em §4.1-§4.5 e §6). No entanto, o plano falha em reconhecer o blast radius da mudança de assinatura de `createMutatingTools` (12 call sites em testes quebram), introduz uma sobrecarga de processos `osascript` no `bootstrap()` que contradiz sua própria promessa de sequenciamento, e não trata a atomicidade da persistência de itens expirados no loop do `bootstrap()`. São gaps de implementação, não de conceito, mas bloqueiam a aprovação sem correções pontuais.
