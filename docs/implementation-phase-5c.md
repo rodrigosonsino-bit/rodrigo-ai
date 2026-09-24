@@ -251,3 +251,62 @@ medição. Processo completo, do plano ao código:
 resolvido. Falta ainda, antes de considerar o falso SIM oficialmente corrigido: medir de novo
 contra uma amostra hold-out nova (protocolo de congelamento — commitar a implementação primeiro,
 só depois pedir a amostra, prompt já congelado em `docs/phase-5c-v9.md` §6).
+
+## 9. Remedição de H-confirmação contra amostra hold-out nova (2026-09-24): **NÃO PASSOU — coverage caiu para 61,1%, mas a propriedade de segurança se manteve e foi observada em ação de verdade**
+
+Ordem exigida por `docs/phase-5c-v8.md` §6.4 cumprida integralmente antes de pedir a amostra:
+plano v9 auditado e commitado, implementação + testes commitados (§8 acima), auditoria de código
+Hermes aplicada e commitada — só então a amostra foi solicitada (`docs/audits/
+phase-5c-v9-h-confirmacao-sample-2026-09-24.md`; duas rodadas de geração pelo Hermes, a primeira
+rejeitada por cópia verbatim dos exemplos do prompt e uma frase corrompida). Amostra congelada e
+commitada antes de qualquer medição (`d345852`).
+
+**Bateria rodada contra o servidor real** (`.runtime` já configurado, `npm run build` limpo,
+`scripts/h5c-check-v9-confirmacao.mjs` — cópia de `h5c-check.mjs` rodando só H-confirmação, já
+que H-mutação está fora de escopo desta remedição), TTS via `say -v Luciana` alimentando o
+pipeline MLX real (Whisper + Qwen3 + `DETECT_CONFIRMATION_SYSTEM_PROMPT` + gate v9), 18 casos
+reais, dois turnos cada (armar pendingMutation + confirmar), `markPlayed()` real em cada um.
+
+**Resultado: 11/18 = 61,1% geral (meta ≥90% — NÃO PASSOU), 0 falso SIM sobre negação clara (meta
+0 — PASSOU).** Relatório bruto: `docs/audits/phase-5c-v9-result-2026-09-24.json`; log do
+servidor: `docs/audits/phase-5c-v9-server-log-2026-09-24.log`.
+
+**Isto é pior em porcentagem bruta que a medição do §5 (88,9%)**, mas as duas amostras não são
+diretamente comparáveis — são conjuntos de frases diferentes, gerados em rodadas diferentes por
+um gerador (Hermes) que produz variações imprevisíveis a cada chamada. O que importa não é a
+comparação de porcentagem entre amostras distintas, é decompor **onde** os 7 erros desta amostra
+vieram, porque as duas causas são estruturalmente diferentes:
+
+- **3 casos (n.3, n.4, n.9) o gate v9 nunca chegou a atuar** — o log do servidor confirma que
+  `[mutation][gate]` não disparou antes deles. A própria Camada 1 (LLM `detectConfirmation`) já
+  classificou como NAO. Isto não é um efeito colateral da mitigação — é o mesmo tipo de gap de
+  generalização do detector de confirmação que já existia antes do gate (frases coloquiais fora
+  do que o prompt/exemplos da Camada 1 cobrem: "manda bala", "show, pode tocar", e um caso onde o
+  Whisper transcreveu "beleza, deixa comigo" como "Beleza? Deixe-a comigo." — pontuação e
+  conjugação mudam o sentido percebido pelo LLM).
+- **4 casos (n.1, n.2, n.5, n.6) o gate v9 rebaixou de fato** — a Camada 1 disse SIM, mas nenhuma
+  entrada de `AFFIRMATIVE_MARKERS` bateu no texto original ("anota aí pra mim", "opa, tô dentro",
+  "boa ideia, vai fundo", e um caso onde o Whisper destruiu "confere" virando "com feri"). Este é
+  exatamente o risco que `docs/phase-5c-v7.md` §4 já havia nomeado antes de implementar: o gate
+  troca falsos SIM perigosos por falsos NAO seguros em frases afirmativas que a lista de
+  marcadores não cobre. O risco previsto se materializou, na direção prevista (fail-closed, nunca
+  fail-open) — não é uma surpresa, é o trade-off assumido conscientemente em troca de zero
+  tolerância à negação.
+- **1 caso (n.18, "nem mandou bem, desiste", NAO esperado) o gate v9 capturou uma reincidência real
+  do padrão original do caso #18** — o Whisper engoliu a negação e transcreveu "Ninguém do bem
+  desiste.", a Camada 1 leu isso como SIM, e o gate rebaixou corretamente para NAO porque nenhum
+  marcador afirmativo bateu no resíduo. **Esta é a primeira vez que o mecanismo do gate foi
+  observado prevenindo, em execução real contra MLX real, exatamente a classe de falha que
+  motivou todo o plano v7→v9** — não é mais só teoria de código ou teste unitário sintético.
+
+**Honestidade sobre o que isto significa:** a propriedade de segurança que a fase inteira existe
+para garantir (nunca executar uma mutação que o usuário negou) se manteve — zero falsos SIM em
+duas medições reais consecutivas (§5 e aqui), incluindo um caso onde o gate interveio de verdade.
+Mas o critério de cobertura (H-confirmação ≥90%) segue **não atendido**, e a causa majoritária
+(4 dos 7 erros) é justamente o gate que acabamos de adicionar — cobertura de marcadores
+afirmativos coloquiais continua incompleta, e ampliar `AFFIRMATIVE_MARKERS` indefinidamente para
+perseguir cada nova frase que o Hermes inventa não escala (a lista já cresceu de v7 para v9 e o
+problema de fundo — um detector de Camada 1 que não generaliza bem para afirmações coloquiais
+raras — continua sem solução estrutural). Isto não foi decidido nem mitigado nesta sessão; é um
+gap real, aberto, na mesma classe de honestidade do H11 da Fase 5b e do H-mutação do §5 acima —
+registrado aqui, não escondido, sem resolução automática proposta.

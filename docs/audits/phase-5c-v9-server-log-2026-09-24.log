@@ -1,0 +1,30 @@
+[Rodrigo AI] Voz local disponível (worker MLX inicializando em segundo plano).
+[Rodrigo AI] Servidor ouvindo exclusivamente em http://127.0.0.1:3000
+[voice-worker] [worker] Carregando LLM (mlx-community/Qwen3-4B-Instruct-2507-4bit)...
+[voice-worker] [worker] LLM carregado.
+[worker] Carregando STT (mlx-community/whisper-small-mlx)...
+[voice-worker] [worker] STT pronto (carregamento perezoso na primeira transcrição).
+[voice-worker] [worker] Aquecimento concluído em 5.2s.
+[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).
+[mutation] turno=36c16c08-282e-48a1-9add-809dd79e805e ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).
+[mutation] turno=f62e818b-27b3-430c-aaef-704d4c90f298 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=119852d7-f559-41cd-8026-6fb9102f32d9 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=192a8c86-b3eb-4858-b570-0c3d93fd1529 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).
+[mutation] turno=f31920de-73f6-4403-8ffd-1e3cac055baa ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).
+[mutation] turno=b277b960-b1ea-4afd-8ae4-94ae2300a148 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=c853938f-26df-46ee-b94f-6c1418ab0b61 ação=LEMBRETE_CRIAR confirmado=SIM
+[mutation] turno=593ccf82-c869-42ea-ab58-7095153f502b ação=LEMBRETE_CRIAR confirmado=SIM
+[mutation] turno=81f9c0b9-f82d-4698-8717-dcf5dc77e64c ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=639acdc9-d980-4992-ae50-19c4129c2579 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=331275e7-0227-467b-a4e6-8136180908ae ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=238b4420-e521-4f8b-b850-31ba595c85a5 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=da9ed590-3d8c-4e9b-912d-157a682866fb ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=a4c2afb5-7829-4ed6-8e39-c22854d73034 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=42cd4ff4-3efc-453e-8df6-8af2c4aba43a ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=513b230c-4440-4afe-9be8-5ac1fc47c0c0 ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation] turno=c8240e4b-e431-4ac8-995a-cbe6ce61231b ação=LEMBRETE_CRIAR confirmado=NAO
+[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).
+[mutation] turno=b2b92559-cdc5-463b-8421-ddb27ccd6bd4 ação=LEMBRETE_CRIAR confirmado=NAO
