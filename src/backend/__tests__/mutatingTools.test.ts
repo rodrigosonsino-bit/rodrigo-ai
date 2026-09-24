@@ -10,6 +10,9 @@ import {
   selectMutatingToolByAction,
   createMutatingTools
 } from '../tools/mutatingTools.js';
+import { ReminderScheduler } from '../tools/reminderScheduler.js';
+import { createVoiceRuntime } from '../voice/voiceRuntime.js';
+import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
 import { keywordConfirmation, hasAffirmativeMarker, normalizeConfirmation } from '../voice/sessionManager.js';
 import type { IMutatingTool } from '../../shared/extensions/tools.js';
 
@@ -83,7 +86,7 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
 
   describe('selectMutatingToolByAction', () => {
     it('retorna a ferramenta adequada pelo tipo de ação', () => {
-      const tools = createMutatingTools(tmpDir);
+      const { tools } = createMutatingTools(tmpDir);
 
       const lembreteCriar = selectMutatingToolByAction('LEMBRETE_CRIAR', tools);
       assert.equal(lembreteCriar?.name, 'LEMBRETE');
@@ -115,7 +118,7 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
 
   describe('LembreteTool', () => {
     it('preview() e execute() com criação, prevenção de duplicata e apagamento', () => {
-      const tools = createMutatingTools(tmpDir);
+      const { tools } = createMutatingTools(tmpDir);
       const tool = tools.find((t) => t.name === 'LEMBRETE')!;
       assert.ok(tool);
       assert.equal(tool.isAvailable(), true);
@@ -152,7 +155,7 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
 
   describe('NotaTool', () => {
     it('preview() e execute() com criação, prevenção de duplicata e apagamento', () => {
-      const tools = createMutatingTools(tmpDir);
+      const { tools } = createMutatingTools(tmpDir);
       const tool = tools.find((t) => t.name === 'NOTA')!;
       assert.ok(tool);
       assert.equal(tool.isAvailable(), true);
@@ -407,6 +410,172 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
         true,
         'limite estrutural conhecido e documentado — o texto residual não carrega mais a negação'
       );
+    });
+  });
+
+  describe('Fase 6 — Agendamento de Lembretes, Deduplicação Temporal e Ciclo de Vida (H3, H4, H5, H9, H10)', () => {
+    it('H3 — preview() explicita o horário e execute() reutiliza o cache lastParsed', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+
+      // preview com horário relativo
+      const question = tool.preview('LEMBRETE_CRIAR', 'ligar pro dentista daqui a 20 minutos');
+      assert.equal(
+        question,
+        'Posso criar o lembrete de ligar pro dentista para daqui a 20 minutos?'
+      );
+
+      // execute consome o cache
+      const answer = tool.execute('LEMBRETE_CRIAR', 'ligar pro dentista daqui a 20 minutos');
+      assert.equal(answer, 'Lembrete criado para daqui a 20 minutos.');
+
+      // Verifica dados salvos no store
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+      const data = store.read();
+      assert.equal(data.items.length, 1);
+      assert.equal(data.items[0].text, 'ligar pro dentista');
+      assert.ok(data.items[0].dueAt);
+      assert.equal(data.items[0].notifiedAt, null);
+
+      scheduler.shutdown();
+    });
+
+    it('H3 — execute() sem preview prévio (cache miss) executa parsing via fallback', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+
+      // Chamada direta a execute
+      const answer = tool.execute('LEMBRETE_CRIAR', 'comprar pão em 10 minutos');
+      assert.equal(answer, 'Lembrete criado para daqui a 10 minutos.');
+
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+      const data = store.read();
+      assert.equal(data.items.length, 1);
+      assert.equal(data.items[0].text, 'comprar pão');
+      assert.ok(data.items[0].dueAt);
+
+      scheduler.shutdown();
+    });
+
+    it('H4 — Deduplicação temporal em LembreteTool.execute()', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+
+      // Cria lembrete com horário A (amanhã de tarde)
+      const res1 = tool.execute('LEMBRETE_CRIAR', 'comprar pão amanhã de tarde');
+      assert.equal(res1, 'Lembrete criado para amanhã de tarde.');
+
+      // Tentativa idêntica consecutiva com mesmo texto e mesmo dueAt -> bloqueado
+      const resDup = tool.execute('LEMBRETE_CRIAR', 'comprar pão amanhã de tarde');
+      assert.equal(resDup, 'Isso já estava salvo.');
+
+      // Mesma tarefa mas para horário diferente B (amanhã de noite) -> aceito
+      const resDiffTime = tool.execute('LEMBRETE_CRIAR', 'comprar pão amanhã de noite');
+      assert.equal(resDiffTime, 'Lembrete criado para amanhã de noite.');
+
+      // Marca o último item como já notificado
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+      const current = store.read();
+      current.items[current.items.length - 1].notifiedAt = new Date().toISOString();
+      store.write(current);
+
+      // Agora mesma tarefa e mesmo horário de B pode ser recriado porque o anterior já foi notificado
+      const resAfterNotified = tool.execute('LEMBRETE_CRIAR', 'comprar pão amanhã de noite');
+      assert.equal(resAfterNotified, 'Lembrete criado para amanhã de noite.');
+
+      scheduler.shutdown();
+    });
+
+    it('H5 — Cancelamento de agendamento em LEMBRETE_APAGAR', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+
+      tool.execute('LEMBRETE_CRIAR', 'pagar conta em 3 horas');
+      assert.equal(scheduler.activeTimersCount, 1);
+
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+      const saved = store.read();
+      const itemId = saved.items[0].id;
+      assert.equal(scheduler.hasTimer(itemId), true);
+
+      // Apaga o lembrete
+      const resApagar = tool.execute('LEMBRETE_APAGAR', null);
+      assert.equal(resApagar, 'Lembrete apagado.');
+
+      // Confirma que o timer foi cancelado no scheduler
+      assert.equal(scheduler.activeTimersCount, 0);
+      assert.equal(scheduler.hasTimer(itemId), false);
+
+      scheduler.shutdown();
+    });
+
+    it('H9 — createMutatingTools desacoplado e injeção de customScheduler', () => {
+      const mockStore = new JsonStore<StoredItem>(tmpDir, 'custom.json');
+      const customScheduler = new ReminderScheduler(mockStore);
+
+      const result = createMutatingTools(tmpDir, customScheduler);
+      assert.equal(result.scheduler, customScheduler);
+      assert.equal(result.tools.length, 2);
+
+      customScheduler.shutdown();
+    });
+
+    it('H9 — RODRIGO_VOICE_DISABLE=1 não instancia timers no voiceRuntime', async () => {
+      const originalEnv = process.env.RODRIGO_VOICE_DISABLE;
+      process.env.RODRIGO_VOICE_DISABLE = '1';
+      try {
+        const runtime = createVoiceRuntime(tmpDir);
+        assert.equal(runtime.available, false);
+        assert.equal(runtime.scheduler, undefined);
+        await runtime.shutdown();
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.RODRIGO_VOICE_DISABLE = originalEnv;
+        } else {
+          delete process.env.RODRIGO_VOICE_DISABLE;
+        }
+      }
+    });
+
+    it('H10 — Regressão da Fase 5c: criação de lembrete sem tempo continua atemporal e NotaTool atemporal', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const lembreteTool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const notaTool = tools.find((t) => t.name === 'NOTA')!;
+
+      // Lembrete sem tempo
+      assert.equal(
+        lembreteTool.preview('LEMBRETE_CRIAR', 'comprar maçã'),
+        'Posso criar o lembrete: comprar maçã?'
+      );
+      assert.equal(
+        lembreteTool.execute('LEMBRETE_CRIAR', 'comprar maçã'),
+        'Lembrete criado.'
+      );
+
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+      const data = store.read();
+      assert.equal(data.items.length, 1);
+      assert.equal(data.items[0].text, 'comprar maçã');
+      assert.equal(data.items[0].dueAt, null);
+      assert.equal(data.items[0].notifiedAt, null);
+
+      // NotaTool
+      assert.equal(
+        notaTool.preview('NOTA_CRIAR', 'ideia de podcast daqui a 20 minutos'),
+        'Posso guardar a nota: ideia de podcast daqui a 20 minutos?'
+      );
+      assert.equal(
+        notaTool.execute('NOTA_CRIAR', 'ideia de podcast daqui a 20 minutos'),
+        'Nota criada.'
+      );
+
+      const notaStore = new JsonStore<StoredItem>(tmpDir, 'notas.json');
+      const notaData = notaStore.read();
+      assert.equal(notaData.items.length, 1);
+      assert.equal(notaData.items[0].text, 'ideia de podcast daqui a 20 minutos');
+      assert.equal(notaData.items[0].dueAt, undefined);
+
+      scheduler.shutdown();
     });
   });
 });

@@ -9,6 +9,7 @@ import { selectVoiceProvider } from './ttsProviders.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
 import { createSystemTools } from '../tools/systemTools.js';
 import { createMutatingTools } from '../tools/mutatingTools.js';
+import { ReminderScheduler } from '../tools/reminderScheduler.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 
 export interface VoiceRuntime {
@@ -16,6 +17,7 @@ export interface VoiceRuntime {
   reason?: string;
   sessionManager?: SessionManager;
   audioStore?: AudioStore;
+  scheduler?: ReminderScheduler;
   shutdown: () => Promise<void>;
 }
 
@@ -89,8 +91,12 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const dataDir = process.env.RODRIGO_DATA_DIR
     ? path.resolve(process.env.RODRIGO_DATA_DIR)
     : path.join(rootDir, 'data');
-  const mutatingTools = createMutatingTools(dataDir);
+  // Factory retorna as ferramentas e a instância única do agendador
+  const { tools: mutatingTools, scheduler: reminderScheduler } = createMutatingTools(dataDir);
   for (const mTool of mutatingTools) ExtensionRegistry.getInstance().registerMutatingTool(mTool);
+
+  // Inicializa o agendador carregando lembretes persistidos
+  reminderScheduler.bootstrap();
 
   const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
   const sessionManager = new SessionManager(
@@ -101,7 +107,9 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     available: true,
     sessionManager,
     audioStore,
+    scheduler: reminderScheduler,
     shutdown: async () => {
+      reminderScheduler.shutdown(); // Cancela timers pendentes na finalização do runtime
       await sessionManager.shutdownAll();
       await engine.shutdown();
     }

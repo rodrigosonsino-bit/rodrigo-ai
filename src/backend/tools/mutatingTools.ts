@@ -2,14 +2,24 @@ import crypto from 'node:crypto';
 import type { IMutatingTool } from '../../shared/extensions/tools.js';
 import type { MutationName } from '../../shared/voiceProtocol.js';
 import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
+import { ReminderScheduler } from './reminderScheduler.js';
+import {
+  parseRelativeTime,
+  formatHumanRelative,
+  type ParsedRelativeTime
+} from './relativeTimeParser.js';
 
 export { type IMutatingTool };
 
 export class LembreteTool implements IMutatingTool {
   readonly name = 'LEMBRETE';
   readonly description = 'Gerencia lembretes locais.';
+  private lastParsed: { raw: string; parsed: ParsedRelativeTime } | null = null;
 
-  constructor(private readonly store: JsonStore<StoredItem>) {}
+  constructor(
+    private readonly store: JsonStore<StoredItem>,
+    private readonly scheduler: ReminderScheduler
+  ) {}
 
   isAvailable(): boolean {
     return true;
@@ -20,7 +30,14 @@ export class LembreteTool implements IMutatingTool {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de lembrete.');
       }
-      return `Posso criar o lembrete: ${content}?`;
+      const parsed = parseRelativeTime(content);
+      this.lastParsed = { raw: content, parsed };
+
+      const finalText = parsed.residualText.trim() || content;
+      if (parsed.dueAt) {
+        return `Posso criar o lembrete de ${finalText} para ${formatHumanRelative(parsed.dueAt)}?`;
+      }
+      return `Posso criar o lembrete: ${finalText}?`;
     }
     if (kind === 'LEMBRETE_APAGAR') {
       return 'Posso apagar o lembrete mais recente?';
@@ -33,17 +50,45 @@ export class LembreteTool implements IMutatingTool {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de lembrete.');
       }
+
+      // Reusa o parsing validado na pergunta ou roda fallback se chamado diretamente
+      const parsed =
+        this.lastParsed && this.lastParsed.raw === content
+          ? this.lastParsed.parsed
+          : parseRelativeTime(content);
+      this.lastParsed = null;
+
+      const { dueAt, residualText } = parsed;
+      const finalText = residualText.trim() || content;
+
       const store = this.store.read();
       const last = store.items[store.items.length - 1];
-      if (last && last.text === content) {
+
+      // Correção do Achado 5: deduplicação temporal segura
+      const isDuplicate =
+        last &&
+        last.text === finalText &&
+        (last.dueAt ?? null) === (dueAt ?? null) &&
+        last.notifiedAt === null;
+
+      if (isDuplicate) {
         return 'Isso já estava salvo.';
       }
+
+      const id = crypto.randomUUID();
       store.items.push({
-        id: crypto.randomUUID(),
-        text: content,
-        createdAt: new Date().toISOString()
+        id,
+        text: finalText,
+        createdAt: new Date().toISOString(),
+        dueAt,
+        notifiedAt: null
       });
       this.store.write(store);
+
+      if (dueAt) {
+        this.scheduler.schedule({ id, text: finalText, dueAt });
+        return `Lembrete criado para ${formatHumanRelative(dueAt)}.`;
+      }
       return 'Lembrete criado.';
     }
 
@@ -52,7 +97,9 @@ export class LembreteTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nenhum lembrete para apagar.';
       }
-      store.items.pop();
+      const removed = store.items.pop()!;
+      // Cancela o agendamento em memória se houver
+      this.scheduler.cancel(removed.id);
       this.store.write(store);
       return 'Lembrete apagado.';
     }
@@ -142,8 +189,24 @@ export function selectMutatingToolByAction(
   return tools.find((t) => t.name.toUpperCase() === prefix && t.isAvailable()) ?? null;
 }
 
-export function createMutatingTools(baseDir: string): IMutatingTool[] {
+export interface MutatingToolsResult {
+  tools: IMutatingTool[];
+  scheduler: ReminderScheduler;
+}
+
+export function createMutatingTools(
+  baseDir: string,
+  customScheduler?: ReminderScheduler
+): MutatingToolsResult {
   const lembreteStore = new JsonStore<StoredItem>(baseDir, 'lembretes.json');
   const notaStore = new JsonStore<StoredItem>(baseDir, 'notas.json');
-  return [new LembreteTool(lembreteStore), new NotaTool(notaStore)];
+
+  const scheduler = customScheduler ?? new ReminderScheduler(lembreteStore);
+  const lembreteTool = new LembreteTool(lembreteStore, scheduler);
+  const notaTool = new NotaTool(notaStore);
+
+  return {
+    tools: [lembreteTool, notaTool],
+    scheduler
+  };
 }

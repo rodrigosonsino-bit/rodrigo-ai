@@ -13,6 +13,20 @@ export {
   NotaTool,
   mightBeMutation,
   selectMutatingToolByAction,
-  createMutatingTools
+  createMutatingTools,
+  type MutatingToolsResult
 } from './mutatingTools.js';
 export type { IMutatingTool } from './mutatingTools.js';
+
+export {
+  ReminderScheduler,
+  OVERDUE_CUTOFF_MS
+} from './reminderScheduler.js';
+
+export {
+  parseRelativeTime,
+  parseNumberOrWord,
+  formatHumanRelative,
+  CARDINAL_WORDS,
+  type ParsedRelativeTime
+} from './relativeTimeParser.js';

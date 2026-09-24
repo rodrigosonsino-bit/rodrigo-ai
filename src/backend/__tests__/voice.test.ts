@@ -882,7 +882,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c: detectMutation detecta intenção, sintetiza pergunta e arma armedMutation (pendingMutation continua null)', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -936,7 +936,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c: markPlayed() com turnId correto promove armedMutation para pendingMutation com askedAt monotônico', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -986,7 +986,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c (Achado 1 / v4 §7): turno superado por barge-in nunca promove armedMutation para pendingMutation', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -1043,7 +1043,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c: confirmação com Sim executa mutação, sintetiza sucesso e persiste dado', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -1112,7 +1112,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c: negação com Não cancela mutação e sintetiza MUTATION_CANCELLED_TEXT sem persistir', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -1174,7 +1174,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c: resposta ambígua consulta detectConfirmation e executa se confirmar', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -1231,7 +1231,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): SIM da Camada 0 nunca aciona o gate nem detectConfirmation', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -1294,7 +1294,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): gate rebaixa SIM da Camada 1 sem marcador afirmativo — regressão do caso #18 real', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
@@ -1358,7 +1358,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     });
 
     it('Fase 5c: TTL de 60s expira pendingMutation e enunciado seguinte segue caminho normal', async (t) => {
-      const mutatingTools = createMutatingTools(tmpDataDir);
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
       let sse: ReturnType<typeof readSse> | null = null;
