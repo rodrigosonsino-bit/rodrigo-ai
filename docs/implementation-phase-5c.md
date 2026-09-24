@@ -310,3 +310,38 @@ problema de fundo — um detector de Camada 1 que não generaliza bem para afirm
 raras — continua sem solução estrutural). Isto não foi decidido nem mitigado nesta sessão; é um
 gap real, aberto, na mesma classe de honestidade do H11 da Fase 5b e do H-mutação do §5 acima —
 registrado aqui, não escondido, sem resolução automática proposta.
+
+## 10. Decisão de fechamento da fase (2026-09-24): gap de cobertura aceito, fase não bloqueia o roteiro
+
+Consultado o Jev (TypeSafe) antes de decidir — não para decidir por mim, para não confiar só em
+julgamento não-calibrado numa escolha de "vale investir mais agora ou seguir": `proximo_passo`
+(choice) favoreceu `aceitar_e_seguir` (57%) sobre `redesenhar_camada1` (40%), com confiança baixa
+(0,35) — genuinamente dividido, não um veredito forte — mas **descartou quase por completo**
+continuar expandindo `AFFIRMATIVE_MARKERS` linha por linha (`expandir_lista`, 3%), confirmando
+que essa via já esgotou o retorno. `vale_investir_agora` (noul) = 0,35, pesando contra investir
+agora. `risco_de_deixar_em_aberto` (score) = 1,07/2, dominante em "médio" (58%) — **não** "baixo",
+então a decisão abaixo não trata isto como inofensivo, trata como um trade-off consciente.
+
+**Decisão do usuário, informada por essa consulta:** documentar o gap como está e seguir para o
+próximo item do roteiro, sem investir agora numa rodada de plano+auditoria para redesenhar a
+Camada 1 do detector de confirmação.
+
+**Estado final da Fase 5c, registrado sem eufemismo:**
+- Implementada, code-audited (Hermes), com a garantia central (nunca mutar sem confirmação real
+  de voz, via `markPlayed()`) validada em produção-símile (execução real contra MLX) e o gate v9
+  comprovadamente funcional contra pelo menos um caso real de STT engolindo negação.
+- **H-mutação: 76,5% (meta ≥80%) — NÃO PASSOU.** Fora de escopo desde o plano v7 §0; não
+  remedido.
+- **H-confirmação: 61,1% na amostra mais recente (meta ≥90%) — NÃO PASSOU**, com zero falso SIM
+  sobre negação clara medido duas vezes reais consecutivas (o critério de segurança, o mais
+  importante dos dois por desenho da fase, foi atendido nas duas).
+- Estes dois gaps somam-se ao H11 da Fase 5b (75%, meta ≥80%) como pendências reconhecidas e
+  aceitas por decisão explícita do usuário, não escondidas, não bloqueando as fases seguintes —
+  mesmo padrão de honestidade nas três.
+- `Rodrigo AI` segue funcional e testado no que foi implementado; os três gaps de cobertura ficam
+  registrados como dívida técnica conhecida, candidatos a revisão futura se o usuário decidir
+  investir numa reformulação estrutural do detector de confirmação de Camada 1 (não decidido
+  agora).
+
+O roteiro segue para a **Fase 6** (memória entre sessões, ver `docs/phase-5a-v1.md` e
+`docs/phase-5c-v1.md` para as referências de escopo já registradas em fases anteriores).
