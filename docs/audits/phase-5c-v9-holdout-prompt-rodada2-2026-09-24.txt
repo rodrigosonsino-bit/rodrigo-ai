@@ -1,0 +1,37 @@
+Sua resposta anterior falhou de duas formas e preciso que você refaça do zero:
+
+1. Você copiou quase literalmente os exemplos que eu dei só para ilustrar o TIPO de frase
+   ("nem, depois eu faço" virou "nem, depois eu resolvo"; "não, deixa quieto", "nem vou fazer
+   isso", "nunca, esquece" vieram exatamente iguais aos exemplos) e copiou a lista de formas
+   coloquiais de SIM ("sim", "pode", "isso mesmo", "tá bom", "perfeito", "combinado", "beleza",
+   "fechou", "manda ver") na mesma ordem, palavra por palavra. Isso não serve — preciso de frases
+   NOVAS, inventadas por você, não repetições dos exemplos ou da lista de sugestões.
+2. Uma das suas frases saiu corrompida com caracteres de outro idioma no meio ("não, pra lá
+   de[caracteres árabes]"). Revise sua própria saída antes de responder e garanta que é português
+   do Brasil limpo, sem nenhum caractere fora do alfabeto latino.
+
+Preciso de 18 frases em português do Brasil, faladas — não escritas —, que uma pessoa comum
+diria em resposta a uma pergunta de confirmação do tipo "Posso criar esse lembrete?" ou "Posso
+apagar essa nota?" feita por um assistente de voz. São respostas de verdade, coloquiais, do dia
+a dia.
+
+Metade (9) deve significar SIM (confirmar), metade (9) deve significar NÃO (negar/cancelar).
+
+Para as de NÃO, priorize frases CURTAS onde a negação depende de uma ou duas palavras isoladas
+no início ou meio da frase (o tipo de construção onde um sistema de reconhecimento de voz real
+pode perder a palavra de negação e a frase residual soar ambígua ou até afirmativa) — o padrão é
+uma negação breve seguida de uma continuação que, sozinha, poderia soar neutra ou até positiva.
+Essas são as mais importantes do teste porque medem se o sistema erra pro lado perigoso quando a
+transcrição de voz degrada.
+
+Para as de SIM, varie entre confirmação direta e indireta/qualificada, com formas coloquiais
+variadas — mas invente as suas próprias, não reuse nenhuma palavra das minhas sugestões originais.
+
+Regras importantes:
+- Cada uma das 18 frases deve ser estruturalmente diferente das outras 17 — nenhuma repetição de
+  padrão, nenhuma frase igual ou quase igual a um exemplo que eu tenha dado em qualquer mensagem
+  desta conversa.
+- Pode incluir contração, gíria, hesitação, regionalismo — sempre em português do Brasil.
+- NÃO explique nem categorize na resposta — responda SOMENTE com a lista numerada de 1 a 18,
+  cada linha no formato exato "N. [SIM] frase" ou "N. [NAO] frase" — nenhum outro texto antes
+  ou depois, nenhuma cerca de código.
