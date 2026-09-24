@@ -1,0 +1,189 @@
+ACHADO: Escrita prematura de `notifiedAt` e silenciamento de erros do `osascript`
+EVIDÊNCIA: [phase-6-v1.md:231-242](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L231-L242):
+```ts
+    execFile('osascript', ['-e',
+      `display notification ${JSON.stringify(item.text)} with title ${JSON.stringify(title)}`
+    ], () => {}); // fire-and-forget deliberado — falha de notificação não deve derrubar o
+                   // servidor nem re-tentar em loop; próxima subida do processo já trata via
+                   // bootstrap() se o item continuar sem notifiedAt
+
+    const store = this.store.read();
+    const idx = store.items.findIndex((i) => i.id === item.id);
+    if (idx !== -1) {
+      store.items[idx] = { ...store.items[idx], notifiedAt: new Date().toISOString() };
+      this.store.write(store);
+    }
+```
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O comentário afirma que uma falha será tratada no próximo `bootstrap()` "se o item continuar sem notifiedAt", mas o código grava `notifiedAt` sincronicamente antes mesmo de `osascript` executar. Se `osascript` falhar (erro de sintaxe, falta de permissão no macOS ou timeout), a callback vazia `() => {}` descarta o erro sem log (`CLAUDE.md: disciplina de honestidade`) e o item já foi marcado como notificado no disco, perdendo a notificação para sempre. Mover a persistência de `notifiedAt` para dentro da callback de sucesso de `execFile`, registrar `console.error` em caso de erro e aplicar um timeout explícito (ex.: `5000ms`) em `execFile`.
+
+---
+
+ACHADO: Ciclo de injeção e instanciação quebrado entre `voiceRuntime.ts`, `createMutatingTools` e `ReminderScheduler`
+EVIDÊNCIA: [phase-6-v1.md:178-179](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L178-L179), [phase-6-v1.md:193](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L193), [phase-6-v1.md:269](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L269) vs [mutatingTools.ts:145-149](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L145-L149) e [voiceRuntime.ts:89-93](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L89-L93):
+```ts
+// phase-6-v1.md:
+// "LembreteTool recebe uma dependência nova no construtor (scheduler: ReminderScheduler), injetada por createMutatingTools()" (§4.3)
+// "Chamado uma vez na subida do servidor (voiceRuntime.ts), depois de createMutatingTools()." (§4.4)
+// "voiceRuntime.ts cria o ReminderScheduler, chama bootstrap() na subida" (§5)
+// mutatingTools.ts:
+export function createMutatingTools(baseDir: string): IMutatingTool[] {
+  const lembreteStore = new JsonStore<StoredItem>(baseDir, 'lembretes.json');
+  ...
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O plano é autocontraditório sobre quem instancia o quê: se `voiceRuntime.ts` cria o `ReminderScheduler`, ele precisa de `lembreteStore`, que hoje é instanciado internamente em `createMutatingTools()`. Se `createMutatingTools()` cria o scheduler, ele não consegue expô-lo para `voiceRuntime.ts` chamar `bootstrap()`, pois seu retorno é `IMutatingTool[]`. Além disso, se `RODRIGO_VOICE_DISABLE=1` for acionado ([voiceRuntime.ts:31-36](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L31-L36)), `voiceRuntime` retorna antecipadamente e o agendador sequer sobe. O implementador deve desacoplar a criação do `lembreteStore` e do `ReminderScheduler`, instanciando-os explicitamente (ou retornando `{ tools, scheduler }` em uma factory dedicada) e expondo o scheduler para controle de ciclo de vida (`bootstrap` e `shutdown`).
+
+---
+
+ACHADO: Falha de parsing em números por extenso comuns em voz coloquial (Whisper STT)
+EVIDÊNCIA: [phase-6-v1.md:106-109](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L106-L109):
+```ts
+  //   /daqui a (\d+) minutos?/        -> now + N min
+  //   /daqui a (\d+) horas?/          -> now + N h
+  //   /em (\d+) minutos?/             -> now + N min
+  //   /em (\d+) horas?/               -> now + N h
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: O STT do Whisper transcreve números falados frequentemente por extenso ("vinte minutos", "dez minutos", "uma hora", "duas horas", "meia hora"). Como as regexes usam estritamente `\d+`, frases comuns ditas pelo usuário falharão silenciosamente no parser, caindo no fallback `{ dueAt: null, residualText: text }` e salvando o lembrete sem agendamento. O implementador deve suportar cardinais por extenso básicos (pelo menos 1 a 59, "um/uma", "dois/duas", "meia") ou normalizar números por extenso para dígitos antes da aplicação das expressões regulares de tempo.
+
+---
+
+ACHADO: "Amanhã de tarde" e "amanhã de noite" agendam incorretamente para a manhã
+EVIDÊNCIA: [phase-6-v1.md:111-114](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L111-L114):
+```ts
+  //   /amanh[ãa] (a|à) tarde/         -> amanhã, 14:00 local
+  //   /amanh[ãa] (a|à) noite/         -> amanhã, 19:00 local
+  //   /amanh[ãa]/ (sem período)       -> amanhã, 09:00 local (mesmo default de "de manhã")
+  // Primeiro padrão que bate vence; a expressão correspondente é removida do texto residual
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Em português do Brasil, "amanhã de tarde" e "amanhã de noite" são coloquialmente tão ou mais comuns que "à tarde" / "à noite". Como o padrão exige estritamente `(a|à)`, uma frase com "de tarde" falha em casar com o padrão das 14h e cai no padrão seguinte `/amanh[ãa]/`, agendando o lembrete para a manhã (08h/09h) e deixando "de tarde" no texto residual. Alterar as regexes para cobrir explicitamente a preposição "de": `/amanh[ãa] (?:(?:a|à|de)\s+)?tarde/` e `/amanh[ãa] (?:(?:a|à|de)\s+)?noite/`.
+
+---
+
+ACHADO: Deduplicação em `execute()` bloqueia novos lembretes legítimos com mesmo texto
+EVIDÊNCIA: [phase-6-v1.md:154-156](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L154-L156):
+```ts
+    const store = this.store.read();
+    const last = store.items[store.items.length - 1];
+    if (last && last.text === finalText) return 'Isso já estava salvo.'; // achado 6-like: dedupe usa o texto residual
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: Na Fase 5c, `last.text === content` comparava o texto bruto. Ao mudar para `last.text === finalText`, qualquer novo lembrete com o mesmo conteúdo residual (ex.: "tomar remédio daqui a 1 hora" seguido mais tarde por "tomar remédio daqui a 4 horas", ou um lembrete criado para amanhã após um já notificado no passado) será sumariamente descartado com "Isso já estava salvo.". A verificação de duplicata deve considerar o estado temporal do item anterior: só considerar duplicata se `last.text === finalText` E `last.dueAt === dueAt` E `last.notifiedAt === null`.
+
+---
+
+ACHADO: Divergência entre a confirmação por voz em `preview()` e a execução em `execute()`
+EVIDÊNCIA: [phase-6-v1.md:151-152](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L151-L152) vs [mutatingTools.ts:18-24](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L18-L24):
+```ts
+// mutatingTools.ts:
+preview(kind: MutationName, content: string | null): string {
+  if (kind === 'LEMBRETE_CRIAR') {
+    return `Posso criar o lembrete: ${content}?`;
+  }
+...
+// phase-6-v1.md (§4.3):
+execute(kind: MutationName, content: string | null): string {
+  const { dueAt, residualText } = parseRelativeTime(content);
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: `LembreteTool.preview()` usa o `content` bruto (ex.: "ligar pro dentista daqui a 20 minutos") sem chamar `parseRelativeTime()`. O usuário ouve a pergunta com o horário, responde "sim", e só então `execute()` roda o parser. Se o parser falhar (ex.: por conter número por extenso), o lembrete é gravado silenciosamente como atemporal (`dueAt: null`) e o sistema responde apenas "Lembrete criado.", quebrando o contrato estabelecido na pergunta de voz. O parsing deve ser centralizado ou executado no preview para que a pergunta reflita o que de fato será agendado (ex.: "Posso criar o lembrete de ligar pro dentista para daqui a 20 minutos?").
+
+---
+
+ACHADO: Vazamento de timers no Map `timers` e ausência de método de shutdown no agendador
+EVIDÊNCIA: [phase-6-v1.md:188](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L188), [phase-6-v1.md:214](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L214), [phase-6-v1.md:222-227](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L222-L227):
+```ts
+  private readonly timers = new Map<string, NodeJS.Timeout>();
+  ...
+  this.timers.set(item.id, timer);
+  ...
+  private fire(id: string): void {
+    const { items } = this.store.read();
+    const item = items.find((i) => i.id === id);
+    if (!item || item.notifiedAt) return;
+    this.notify(item, { late: false });
+  }
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: `this.timers.delete(id)` só é invocado em `cancel(id)`, nunca em `fire(id)`. Todos os timers concluídos permanecem armazenados no Map indefinidamente. Além disso, `schedule()` sobrescreve entradas no Map sem chamar `clearTimeout()` no timer anterior, e a classe não expõe um método de encerramento (`shutdown()` / `dispose()`), deixando timers ativos rodando após o fechamento do servidor ou durante a execução dos testes automatizados. O implementador deve remover o timer do Map dentro de `fire()`, limpar timers anteriores no `schedule()` e implementar `shutdown()` com limpeza geral dos timeouts.
+
+---
+
+ACHADO: Contradição entre §2 e §4.4 na política de lembretes atrasados ("últimos N minutos")
+EVIDÊNCIA: [phase-6-v1.md:53-54](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L53-L54) vs [phase-6-v1.md:197-202](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L197-L202):
+```markdown
+// §2: "ao processo subir de novo, lembretes com dueAt já vencido dentro dos últimos N minutos são tratados como 'atrasados' (ver §4.4) em vez de silenciosamente descartados ou disparados tarde demais sem aviso."
+// §4.4:
+      const due = new Date(item.dueAt);
+      if (due <= now) {
+        this.notify(item, { late: true });
+      }
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O texto de §2 promete explicitamente um limite temporal ("dentro dos últimos N minutos") para evitar disparar notificações obsoletas de dias/semanas atrás, mas o pseudocódigo em §4.4 não define nem implementa nenhum limite N (executa `due <= now` incondicionalmente). Se houver vários lembretes antigos, o sistema disparará dezenas de instâncias de `osascript` simultâneas no boot. O plano deve formalizar o valor exato de N (ex.: 60 minutos ou 24 horas), descartar ou marcar como expirados itens anteriores a essa janela, e sequenciar ou limitar disparos múltiplos na subida.
+
+---
+
+ACHADO: Contradição interna de horários de disparo para "amanhã" em §4.1
+EVIDÊNCIA: [phase-6-v1.md:110](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L110) vs [phase-6-v1.md:113](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L113):
+```ts
+  //   /amanh[ãa] de manh[ãa]/         -> amanhã, 08:00 local
+  ...
+  //   /amanh[ãa]/ (sem período)       -> amanhã, 09:00 local (mesmo default de "de manhã")
+```
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: A linha 113 define 09:00 alegando ser o "mesmo default de de manhã", mas a linha 110 fixou "de manhã" em 08:00. Uniformizar o horário padrão da manhã em todo o documento para um valor único (08:00 ou 09:00).
+
+---
+
+ACHADO: Função `formatHumanRelative` usada no retorno de `execute()` não possui especificação
+EVIDÊNCIA: [phase-6-v1.md:169](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L169) e [phase-6-v1.md:265](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L265):
+```ts
+return dueAt
+  ? `Lembrete criado para ${formatHumanRelative(dueAt)}.` // ex. "daqui a 20 minutos"
+  : 'Lembrete criado.';
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: A função é listada como exportada por `relativeTimeParser.ts` e usada para construir a fala do TTS, mas não há assinatura, pseudocódigo, comportamento para "amanhã" vs deltas de minutos, nem casos de teste especificados. O formato gerado precisa ser natural para fala (`VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS` em `sessionManager.ts:126-138`) e evitar termos truncados ou formatos numéricos brutos. O plano deve detalhar formalmente sua especificação técnica e casos de teste.
+
+---
+
+ACHADO: Critérios de aceite incompletos e sem codificação H1..Hn padronizada
+EVIDÊNCIA: [phase-6-v1.md:275-295](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L275-L295):
+```markdown
+## 6. Critérios de aceite (rascunho — numerar H1..Hn na versão auditada)
+1. Testes unitários novos passam...
+...
+7. Regressão: lembrete criado sem expressão de tempo...
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O plano não inclui testes para o cancelamento do agendamento quando `LEMBRETE_APAGAR` é executado (`scheduler.cancel(id)`), não prevê testes para `formatHumanRelative()`, e mantém os critérios como um rascunho de 1 a 7. Codificar os critérios sob o padrão estrito `H1..Hn` do repositório, adicionando a verificação de cancelamento e de formatação falada.
+
+---
+
+ACHADO: Formulação enganosa de "fecha (ou minimiza) o app" no critério de conclusão
+EVIDÊNCIA: [phase-6-v1.md:37-39](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-6-v1.md#L37-L39):
+```markdown
+o usuário fala "me lembra de ligar pro dentista daqui a 20 minutos", confirma, fecha (ou minimiza) o app, e 20 minutos depois recebe uma notificação do macOS com o texto "Ligar pro dentista".
+```
+GRAVIDADE: BAIXA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: Rodrigo AI é composto por um servidor Node rodando no terminal e uma interface no navegador. Fechar o terminal (o que um usuário entenderia como "fechar o app") encerra o processo Node e impede qualquer notificação futura. A redação deve ser ajustada para "fecha ou minimiza a aba do navegador, mantendo o processo do servidor ativo", evitando expectativas irreais no teste manual do SO.
+
+---
+
+VEREDITO: REJEITADO
+JUSTIFICATIVA: O plano apresenta falhas críticas que quebram o código em produção: grava `notifiedAt` prematuramente silenciando falhas de notificação e violando a política de honestidade do projeto, introduz um ciclo de injeção irrealizável entre `voiceRuntime` e `createMutatingTools`, e quebra a deduplicação impedindo novos agendamentos legítimos. Além disso, as expressões regulares ignoram números por extenso comuns no Whisper e corrompem "amanhã de tarde" para o período da manhã.
