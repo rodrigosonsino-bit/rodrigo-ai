@@ -286,6 +286,63 @@ describe('ReminderScheduler (Fase 6 — H6, H7 & H8)', () => {
 
       scheduler.shutdown();
     });
+
+    it('achado 7 (auditoria de código, Hermes, 2026-09-24): mix futuro+atrasado+expirado numa chamada só', async () => {
+      const calls: Array<{ args: string[] }> = [];
+      const mockExecFile = ((cmd: string, args: string[], opts: any, cb: any) => {
+        calls.push({ args });
+        cb(null, '', '');
+      }) as any;
+
+      const scheduler = new ReminderScheduler(store, mockExecFile);
+      const now = new Date();
+
+      store.write({
+        items: [
+          {
+            id: 'mix-future',
+            text: 'Item futuro',
+            createdAt: now.toISOString(),
+            dueAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
+            notifiedAt: null
+          },
+          {
+            id: 'mix-late',
+            text: 'Item atrasado',
+            createdAt: now.toISOString(),
+            dueAt: new Date(now.getTime() - 2 * 3600_000).toISOString(), // 2h atrás
+            notifiedAt: null
+          },
+          {
+            id: 'mix-expired',
+            text: 'Item expirado',
+            createdAt: now.toISOString(),
+            dueAt: new Date(now.getTime() - (OVERDUE_CUTOFF_MS + 3600_000)).toISOString(), // 25h atrás
+            notifiedAt: null
+          }
+        ]
+      });
+
+      scheduler.bootstrap(now);
+
+      // O futuro entra no Map imediatamente, síncrono.
+      assert.equal(scheduler.hasTimer('mix-future'), true);
+
+      await new Promise((r) => setTimeout(r, 60));
+
+      // O atrasado disparou osascript com título de atraso; o expirado nunca chamou osascript.
+      assert.equal(calls.length, 1);
+      assert.ok(calls[0].args[1].includes('Item atrasado'));
+      assert.ok(calls[0].args[1].includes('with title "Lembrete (atrasado)"'));
+
+      const reRead = store.read();
+      const byId = Object.fromEntries(reRead.items.map((it) => [it.id, it]));
+      assert.equal(byId['mix-future'].notifiedAt, null, 'futuro não deve ser notificado ainda');
+      assert.ok(byId['mix-late'].notifiedAt, 'atrasado deve ter notifiedAt gravado após o disparo');
+      assert.ok(byId['mix-expired'].notifiedAt, 'expirado deve ser marcado sem popup no SO');
+
+      scheduler.shutdown();
+    });
   });
 
   describe('H8 — shutdown()', () => {

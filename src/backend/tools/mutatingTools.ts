@@ -46,6 +46,14 @@ export class LembreteTool implements IMutatingTool {
   }
 
   execute(kind: MutationName, content: string | null): string {
+    // Achado 8 (auditoria de código, Hermes, 2026-09-24): captura o cache e limpa
+    // incondicionalmente aqui, independente do kind — um preview(LEMBRETE_CRIAR) seguido de um
+    // execute(LEMBRETE_APAGAR) (usuário muda de ideia entre a pergunta e a confirmação) não pode
+    // deixar `lastParsed` sobrevivendo para contaminar uma criação de lembrete não relacionada
+    // mais tarde. `cachedParsed` guarda o valor capturado antes da limpeza, pro ramo CRIAR usar.
+    const cachedParsed = this.lastParsed;
+    this.lastParsed = null;
+
     if (kind === 'LEMBRETE_CRIAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de lembrete.');
@@ -53,10 +61,9 @@ export class LembreteTool implements IMutatingTool {
 
       // Reusa o parsing validado na pergunta ou roda fallback se chamado diretamente
       const parsed =
-        this.lastParsed && this.lastParsed.raw === content
-          ? this.lastParsed.parsed
+        cachedParsed && cachedParsed.raw === content
+          ? cachedParsed.parsed
           : parseRelativeTime(content);
-      this.lastParsed = null;
 
       const { dueAt, residualText } = parsed;
       const finalText = residualText.trim() || content;
@@ -194,6 +201,14 @@ export interface MutatingToolsResult {
   scheduler: ReminderScheduler;
 }
 
+/**
+ * `customScheduler`, se passado, DEVE ter sido construído com o mesmo `JsonStore` de lembretes
+ * que este `baseDir` produziria (`new JsonStore(baseDir, 'lembretes.json')`) — achado 5 (auditoria
+ * de código, Hermes, 2026-09-24): um scheduler apontando para um store diferente agenda o timer
+ * normalmente, mas `fire()` nunca encontra o item nesse store e a notificação nunca dispara, sem
+ * nenhum erro visível. Em produção `customScheduler` nunca é passado (voiceRuntime.ts usa o
+ * default); o parâmetro existe só para testes injetarem um scheduler mockável.
+ */
 export function createMutatingTools(
   baseDir: string,
   customScheduler?: ReminderScheduler

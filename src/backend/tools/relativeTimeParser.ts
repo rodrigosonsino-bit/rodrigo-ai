@@ -1,3 +1,6 @@
+/** Teto de sanidade para minutos/horas por extenso ou dígito — ver achado 4 (Hermes, 2026-09-24). */
+const MAX_REASONABLE_UNITS = 100_000;
+
 export interface ParsedRelativeTime {
   dueAt: string | null;      // ISO 8601, sempre no futuro relativo ao momento da chamada
   residualText: string;      // Conteúdo do lembrete sem a expressão de tempo e sem pontuações residuais
@@ -106,7 +109,10 @@ export function parseRelativeTime(text: string, now: Date = new Date()): ParsedR
   const minutosMatch = text.match(minutosRegex);
   if (minutosMatch && minutosMatch.index !== undefined) {
     const val = parseNumberOrWord(minutosMatch[1]);
-    if (val !== null && val > 0) {
+    // Achado 4 (auditoria de código, Hermes, 2026-09-24): teto de sanidade — sem ele, um
+    // dígito absurdamente grande (só alcançável via chamada direta da função, não por voz
+    // real) produz Date inválida e new Date(...).toISOString() lança RangeError não tratado.
+    if (val !== null && val > 0 && val < MAX_REASONABLE_UNITS) {
       const dueAt = new Date(now.getTime() + val * 60_000).toISOString();
       const residual = cleanResidualText(
         text.slice(0, minutosMatch.index) + ' ' + text.slice(minutosMatch.index + minutosMatch[0].length)
@@ -120,7 +126,7 @@ export function parseRelativeTime(text: string, now: Date = new Date()): ParsedR
   const horasMatch = text.match(horasRegex);
   if (horasMatch && horasMatch.index !== undefined) {
     const val = parseNumberOrWord(horasMatch[1]);
-    if (val !== null && val > 0) {
+    if (val !== null && val > 0 && val < MAX_REASONABLE_UNITS) {
       const dueAt = new Date(now.getTime() + val * 3600_000).toISOString();
       const residual = cleanResidualText(
         text.slice(0, horasMatch.index) + ' ' + text.slice(horasMatch.index + horasMatch[0].length)
@@ -193,6 +199,11 @@ export function formatHumanRelative(dueAtIso: string, now: Date = new Date()): s
   const target = new Date(dueAtIso);
   const diffMs = target.getTime() - now.getTime();
   const diffMin = Math.round(diffMs / 60_000);
+
+  // Achado 3 (auditoria de código, Hermes, 2026-09-24): função pública, chamável fora do
+  // caminho protegido de bootstrap()/parseRelativeTime() — ISO inválido produziria "daqui a
+  // NaN horas" sem esta guarda.
+  if (Number.isNaN(diffMin)) return 'agora';
 
   // Se o horário já passou ou é imediato
   if (diffMin <= 0) return 'agora';

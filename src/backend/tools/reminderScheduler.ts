@@ -45,7 +45,16 @@ export class ReminderScheduler {
           // Atrasado dentro da janela de 24h: notifica com título explicativo, espaçado no
           // tempo (200ms entre disparos) para nunca lançar N processos osascript de uma vez —
           // a promessa de "sequenciado" do §2 agora tem um mecanismo real, não só prosa.
-          setTimeout(() => this.notify(item, { late: true }), lateDelayMs);
+          // Achado 1 (auditoria de código, Hermes, 2026-09-24): este timer precisa do mesmo
+          // tratamento de schedule() — rastreado no Map (pra shutdown() poder cancelá-lo) e
+          // unref()'d (pra nunca ser o motivo do processo não encerrar, mesma armadilha do
+          // CLAUDE.md global sobre setTimeout ref'd).
+          const lateTimer = setTimeout(() => {
+            this.timers.delete(item.id);
+            this.notify(item, { late: true });
+          }, lateDelayMs);
+          lateTimer.unref();
+          this.timers.set(item.id, lateTimer);
           lateDelayMs += 200;
         } else {
           // Vencido há mais de 24h: registra log explícito, não dispara no SO, acumula pra
@@ -126,8 +135,14 @@ export class ReminderScheduler {
       // Garantia explícita (achado BAIXA, auditoria Hermes rodada 1 sobre o v2): se
       // LEMBRETE_APAGAR remover este item entre o disparo do timer e este callback, a releitura
       // fresca do store aqui (não o `item` capturado no closure) mais o `idx !== -1` cobrem o
-      // caso — o item removido simplesmente não é encontrado e nada é escrito. Não é uma
-      // corrida real: é uma checagem que já resolve corretamente, só precisava ficar nomeada.
+      // caso — o item removido simplesmente não é encontrado e nada é escrito.
+      // Limite conhecido, documentado (achado 2, auditoria de código, Hermes, 2026-09-24): o
+      // `idx !== -1` acima protege só a PERSISTÊNCIA de notifiedAt, não a ENTREGA — o processo
+      // `osascript` já foi disparado (linha acima) antes desta checagem rodar, então numa janela
+      // de milissegundos entre o disparo do timer e LEMBRETE_APAGAR cancelar/remover o item, o
+      // usuário ainda vê o popup de um lembrete que acabou de apagar. Janela pequena o bastante
+      // (exigiria apagar no exato tick do disparo) pra não justificar checar o store antes do
+      // execFile — mas é real, não um falso positivo, e fica nomeada aqui.
       try {
         const store = this.store.read();
         const idx = store.items.findIndex((i) => i.id === item.id);

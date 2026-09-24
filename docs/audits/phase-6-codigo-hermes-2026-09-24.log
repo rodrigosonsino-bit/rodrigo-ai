@@ -1,0 +1,150 @@
+## Auditoria de Código — Fase 6 (Rodrigo AI)
+
+Após leitura integral de todos os arquivos listados, execução mental de cada teste contra o código real e rastreamento de todos os caminhos de timer/cache/parsing, seguem os achados com evidência arquivo:linha.
+
+---
+
+**ACHADO 1: timers de itens atrasados em `bootstrap()` não são rastreados no Map `timers` e não são `unref()`d**
+
+**EVIDÊNCIA:** `src/backend/tools/reminderScheduler.ts:48-49`
+```ts
+setTimeout(() => this.notify(item, { late: true }), lateDelayMs);
+lateDelayMs += 200;
+```
+vs. `schedule()` (linha 82) que chama `timer.unref()` e adiciona ao Map em `this.timers.set(item.id, timer)`.
+
+**GRAVIDADE:** BAIXA
+
+**CONFIANÇA:** 95%
+
+**AÇÃO RECOMENDADA:** Adicionar o retorno de `setTimeout` a `this.timers` (para `shutdown()` poder cancelá-lo) e chamar `.unref()` em cada um. Alternativamente, se a intenção é que sempre disparem no boot, documentar esse contrato em comentário.
+
+---
+
+**ACHADO 2: condição de corrida — notificação entregue ao usuário mesmo após `LEMBRETE_APAGAR`**
+
+**EVIDÊNCIA:** `src/backend/tools/reminderScheduler.ts:101-109` (fire) e `src/backend/tools/mutatingTools.ts:95-104` (APAGAR).
+
+Sequência que expõe a corrida:
+1. Timer dispara → `fire(id)` → `this.timers.delete(id)` (mapa limpo)
+2. `notify()` → `execFile('osascript', ...)` — o processo macOS já foi spawnado
+3. Entre o spawn e o callback do execFile, `LEMBRETE_APAGAR` executa: `store.items.pop()` remove o item e `scheduler.cancel(id)` faz nada (id já não está no Map)
+4. Callback do execFile lê store fresco, `findIndex` retorna -1, não escreve `notifiedAt`
+5. **O usuário já recebeu a notificação do osascript antes do passo 4** — o `idx !== -1` só protege a persistência, não a entrega
+
+O plano §10 (achado Hermes BAIXA) nomeia "a checagem `idx !== -1` já cobre", mas essa análise é incompleta: cobre a escrita de `notifiedAt`, não a entrega da notificação.
+
+**GRAVIDADE:** BAIXA (janela de corrida é de milissegundos — exigiria o usuário confirmar exclusão no exato tick do disparo)
+
+**CONFIANÇA:** 80%
+
+**AÇÃO RECOMENDADA:** Se quiser garantia total de "não mostrar popup de item deletado", checar o store antes do `execFile` (não depois no callback). Se aceitar a janela milissegundo, documentar explicitamente que o `idx !== -1` cobre apenas persistência.
+
+---
+
+**ACHADO 3: `formatHumanRelative()` retorna string absurda para ISO inválido**
+
+**EVIDÊNCIA:** `src/backend/tools/relativeTimeParser.ts:192-195`
+```ts
+export function formatHumanRelative(dueAtIso: string, now: Date = new Date()): string {
+  const target = new Date(dueAtIso);
+  const diffMs = target.getTime() - now.getTime();
+```
+Se `dueAtIso` for inválido, `target.getTime()` retorna `NaN`, `diffMin` = `NaN`, todas as comparações (`<= 0`, `< 60`, etc.) falham, e a função chega em `daqui a NaN horas` (linha 228-237).
+
+**GRAVIDADE:** BAIXA — protegido em produção: `bootstrap()` valida com `Number.isNaN(dueAt.getTime())` e lança (linha 36-39), e `parseRelativeTime` só gera ISO via `new Date(...).toISOString()`. Mas a função exportada é pública e chamável de qualquer contexto.
+
+**CONFIANÇA:** 85%
+
+**AÇÃO RECOMENDADA:** Adicionar guarda no início: `if (Number.isNaN(target.getTime())) return 'agora';` (ou lançar — depende do contrato desejado para função pública).
+
+---
+
+**ACHACHADO 4: `parseRelativeTime()` lança `RangeError` não tratado para dígitos absurdamente grandes**
+
+**EVIDÊNCIA:** `src/backend/tools/relativeTimeParser.ts:39-41` + `src/backend/tools/relativeTimeParser.ts:97`
+```ts
+if (/^\d+$/.test(trimmed)) {
+  const val = parseInt(trimmed, 10);
+  return Number.isFinite(val) ? val : null;
+}
+// ...
+const dueAt = new Date(now.getTime() + 30 * 60_000).toISOString();
+```
+`parseInt("99999999999999999999999999")` → número finito porém gigante. `new Date(now + gigante * 60_000)` → `Invalid Date`, e `.toISOString()` lança `RangeError: Invalid time value`. Esse throw propaga por `LembreteTool.preview()`/`execute()` sem catch.
+
+**GRAVIDADE:** BAIXA — Whisper não transcreve "99999999999999999999999999 minutos". Só alcançável via chamada direta da função com input artificial.
+
+**CONFIANÇA:** 75%
+
+**AÇÃO RECOMENDADA:** Validar um teto razoável (ex.: `val > 0 && val < 10_000`) antes do cálculo do `dueAt`.
+
+---
+
+**ACHADO 5: `createMutatingTools(customScheduler)` permite store mismatch silencioso**
+
+**EVIDÊNCIA:** `src/backend/tools/mutatingTools.ts:197-211`
+```ts
+export function createMutatingTools(baseDir: string, customScheduler?: ReminderScheduler): MutatingToolsResult {
+  const lembreteStore = new JsonStore<StoredItem>(baseDir, 'lembretes.json');
+  // ...
+  const scheduler = customScheduler ?? new ReminderScheduler(lembreteStore);
+  const lembreteTool = new LembreteTool(lembreteStore, scheduler);
+```
+Se `customScheduler` foi construído com um `JsonStore` diferente de `lembreteStore`, o `lembreteTool` persiste em `lembreteStore` (lembretes.json) mas o scheduler lê do store dele (ex.: custom.json). Resultado: `schedule()` registra timer, timer dispara, `fire()` lê store do scheduler, não encontra o item, retorno silencioso sem notificação. O agendamento "funciona" (timer existe no Map) mas nunca entrega.
+
+Teste atual (`mutatingTools.test.ts:512-521`) só verifica identidade `result.scheduler === customScheduler`, nunca exercita o fluxo completo.
+
+**GRAVIDADE:** BAIXA — em produção `customScheduler` nunca é passado (usa default). Só afeta testes que injetam scheduler customizado.
+
+**CONFIANÇA:** 80%
+
+**AÇÃO RECOMENDADA:** Documentar no contrato que `customScheduler` deve ser construído com o mesmo store que `lembreteStore`, ou lançar explicitamente se `customScheduler.store !== lembreteStore`.
+
+---
+
+**ACHADO 6: cobertura de testes — compostos por extenso ("vinte e cinco minutos") não exercitados em `parseRelativeTime`**
+
+**EVIDÊNCIA:** `src/backend/__tests__/relativeTimeParser.test.ts:39-47` (parseNumberOrWord cobre "vinte e cinco" → 25) vs. `src/backend/__tests__/relativeTimeParser.test.ts:71-110` (minutos só testa dígitos + cardinais simples) e `:112-132` (horas mesma coisa).
+
+**GRAVIDADE:** BAIXA — a lógica é coberta em isolamento, mas a integração regex→parseNumberOrWord→dueAt nunca é verificada para compostos.
+
+**CONFIANÇA:** 90%
+
+**AÇÃO RECOMENDADA:** Adicionar casos `parseRelativeTime('daqui a vinte e cinco minutos comprar pão', fixedNow)` e `parseRelativeTime('em duas e meia horas reunião', fixedNow)`.
+
+---
+
+**ACHADO 7: cobertura de testes — `bootstrap()` nunca é testado com mix futuro+atrasado+expirado numa chamada só**
+
+**EVIDÊNCIA:** `src/backend/__tests__/reminderScheduler.test.ts:183-288` — cada cenário (item atrasado, item expirado, item futuro) é testado em isolamento. O H6 plano §6 cobre "sequenciamento" e "atomicidade" mas não "bootstrap com mix completo persistido em disco".
+
+**GRAVIDADE:** BAIXA
+
+**CONFIANÇA:** 85%
+
+**AÇÃO RECOMENDADA:** Adicionar um teste que escreve 3 itens (1 futuro, 1 atrasado <24h, 1 expirado >24h), chama `bootstrap(now)`, e verifica que: futuro está no Map, atrasado chamou `execFile` com "atrasado", expirado marcou `notifiedAt` no disco sem chamar `osascript`.
+
+---
+
+**ACHADO 8: `LembreteTool.execute(LEMBRETE_APAGAR)` não limpa `lastParsed`**
+
+**EVIDÊNCIA:** `src/backend/tools/mutatingTools.ts:54-59` (limpa lastParsed apenas no ramo LEMBRETE_CRIAR) vs. `:95-104` (ramo LEMBRETE_APAGAR não toca em lastParsed).
+
+Se `preview(LEMBRETE_CRIAR, 'X')` seta `lastParsed`, e em vez de confirmar o usuário dispara `LEMBRETE_APAGAR`, o cache sobrevive. Um `execute(LEMBRETE_CRIAR, 'X')` posterior acertaria o cache (com `raw === content`), reutilizando parsing confirmado em contexto possivelmente diferente.
+
+**GRAVIDADE:** BAIXA — `SessionManager` garante uma mutação armada por vez, então na prática o preview sempre é seguido do execute correspondente.
+
+**CONFIANÇA:** 70%
+
+**AÇÃO RECOMENDADA:** Limpar `this.lastParsed = null` no início de `execute()` independente do kind, ou documentar a suposição de SessionManager.
+
+---
+
+Nenhum achado de gravidade CRÍTICA ou ALTA foi encontrado. O código segue o plano fielmente, os timers são gerenciados corretamente nos caminhos principais (schedule/cancel/fire/shutdown), a deduplicação considera `dueAt` + `notifiedAt === null` conforme especificado, o cache `lastParsed` funciona para o fluxo previsto, e os testes exercicem os comportamentos alegados nos caminhos felizes e nos principais ramos de erro.
+
+---
+
+**VEREDITO: APROVADO COM RESSALVAS**
+
+**JUSTIFICATIVA:** Implementação fiel ao plano v2, sem bugs críticos ou altos. Os 8 achados são todos BAIXA — edge cases de cronometria fina, funções públicas sem guarda completa contra input inválido, e lacunas de cobertura de testes. Nenhum compromete a garantia central da fase (notificação no horário + confirmação por voz + persistência atômica). As ressalvas são mecânicas e não exigem re-auditoria do plano — podem ser aplicadas como follow-up.

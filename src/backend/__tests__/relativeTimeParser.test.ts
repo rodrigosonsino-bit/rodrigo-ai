@@ -289,5 +289,29 @@ describe('relativeTimeParser (Fase 6 — H1 & H2)', () => {
       assert.equal(/[*_`#]/.test(formatted), false);
       assert.equal(/\bmin\b/i.test(formatted), false);
     });
+
+    it('achado 3 (auditoria de código, Hermes, 2026-09-24): ISO inválido não produz "NaN" na fala', () => {
+      assert.equal(formatHumanRelative('não-é-uma-data', fixedNow), 'agora');
+    });
+  });
+
+  describe('achado 6 (auditoria de código, Hermes, 2026-09-24) — integração regex + números compostos por extenso', () => {
+    it('parseRelativeTime reconhece minutos compostos dentro de uma frase real', () => {
+      const r = parseRelativeTime('me lembra de comprar pão daqui a vinte e cinco minutos', fixedNow);
+      assert.equal(r.dueAt, new Date(fixedNow.getTime() + 25 * 60_000).toISOString());
+      assert.equal(r.residualText, 'me lembra de comprar pão');
+    });
+
+    it('parseRelativeTime reconhece horas compostas dentro de uma frase real', () => {
+      const r = parseRelativeTime('reunião em trinta e duas horas', fixedNow);
+      assert.equal(r.dueAt, new Date(fixedNow.getTime() + 32 * 3600_000).toISOString());
+      assert.equal(r.residualText, 'reunião');
+    });
+
+    it('achado 4 (auditoria de código, Hermes, 2026-09-24): número absurdamente grande não lança RangeError', () => {
+      assert.doesNotThrow(() => parseRelativeTime('daqui a 99999999999999999999999999 minutos', fixedNow));
+      const r = parseRelativeTime('daqui a 99999999999999999999999999 minutos', fixedNow);
+      assert.equal(r.dueAt, null); // acima do teto de sanidade -> tratado como não reconhecido
+    });
   });
 });
