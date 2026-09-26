@@ -1,0 +1,228 @@
+Como auditor adversarial em modo plan/read-only, auditei o plano de implementação [docs/phase-7-v1.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md) linha por linha contra o código real do repositório ([mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts), [sessionManager.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts), [voiceRuntime.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts), [voiceProtocol.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts), [worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py), e a suíte de testes em [src/backend/\_\_tests\_\_/](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/)).
+
+Abaixo estão os achados detalhados para cada aspecto investigado.
+
+---
+
+ACHADO: Omissão de `parse_mutation_output` em `worker.py` descarta o conteúdo de `MEMORIA_GUARDAR` e quebra o salvamento
+EVIDÊNCIA: Em [scripts/worker/worker.py:164-170](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L164-L170):
+```python
+    if action not in MUTATION_NAMES:
+        return ("NENHUMA", None)
+    if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR"):
+        if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
+            return ("NENHUMA", None)
+        return (action, content)
+    return (action, None)
+```
+E no plano [docs/phase-7-v1.md:178](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L178) e [docs/phase-7-v1.md:238](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L238):
+> `scripts/worker/worker.py MUTATION_NAMES + DETECT_MUTATION_SYSTEM_PROMPT com exemplos contrastivos`
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Atualizar a especificação de modificação de [scripts/worker/worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py) para incluir explicitamente a alteração da linha 166: `if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR"):`. Sem isso, o worker retornará `("MEMORIA_GUARDAR", None)`, fazendo com que `MemoriaTool.preview()` lance invariavelmente `Error('Conteúdo ausente para guardar memória.')` e `sessionManager.ts:465` responda sempre com `MUTATION_FAILURE_TEXT` ("Não consegui salvar isso agora."). Atualizar também o arquivo de testes de unidade puro [scripts/worker/test_mutation_parser.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/test_mutation_parser.py) em §5 e §6.
+
+---
+
+ACHADO: Gate de confirmação da Camada 2 (`NEGATION_MARKERS`) veta confirmações legítimas de `MEMORIA_ESQUECER`
+EVIDÊNCIA: Em [src/backend/voice/sessionManager.ts:105-115](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L105-L115):
+```ts
+const NEGATION_MARKERS = [
+  'nao', 'nem', 'nunca', 'jamais', 'cancela', 'cancelar', 'esquece', 'esquecer', 'tira', 'tirar',
+  'nada'
+];
+export function hasAffirmativeMarker(transcript: string): boolean {
+  const n = normalizeConfirmation(transcript);
+  return AFFIRMATIVE_REGEX.test(n) && !NEGATION_REGEX.test(n);
+}
+```
+E no plano [docs/phase-7-v1.md:41](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L41) e [docs/phase-7-v1.md:65](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L65):
+> `reutilizando a infraestrutura já existente (Camadas 0/1/2, markPlayed()), sem nenhuma mudança nela.`
+> `preview(): Posso esquecer o que você me disse por último?`
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O plano assume falsamente que a Camada 2 pode ser reutilizada sem alteração. Se o Rodrigo pergunta "Posso esquecer o que você me disse por último?", a resposta coloquial natural do usuário é "pode esquecer", "sim, pode esquecer" ou "esquece sim". Como `esquece` e `esquecer` constam em `NEGATION_MARKERS`, `NEGATION_REGEX.test(n)` retorna `true`, fazendo com que `hasAffirmativeMarker()` retorne `false`. O `SIM` do classificador LLM é obrigatoriamente rebaixado para `NAO` em [sessionManager.ts:387-392](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L387-L392) e cancelado. Além disso, `esquece isso` está em `CONFIRM_NO_EXACT` ([sessionManager.ts:54](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L54)). O plano precisa definir como o gate de confirmação trata a ação `MEMORIA_ESQUECER` contextualizada — por exemplo, permitindo que marcadores como `pode esquecer` sejam afirmativos ou parametrizando `NEGATION_MARKERS` pelo tipo de mutação pendente (`pendingMutation.kind`).
+
+---
+
+ACHADO: Decisão arquitetural em aberto e risco de quebra de `ReminderScheduler` em `createMutatingTools()`
+EVIDÊNCIA: Em [docs/phase-7-v1.md:227-228](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L227-L228):
+> `aqui devolve { tools, memoriaStore }, ou os dois stores relevantes, a decidir na implementação de forma consistente com o padrão já estabelecido`
+E no código real [src/backend/tools/mutatingTools.ts:199-202](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L199-L202) e [src/backend/voice/voiceRuntime.ts:95](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L95):
+```ts
+export interface MutatingToolsResult {
+  tools: IMutatingTool[];
+  scheduler: ReminderScheduler;
+}
+// voiceRuntime.ts:95:
+const { tools: mutatingTools, scheduler: reminderScheduler } = createMutatingTools(dataDir);
+reminderScheduler.bootstrap();
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O plano viola a diretriz de planejamento ao deixar a assinatura "a decidir na implementação". Além disso, sugerir que passe a devolver `{ tools, memoriaStore }` descartaria `scheduler`. Se `scheduler` for removido, `voiceRuntime.ts:99` (`reminderScheduler.bootstrap()`) e `voiceRuntime.ts:112` (`reminderScheduler.shutdown()`) lançam `TypeError: Cannot read properties of undefined` em tempo de execução, além de quebrar testes existentes em [src/backend/\_\_tests\_\_/mutatingTools.test.ts:418, 444, 461, 490, 516, 541](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L418). O plano deve fechar a assinatura exata e retrocompatível:
+```ts
+export interface MutatingToolsResult {
+  tools: IMutatingTool[];
+  scheduler: ReminderScheduler;
+  memoriaStore: JsonStore<StoredItem>;
+}
+```
+
+---
+
+ACHADO: Contradição interna de instanciação de `memoriaStore` em §4.5
+EVIDÊNCIA: Em [docs/phase-7-v1.md:216-228](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L216-L228):
+Linha 216:
+```ts
+const memoriaStore = new JsonStore<StoredItem>(dataDir, 'memorias.json');
+```
+Linhas 217-219:
+> `// createMutatingTools() já cria memorias.json internamente para o MemoriaTool — reaproveitar a MESMA instância aqui, não criar uma segunda (mesmo cuidado do achado 5...)`
+Linhas 225-228:
+> `createMutatingTools() precisa expor o memoriaStore que já cria internamente...`
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Eliminar a contradição entre as linhas 216 e 217. No pseudocódigo de `voiceRuntime.ts`, remover a linha `new JsonStore(...)` e desestruturar `memoriaStore` diretamente do retorno de `createMutatingTools(dataDir)`:
+```ts
+const { tools: mutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
+```
+
+---
+
+ACHADO: Quebra de retrocompatibilidade no construtor de `SessionManager` e blast radius nos testes existentes
+EVIDÊNCIA: Em [src/backend/voice/sessionManager.ts:204-212](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L204-L212):
+```ts
+  constructor(
+    engine: VoiceEngine,
+    ttsProvider: IVoiceProvider,
+    audioStore: AudioStore,
+    agents: readonly IAgent[],
+    retriever: KnowledgeRetriever | null = null,
+    tools: readonly ITool[] = [],
+    mutatingTools: readonly IMutatingTool[] = []
+  )
+```
+Em [src/backend/\_\_tests\_\_/voice.test.ts:86-94](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts#L86-L94):
+```ts
+  const sessionManager = new SessionManager(
+    engine, tts, audioStore, createSpecialistAgents(), retriever, tools, mutatingTools
+  );
+```
+E no plano [docs/phase-7-v1.md:171](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L171), [docs/phase-7-v1.md:220-222](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L220-L222), e §5 ("Arquivos afetados").
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O plano propõe que `SessionManager` receba obrigatoriamente `memoriaStore: JsonStore<StoredItem>` como 8º argumento. Embora haja 1 chamada direta em `voice.test.ts:86`, ela está encapsulada dentro de `setupHarness()`, que é invocada por 17 suítes de teste de voz cobrindo dezenas de cenários. Se o parâmetro for obrigatório, o TypeScript rejeitará o build dos testes (`TS2554`). Se for opcional sem fallback seguro (`memoriaStore?: JsonStore<StoredItem>`), a chamada `this.memoriaStore.read()` proposta em §4.3 causará `TypeError: Cannot read properties of undefined (reading 'read')` em cada turno executado pelos testes existentes. O plano deve:
+1. Tornar `memoriaStore` opcional no construtor com default `null` ou criar uma instância de fallback em diretório isolado se não fornecida.
+2. Atualizar `setupHarness()` em `voice.test.ts` e listar explicitamente `voice.test.ts` e `mutatingTools.test.ts` (onde `result.tools.length` passa de 2 para 3 na linha 518) na seção 5 de arquivos afetados.
+
+---
+
+ACHADO: Ausência de tratamento de erro na leitura de `memoriaStore` em `runTurn()` contraria a filosofia de resiliência da Fase 5a
+EVIDÊNCIA: Em [src/backend/voice/sessionManager.ts:560-568](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L560-L568):
+```ts
+      if (this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA')) {
+        try {
+          retrieved = this.retriever.retrieve(agent.id, transcript);
+        } catch (err) {
+          retrieved = [];
+          console.error('[knowledge] recuperação falhou, seguindo sem trecho:', err);
+        }
+      }
+```
+E no plano [docs/phase-7-v1.md:163](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L163):
+```ts
+const memoryBlock = buildMemoryBlock(this.memoriaStore.read().items);
+```
+GRAVIDADE: ALTA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Em [src/backend/storage/jsonStore.ts:44](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/storage/jsonStore.ts#L44), `read()` lança exceção em caso de JSON corrompido ou erro de I/O. Sem `try/catch` ao redor de `this.memoriaStore.read()`, qualquer problema de disco ou formato inválido em `memorias.json` escalará para o `catch` externo de `runTurn()` ([sessionManager.ts:614](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L614)), emitindo evento de `error` e derrubando **todos** os turnos de fala da aplicação. O plano afirma seguir o precedente de conhecimento da Fase 5a, mas ignora a regra: *"perder a consulta não deve custar a resposta"*. O implementador deve envolver a leitura de memória em `try/catch`, degradando para bloco vazio e logando em `console.error`.
+
+---
+
+ACHADO: Colisão semântica de verbos com `NOTA_CRIAR` e `LEMBRETE_APAGAR` no prompt do classificador
+EVIDÊNCIA: Em [scripts/worker/worker.py:115-120](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L115-L120):
+```python
+    "NOTA_CRIAR: uma ideia, observação, ou texto livre pra guardar — 'guarda essa ideia', "
+    "'escreve isso pra mim', 'salva essa observação', 'registra que'.\n"
+    "LEMBRETE_APAGAR: pede pra apagar/cancelar o lembrete mais recente — 'apaga o lembrete', "
+    "'cancela aquele lembrete', 'esquece o que eu pedi pra lembrar'.\n"
+```
+E no plano [docs/phase-7-v1.md:188-203](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L188-L203):
+```
+MEMORIA_GUARDAR: ... 'anota que eu gosto de', 'guarda que meu nome é' ...
+MEMORIA_ESQUECER: ... 'esquece o que eu te falei', 'apaga essa memória sobre mim' ...
+Exemplos contrastivos (LEMBRETE_CRIAR vs. MEMORIA_GUARDAR ...):
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: O plano focou unicamente no contraste `LEMBRETE_CRIAR` vs `MEMORIA_GUARDAR`, mas gerou colisões não resolvidas em duas outras frentes:
+1. `NOTA_CRIAR` vs `MEMORIA_GUARDAR`: verbos como "anota que...", "salva que..." e "registra que..." pertencem formalmente à descrição de `NOTA_CRIAR`. Frases coloquiais como "Anota que meu aniversário é dia 10" ou "Salva que eu não tomo café" cairão em `NOTA_CRIAR` na ausência de exemplos contrastivos específicos.
+2. `LEMBRETE_APAGAR` vs `MEMORIA_ESQUECER`: `LEMBRETE_APAGAR` contém explicitamente `"esquece o que eu pedi pra lembrar"`, enquanto `MEMORIA_ESQUECER` usa `"esquece o que eu te falei"`. Frases como "esquece o que eu acabei de pedir" são altamente propensas a falso-positivo para remoção de lembrete em vez de memória.
+O plano deve enriquecer os exemplos contrastivos cobrindo explicitamente `NOTA_CRIAR` vs `MEMORIA_GUARDAR` e `LEMBRETE_APAGAR` vs `MEMORIA_ESQUECER`.
+
+---
+
+ACHADO: Indução a reescrita em 3ª pessoa não-determinística fora do escopo declarado
+EVIDÊNCIA: Em [docs/phase-7-v1.md:198-201](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L198-L201):
+```
+Lembra que eu prefiro respostas curtas -> MEMORIA_GUARDAR|Prefere respostas curtas
+Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR|O nome do usuário é Rodrigo
+Anota que eu sou alérgico a amendoim -> MEMORIA_GUARDAR|É alérgico a amendoim
+```
+E em [docs/phase-7-v1.md:106](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L106):
+```ts
+return `Posso guardar isso sobre você: ${content}?`;
+```
+E em [docs/phase-7-v1.md:68-70](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L68-L70) (fora de escopo: extração automática / resumo).
+GRAVIDADE: MÉDIA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: Ao contrário de `LEMBRETE_CRIAR` e `NOTA_CRIAR` que extraem o texto exato residual da frase do usuário ([worker.py:111](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L111): *"o texto exato do que deve ser lembrado/anotado"*), os exemplos de `MEMORIA_GUARDAR` instruem o modelo 4B a resumir e reescrever a frase em 3ª pessoa ("O nome do usuário é Rodrigo"). Isso gera duas anomalias:
+1. Em `preview()`, o TTS sintetizará: *"Posso guardar isso sobre você: O nome do usuário é Rodrigo?"*, o que soa gramaticalmente inconsistente e não-natural em voz.
+2. Atribui ao modelo local quantizado (4-bit) uma responsabilidade de síntese gramatical não-determinística sem necessidade.
+Padronizar a extração como conteúdo direto/residual em 2ª pessoa ou afirmativa direta (ex.: `seu nome é Rodrigo`, `prefere respostas curtas`), alinhando o template de `preview` ou mantendo o texto exato do predicado.
+
+---
+
+ACHADO: Deduplicação temporal ingênua herdada de `NotaTool` compromete a lista fixa de memórias
+EVIDÊNCIA: Em [docs/phase-7-v1.md:116-117](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L116-L117):
+```ts
+const last = store.items[store.items.length - 1];
+if (last && last.text === content) return 'Isso já estava guardado.';
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: Em `NotaTool`, deduplicar apenas contra `last` faz sentido porque notas são um log temporal append-only onde registros idênticos podem ocorrer em dias diferentes. Memórias, por outro lado, são uma lista estática de fatos de contexto com teto rígido de 20 itens injetados sempre no prompt. Se o usuário diz *"Guarda que meu nome é Rodrigo"*, depois guarda outro fato, e semanas depois repete *"Guarda que meu nome é Rodrigo"*, a checagem de `last` falha e o mesmo fato é duplicado no arquivo e no prompt, desperdiçando um dos 20 slots de injeção. A deduplicação de `MemoriaTool` deve checar a existência em todo o array: `if (store.items.some((it) => it.text.trim().toLowerCase() === content.trim().toLowerCase()))`.
+
+---
+
+ACHADO: Ausência de teto em caracteres para o `memoryBlock` coloca em risco o SLA de latência (TTFT)
+EVIDÊNCIA: Em [docs/phase-7-v1.md:144-153](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L144-L153):
+```ts
+export const MAX_MEMORIES_INJECTED = 20;
+```
+Em [src/shared/voiceProtocol.ts:110](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts#L110) e [scripts/worker/worker.py:107](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L107):
+`MAX_MUTATION_CONTENT_CHARS = 200`
+`MAX_CONTEXT_TOKENS: 4096`
+E [CLAUDE.md:42](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/CLAUDE.md#L42):
+> `median ~3.2s, p95 ~3.8s from end-of-speech to first audio (target was ≤4s/≤8s — met).`
+GRAVIDADE: MÉDIA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: O plano aponta o teto de 20 memórias como risco em §7, mas não o quantifica. Vinte memórias de 200 caracteres somam até 4.150 caracteres (~1.000 tokens). Somando com o prompt do especialista (~300 tokens), salvaguardas universais (~200 tokens), bloco de conhecimento da Fase 5a (~350 tokens) e o histórico de 8 turnos (~2.400 tokens), o prompt de geração atinge entre 4.000 e 4.400 tokens, tangenciando ou excedendo `MAX_CONTEXT_TOKENS` (4096). Mais importante: o prefill de ~1.000 tokens adicionais em **todos** os turnos de qualquer agente adicionará latência direta ao Time to First Token (TTFT) no MLX local, ameaçando a meta estrita de ≤4s que hoje opera no limiar (mediana ~3.2s, p95 ~3.8s). O plano deve estabelecer um teto de caracteres além do de contagem (ex.: limite máximo de 1.500 caracteres ou 10 memórias para o v1) e incluir uma medição comparativa de TTFT em §6.
+
+---
+
+ACHADO: Filtro `MUTATION_GATE` em `mutatingTools.ts` não inclui radicais para o verbo memorizar
+EVIDÊNCIA: Em [src/backend/tools/mutatingTools.ts:175-176](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L175-L176):
+```ts
+const MUTATION_GATE =
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr)\w*\b/;
+```
+E no plano [docs/phase-7-v1.md:90-137](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v1.md#L90-L137).
+GRAVIDADE: BAIXA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: O regex permissivo de mutação cobre `lembr`, `guard`, `esquec`, `anot`, mas omite `memor` e `grav`. Frases coloquiais naturais como "memorize que eu tenho restrição alimentar" ou "grave isso sobre mim" retornarão `mightBeMutation() === false` e sequer chegarão à detecção de mutação do worker. Adicionar `memor` e `grav` ao `MUTATION_GATE`.
+
+---
+
+VEREDITO: REJEITADO
+JUSTIFICATIVA: O plano contém dois defeitos impeditivos que quebrariam a funcionalidade em produção: o descarte integral do conteúdo de `MEMORIA_GUARDAR` por omissão em `parse_mutation_output()` no worker Python, e o cancelamento involuntário de confirmações de `MEMORIA_ESQUECER` provocado pelo veto de `esquecer` em `NEGATION_MARKERS`. Adicionalmente, o documento deixa decisões de interface em aberto ("a decidir na implementação") com alto risco de remoção acidental de `ReminderScheduler`, quebra a compilação e execução de testes existentes de `SessionManager` e ignora a resiliência a falhas de leitura de arquivo em disco. O plano deve ser revisado para v2 antes de qualquer implementação.
