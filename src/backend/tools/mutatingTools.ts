@@ -171,9 +171,73 @@ export class NotaTool implements IMutatingTool {
   }
 }
 
-/** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2. */
+export class MemoriaTool implements IMutatingTool {
+  readonly name = 'MEMORIA';
+  readonly description = 'Guarda e esquece fatos/preferências do usuário entre sessões.';
+
+  constructor(private readonly store: JsonStore<StoredItem>) {}
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  preview(kind: MutationName, content: string | null): string {
+    if (kind === 'MEMORIA_GUARDAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para guardar memória.');
+      }
+      return `Posso guardar isso sobre você: ${content}?`;
+    }
+    if (kind === 'MEMORIA_ESQUECER') {
+      // Achado 2 (CRÍTICA, rodada 1): "apagar", nunca "esquecer" — a palavra "esquece" está em
+      // NEGATION_MARKERS (sessionManager.ts) e vetaria a própria confirmação afirmativa.
+      // Achado novo (BAIXA, rodada 2): frase curta, simétrica a LEMBRETE_APAGAR/NOTA_APAGAR —
+      // uma cauda como "...que você me pediu para guardar?" reintroduziria "guardar", que é ele
+      // mesmo um marcador afirmativo ('pode guardar'), abrindo espaço pra ambiguidade contrária.
+      return 'Posso apagar a memória mais recente?';
+    }
+    throw new Error(`Ação inválida para MemoriaTool: ${kind}`);
+  }
+
+  execute(kind: MutationName, content: string | null): string {
+    if (kind === 'MEMORIA_GUARDAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para guardar memória.');
+      }
+      const store = this.store.read();
+      // Achado 7 (MÉDIA, rodada 1): checa o array inteiro, não só o último item — memória é
+      // lista estática de fatos, não um log temporal como NotaTool.
+      const normalized = content.trim().toLowerCase();
+      const isDuplicate = store.items.some((it) => it.text.trim().toLowerCase() === normalized);
+      if (isDuplicate) {
+        return 'Isso já estava guardado.';
+      }
+      store.items.push({
+        id: crypto.randomUUID(),
+        text: content,
+        createdAt: new Date().toISOString()
+      });
+      this.store.write(store);
+      return 'Guardado.';
+    }
+
+    if (kind === 'MEMORIA_ESQUECER') {
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nada guardado pra apagar.';
+      }
+      store.items.pop();
+      this.store.write(store);
+      return 'Apagado.';
+    }
+
+    throw new Error(`Ação inválida para MemoriaTool: ${kind}`);
+  }
+}
+
+/** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2 e atualizado na Fase 7 §4.1. */
 const MUTATION_GATE =
-  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr)\w*\b/;
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar)\w*\b/;
 
 export function mightBeMutation(transcript: string): boolean {
   const n = transcript
@@ -199,6 +263,7 @@ export function selectMutatingToolByAction(
 export interface MutatingToolsResult {
   tools: IMutatingTool[];
   scheduler: ReminderScheduler;
+  memoriaStore: JsonStore<StoredItem>;
 }
 
 /**
@@ -215,13 +280,16 @@ export function createMutatingTools(
 ): MutatingToolsResult {
   const lembreteStore = new JsonStore<StoredItem>(baseDir, 'lembretes.json');
   const notaStore = new JsonStore<StoredItem>(baseDir, 'notas.json');
+  const memoriaStore = new JsonStore<StoredItem>(baseDir, 'memorias.json');
 
   const scheduler = customScheduler ?? new ReminderScheduler(lembreteStore);
   const lembreteTool = new LembreteTool(lembreteStore, scheduler);
   const notaTool = new NotaTool(notaStore);
+  const memoriaTool = new MemoriaTool(memoriaStore);
 
   return {
-    tools: [lembreteTool, notaTool],
-    scheduler
+    tools: [lembreteTool, notaTool, memoriaTool],
+    scheduler,
+    memoriaStore
   };
 }

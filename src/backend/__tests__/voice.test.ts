@@ -9,13 +9,13 @@ import type { AppConfig } from '../../shared/types.js';
 import { AudioStore } from '../voice/audioStore.js';
 import { FakeVoiceEngine } from '../voice/fakeEngine.js';
 import { KnowledgeRetriever, chunkMarkdown, KNOWLEDGE_PREAMBLE } from '../knowledge/index.js';
-import { SessionManager } from '../voice/sessionManager.js';
+import { SessionManager, hasAffirmativeMarker } from '../voice/sessionManager.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { createSystemTools, TOOL_FAILURE_TEXT, HoraAtualTool } from '../tools/index.js';
 import { createMutatingTools } from '../tools/index.js';
-import { JsonStore } from '../storage/jsonStore.js';
+import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
 import { VOICE_LIMITS, MUTATION_FAILURE_TEXT, MUTATION_CANCELLED_TEXT } from '../../shared/voiceProtocol.js';
 
 function buildTestWav(durationSeconds = 0.2, sampleRate = 16000): Buffer {
@@ -71,7 +71,8 @@ interface Harness {
 async function setupHarness(
   retriever: KnowledgeRetriever | null = null,
   tools: readonly ITool[] = [],
-  mutatingTools: readonly IMutatingTool[] = []
+  mutatingTools: readonly IMutatingTool[] = [],
+  memoriaStore: JsonStore<StoredItem> | null = null
 ): Promise<Harness> {
   const testConfig: AppConfig = { port: 0, host: '127.0.0.1', clientPort: 0 };
   // porta 0 -> o SO escolhe uma porta livre; startServer atual exige config.port fixo,
@@ -90,7 +91,8 @@ async function setupHarness(
     createSpecialistAgents(),
     retriever,
     tools,
-    mutatingTools
+    mutatingTools,
+    memoriaStore
   );
 
   const server = await startServer(config, undefined, { config, sessionManager, audioStore });
@@ -1464,6 +1466,341 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         const session = (h.sessionManager as any).current;
         assert.equal(session.armedMutation, null, 'armedMutation NÃO deve ser armado quando preview falha');
         assert.equal(session.pendingMutation, null);
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+  });
+
+  describe('Memória de Contexto Entre Sessões (Fase 7 — H3, H4, H5, H6)', () => {
+    let tmpMemoriaDir: string;
+    let currentH: Harness | null = null;
+    let currentSse: ReturnType<typeof readSse> | null = null;
+
+    beforeEach(() => {
+      tmpMemoriaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-voice-memoria-test-'));
+    });
+
+    afterEach(async () => {
+      try {
+        currentSse?.close();
+      } catch {}
+      if (currentH) {
+        await teardownHarness(currentH);
+        currentH = null;
+      }
+      currentSse = null;
+      try {
+        fs.rmSync(tmpMemoriaDir, { recursive: true, force: true });
+      } catch {}
+    });
+
+    it('H3 — MEMORIA_GUARDAR grava em memorias.json e injeta o fato em todos os 4 rótulos (GERAL, TEOLOGIA, VIRTOLOGIA, AMBIGUO)', async (t) => {
+      const { tools: mutatingTools, memoriaStore } = createMutatingTools(tmpMemoriaDir);
+      const h = await setupHarness(null, [], mutatingTools, memoriaStore);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        // Turno 1: usuário pede para guardar memória
+        h.engine.fixedTranscript = 'Guarda que meu nome é Rodrigo';
+        h.engine.mutationToReturn = ['MEMORIA_GUARDAR', 'seu nome é Rodrigo'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1); // ouvindo
+
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        const previewEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+          | { type: 'sentence_audio_ready'; text: string }
+          | undefined;
+        assert.equal(previewEvent?.text, 'Posso guardar isso sobre você: seu nome é Rodrigo?');
+
+        // Confirma reprodução da pergunta
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: previewEvent!.text })
+        });
+
+        // Turno 2: confirmação pelo usuário ("Sim")
+        h.engine.fixedTranscript = 'Sim';
+        const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes2.status, 200);
+        await sse.waitFor(15, 5000);
+
+        const executedEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(executedEvent?.text, 'Guardado.');
+
+        // Verifica que o fato foi gravado em memorias.json
+        const store = new JsonStore<StoredItem>(tmpMemoriaDir, 'memorias.json');
+        const savedData = store.read();
+        assert.equal(savedData.items.length, 1);
+        assert.equal(savedData.items[0].text, 'seu nome é Rodrigo');
+
+        // Turno seguinte para cada um dos 4 rótulos: memória deve estar presente no systemPrompt de todos
+        const labels: Array<'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'AMBIGUO'> = [
+          'GERAL',
+          'TEOLOGIA',
+          'VIRTOLOGIA',
+          'AMBIGUO'
+        ];
+
+        h.engine.mutationToReturn = ['NENHUMA', null];
+        h.engine.fixedTranscript = 'Qual é o meu nome?';
+
+        for (const label of labels) {
+          h.engine.classificationToReturn = label;
+          const currentEventsCount = sse.events.length;
+          const turnRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+            method: 'POST',
+            headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+            body: buildTestWav(1)
+          });
+          assert.equal(turnRes.status, 200);
+          await sse.waitFor(currentEventsCount + 7, 5000);
+
+          const lastGenerateCall = h.engine.generateCalls[h.engine.generateCalls.length - 1];
+          assert.ok(lastGenerateCall, `Chamada generate() esperada para rótulo ${label}`);
+          const systemMsg = lastGenerateCall.messages.find((m) => m.role === 'system');
+          assert.ok(systemMsg, `Mensagem de system esperada para rótulo ${label}`);
+          assert.ok(
+            systemMsg.content.includes('[Fatos que o usuário pediu para você lembrar entre sessões'),
+            `systemPrompt para ${label} deve conter o cabeçalho de memórias`
+          );
+          assert.ok(
+            systemMsg.content.includes('- seu nome é Rodrigo'),
+            `systemPrompt para ${label} deve conter a memória guardada`
+          );
+        }
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('H4 — MEMORIA_ESQUECER remove o item mais recente e frase não é vetada por hasAffirmativeMarker', async (t) => {
+      // 1. Teste de regressão específico: provar que a frase e respostas afirmativas passam pelo gate
+      const confirmationQuestion = 'Posso apagar a memória mais recente?';
+      assert.equal(confirmationQuestion, 'Posso apagar a memória mais recente?');
+      // Prova que a pergunta em si não contém radicais de negação (esquece/esquecer/cancela)
+      assert.equal(/esquece|esquecer|cancela|cancelar/.test(confirmationQuestion), false);
+      // Prova que as respostas afirmativas naturais são aceitas por hasAffirmativeMarker
+      assert.equal(hasAffirmativeMarker('sim'), true);
+      assert.equal(hasAffirmativeMarker('pode apagar'), true);
+      assert.equal(hasAffirmativeMarker('claro'), true);
+      assert.equal(hasAffirmativeMarker('com certeza'), true);
+
+      // 2. Fluxo end-to-end com áudio/sessão
+      const { tools: mutatingTools, memoriaStore } = createMutatingTools(tmpMemoriaDir);
+      // Pré-popula duas memórias
+      memoriaStore.write({
+        items: [
+          { id: '1', text: 'fato antigo', createdAt: new Date().toISOString() },
+          { id: '2', text: 'fato mais recente', createdAt: new Date().toISOString() }
+        ]
+      });
+
+      const h = await setupHarness(null, [], mutatingTools, memoriaStore);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Apaga essa memória sobre mim';
+        h.engine.mutationToReturn = ['MEMORIA_ESQUECER', null];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        // Turno 1: gera pergunta
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        const previewEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+          | { type: 'sentence_audio_ready'; text: string }
+          | undefined;
+        assert.equal(previewEvent?.text, 'Posso apagar a memória mais recente?');
+
+        // Confirma reprodução da pergunta
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: previewEvent!.text })
+        });
+
+        // Turno 2: resposta afirmativa real ("pode apagar")
+        // "pode apagar" não está na whitelist exata (Camada 0), então consulta detectConfirmation (Camada 1)
+        // e é validado pelo gate afirmativo hasAffirmativeMarker (Camada 2).
+        h.engine.fixedTranscript = 'Pode apagar';
+        h.engine.confirmationToReturn = 'SIM';
+        const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes2.status, 200);
+        await sse.waitFor(15, 5000);
+
+        const executedEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(executedEvent?.text, 'Apagado.');
+
+        // Verifica que o item mais recente foi removido e restou apenas o antigo
+        const remaining = memoriaStore.read();
+        assert.equal(remaining.items.length, 1);
+        assert.equal(remaining.items[0].text, 'fato antigo');
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('H5 — falha em memoriaStore.read() (JSON corrompido) degrada com segurança e loga erro sem emitir evento de erro', async (t) => {
+      // Cria uma store mock que falha na leitura simulando JSON corrompido
+      const brokenStore = {
+        read: () => {
+          throw new Error('Falha de leitura simulada em memorias.json');
+        },
+        write: () => {}
+      } as unknown as JsonStore<StoredItem>;
+
+      const errorsLogged: any[] = [];
+      const origConsoleError = console.error;
+      console.error = (...args: any[]) => {
+        errorsLogged.push(args);
+      };
+
+      const h = await setupHarness(null, [], [], brokenStore);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        console.error = origConsoleError;
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Olá, tudo bem?';
+        h.engine.mutationToReturn = ['NENHUMA', null];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes.status, 200);
+
+        // Aguarda finalização normal do turno
+        await sse.waitFor(8, 5000);
+
+        // Turno completou com sucesso (turn_done e state: ouvindo)
+        const turnDone = sse.events.find((e) => (e as { type: string }).type === 'turn_done');
+        assert.ok(turnDone, 'Turno deve ter finalizado com turn_done');
+
+        // Nenhum evento de erro emitido para o cliente
+        const errorEvents = sse.events.filter((e) => (e as { type: string }).type === 'error');
+        assert.equal(errorEvents.length, 0, 'Nenhum evento de erro deve ser enviado ao cliente');
+
+        // console.error foi chamado reportando a falha de memória
+        const memoryLog = errorsLogged.find((args) =>
+          typeof args[0] === 'string' && args[0].includes('[memory] leitura de memórias falhou')
+        );
+        assert.ok(memoryLog, 'console.error deve logar falha da leitura de memórias');
+
+        // O systemPrompt não contém bloco de memória
+        const lastGenerateCall = h.engine.generateCalls[h.engine.generateCalls.length - 1];
+        const systemMsg = lastGenerateCall.messages.find((m) => m.role === 'system');
+        assert.equal(
+          systemMsg?.content.includes('[Fatos que o usuário pediu para você lembrar entre sessões'),
+          false
+        );
+      } finally {
+        console.error = origConsoleError;
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+
+    it('H6 — SessionManager construído sem memoriaStore funciona normalmente sem memórias', async (t) => {
+      // setupHarness sem 4º argumento instancia com memoriaStore = null
+      const h = await setupHarness(null, [], []);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Como você está?';
+        h.engine.mutationToReturn = ['NENHUMA', null];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes.status, 200);
+        await sse.waitFor(8, 5000);
+
+        const turnDone = sse.events.find((e) => (e as { type: string }).type === 'turn_done');
+        assert.ok(turnDone, 'Turno deve ter completado com turn_done');
+
+        const lastGenerateCall = h.engine.generateCalls[h.engine.generateCalls.length - 1];
+        const systemMsg = lastGenerateCall.messages.find((m) => m.role === 'system');
+        assert.equal(
+          systemMsg?.content.includes('[Fatos que o usuário pediu para você lembrar entre sessões'),
+          false
+        );
       } finally {
         sse?.close();
         await teardownHarness(h);

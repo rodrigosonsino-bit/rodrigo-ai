@@ -11,6 +11,7 @@ export type { Clock } from './systemTools.js';
 export {
   LembreteTool,
   NotaTool,
+  MemoriaTool,
   mightBeMutation,
   selectMutatingToolByAction,
   createMutatingTools,

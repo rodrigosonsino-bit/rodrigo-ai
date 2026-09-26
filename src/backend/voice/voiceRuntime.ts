@@ -91,8 +91,8 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const dataDir = process.env.RODRIGO_DATA_DIR
     ? path.resolve(process.env.RODRIGO_DATA_DIR)
     : path.join(rootDir, 'data');
-  // Factory retorna as ferramentas e a instância única do agendador
-  const { tools: mutatingTools, scheduler: reminderScheduler } = createMutatingTools(dataDir);
+  // Factory retorna as ferramentas, a instância única do agendador e o store de memórias
+  const { tools: mutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
   for (const mTool of mutatingTools) ExtensionRegistry.getInstance().registerMutatingTool(mTool);
 
   // Inicializa o agendador carregando lembretes persistidos
@@ -100,7 +100,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
 
   const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
   const sessionManager = new SessionManager(
-    engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools
+    engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools, memoriaStore
   );
 
   return {

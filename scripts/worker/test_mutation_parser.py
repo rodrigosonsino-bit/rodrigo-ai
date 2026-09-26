@@ -91,7 +91,7 @@ def main() -> None:
         ("NENHUMA", None),
     )
 
-    # Ações de APAGAR
+    # Ações de APAGAR e ESQUECER
     check(
         "LEMBRETE_APAGAR canônico",
         parse_mutation_output("LEMBRETE_APAGAR", truncated=False),
@@ -103,9 +103,71 @@ def main() -> None:
         ("NOTA_APAGAR", None),
     )
     check(
+        "MEMORIA_ESQUECER canônico",
+        parse_mutation_output("MEMORIA_ESQUECER", truncated=False),
+        ("MEMORIA_ESQUECER", None),
+    )
+    check(
         "LEMBRETE_APAGAR mesmo se vier com conteúdo extra descarta o conteúdo",
         parse_mutation_output("LEMBRETE_APAGAR|ignorado", truncated=False),
         ("LEMBRETE_APAGAR", None),
+    )
+    check(
+        "MEMORIA_ESQUECER mesmo se vier com conteúdo extra descarta o conteúdo",
+        parse_mutation_output("MEMORIA_ESQUECER|ignorado", truncated=False),
+        ("MEMORIA_ESQUECER", None),
+    )
+
+    # Fase 7: testes dedicados para MEMORIA_GUARDAR
+    check(
+        "MEMORIA_GUARDAR canônico",
+        parse_mutation_output("MEMORIA_GUARDAR|seu nome é Rodrigo", truncated=False),
+        ("MEMORIA_GUARDAR", "seu nome é Rodrigo"),
+    )
+    check(
+        "MEMORIA_GUARDAR em minúsculas e com espaços",
+        parse_mutation_output(" memoria_guardar | prefere respostas curtas ", truncated=False),
+        ("MEMORIA_GUARDAR", "prefere respostas curtas"),
+    )
+    check(
+        "MEMORIA_GUARDAR contendo caractere pipe (|)",
+        parse_mutation_output("MEMORIA_GUARDAR|gosta de café | chá", truncated=False),
+        ("MEMORIA_GUARDAR", "gosta de café | chá"),
+    )
+    check(
+        "MEMORIA_GUARDAR com conteúdo vazio",
+        parse_mutation_output("MEMORIA_GUARDAR|", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "MEMORIA_GUARDAR com conteúdo só de espaços",
+        parse_mutation_output("MEMORIA_GUARDAR|   ", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "MEMORIA_GUARDAR sem separador de conteúdo",
+        parse_mutation_output("MEMORIA_GUARDAR", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "MEMORIA_GUARDAR com exatamente 200 caracteres",
+        parse_mutation_output("MEMORIA_GUARDAR|" + "a" * 200, truncated=False),
+        ("MEMORIA_GUARDAR", "a" * 200),
+    )
+    check(
+        "MEMORIA_GUARDAR excedendo 200 caracteres (201) degrada para NENHUMA",
+        parse_mutation_output("MEMORIA_GUARDAR|" + "a" * 201, truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "truncated=True com MEMORIA_GUARDAR degrada para NENHUMA",
+        parse_mutation_output("MEMORIA_GUARDAR|prefere respostas curtas", truncated=True),
+        ("NENHUMA", None),
+    )
+    check(
+        "truncated=True com MEMORIA_ESQUECER degrada para NENHUMA",
+        parse_mutation_output("MEMORIA_ESQUECER", truncated=True),
+        ("NENHUMA", None),
     )
 
     # Casos inválidos e bordas

@@ -17,6 +17,8 @@ import { AudioStore } from './audioStore.js';
 import type { VoiceEngine } from './engine.js';
 import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
 import type { RetrievedChunk } from '../knowledge/index.js';
+import type { JsonStore, StoredItem } from '../storage/jsonStore.js';
+import { buildMemoryBlock } from '../memory/index.js';
 
 export interface ArmedMutation {
   kind: MutationName;
@@ -196,6 +198,8 @@ export class SessionManager {
   private readonly tools: readonly ITool[];
   /** Fase 5c: ferramentas que mutam estado registradas. */
   private readonly mutatingTools: readonly IMutatingTool[];
+  /** Fase 7: persistência de memória de contexto entre sessões. */
+  private readonly memoriaStore: JsonStore<StoredItem> | null;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -208,7 +212,8 @@ export class SessionManager {
     agents: readonly IAgent[],
     retriever: KnowledgeRetriever | null = null,
     tools: readonly ITool[] = [],
-    mutatingTools: readonly IMutatingTool[] = []
+    mutatingTools: readonly IMutatingTool[] = [],
+    memoriaStore: JsonStore<StoredItem> | null = null
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
@@ -217,6 +222,7 @@ export class SessionManager {
     this.retriever = retriever;
     this.tools = tools;
     this.mutatingTools = mutatingTools;
+    this.memoriaStore = memoriaStore;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -573,10 +579,28 @@ export class SessionManager {
         );
       }
 
+      // Fase 7: memória de contexto entre sessões. Lê do disco com proteção try/catch
+      // (mesmo padrão de resiliência da Fase 5a: falha de disco nunca derruba o turno).
+      // Entra SEMPRE, para todos os 4 rótulos (decisão do usuário §0.3).
+      let memoryItems: readonly StoredItem[] = [];
+      if (this.memoriaStore) {
+        try {
+          memoryItems = this.memoriaStore.read().items;
+        } catch (err) {
+          memoryItems = [];
+          console.error('[memory] leitura de memórias falhou, seguindo sem elas:', err);
+        }
+      }
+      const memoryBlock = buildMemoryBlock(memoryItems);
       const knowledgeBlock = buildKnowledgeBlock(retrieved);
-      const systemPrompt = knowledgeBlock
-        ? `${agent.getSystemPrompt()}\n\n${knowledgeBlock}\n\n${VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS}`
-        : `${agent.getSystemPrompt()}\n\n${VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS}`;
+      const systemPrompt = [
+        agent.getSystemPrompt(),
+        memoryBlock,
+        knowledgeBlock,
+        VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS
+      ]
+        .filter((b) => b)
+        .join('\n\n');
 
       // Só AMBIGUO continua sem especialista dedicado (cai no Geral por decisão de
       // projeto, mitigada pela salvaguarda universal acima) — GERAL/TEOLOGIA/VIRTOLOGIA

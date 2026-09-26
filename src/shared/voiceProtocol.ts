@@ -21,6 +21,8 @@ export const MUTATION_NAMES = [
   'LEMBRETE_APAGAR',
   'NOTA_CRIAR',
   'NOTA_APAGAR',
+  'MEMORIA_GUARDAR',
+  'MEMORIA_ESQUECER',
   'NENHUMA'
 ] as const;
 export type MutationName = (typeof MUTATION_NAMES)[number];

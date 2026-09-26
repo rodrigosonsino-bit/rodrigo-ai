@@ -103,13 +103,18 @@ def parse_tool_output(raw: str) -> str:
     return normalized if normalized in TOOL_NAMES else "NENHUMA"
 
 
-MUTATION_NAMES = {"LEMBRETE_CRIAR", "LEMBRETE_APAGAR", "NOTA_CRIAR", "NOTA_APAGAR", "NENHUMA"}
+MUTATION_NAMES = {
+    "LEMBRETE_CRIAR", "LEMBRETE_APAGAR", "NOTA_CRIAR", "NOTA_APAGAR",
+    "MEMORIA_GUARDAR", "MEMORIA_ESQUECER",
+    "NENHUMA"
+}
 MAX_MUTATION_CONTENT_CHARS = 200
 
 DETECT_MUTATION_SYSTEM_PROMPT = (
-    "Você decide se a frase do usuário pede para CRIAR ou APAGAR um LEMBRETE ou uma NOTA, ou "
-    "NENHUMA das quatro. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR (o texto "
-    "exato do que deve ser lembrado/anotado, sem aspas, sem explicação extra).\n"
+    "Você decide se a frase do usuário pede para CRIAR ou APAGAR um LEMBRETE, uma NOTA ou uma "
+    "MEMÓRIA, ou NENHUMA das seis. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR e "
+    "MEMORIA_GUARDAR (o texto do que deve ser lembrado/anotado/guardado, sem aspas, sem "
+    "explicação extra).\n"
     "LEMBRETE_CRIAR: um compromisso, tarefa ou coisa temporária a fazer — 'lembra de', 'não "
     "deixa eu esquecer', 'anota aí que eu preciso', 'bota um lembrete pra'.\n"
     "NOTA_CRIAR: uma ideia, observação, ou texto livre pra guardar — 'guarda essa ideia', "
@@ -118,16 +123,28 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "'cancela aquele lembrete', 'esquece o que eu pedi pra lembrar'.\n"
     "NOTA_APAGAR: pede pra apagar a nota mais recente — 'apaga essa nota', 'joga fora a "
     "anotação'.\n"
+    "MEMORIA_GUARDAR: um FATO ou PREFERÊNCIA sobre o próprio usuário, pra você lembrar quem ele é — "
+    "'lembra que eu prefiro', 'guarda que meu nome é', 'anota que eu gosto de'. Diferença de "
+    "LEMBRETE_CRIAR: aqui não é uma TAREFA a fazer num momento futuro, é uma INFORMAÇÃO SOBRE A "
+    "PESSOA que vale pra sempre. Diferença de NOTA_CRIAR: nota é uma ideia ou observação qualquer "
+    "(sobre qualquer assunto); memória é especificamente um fato sobre QUEM O USUÁRIO É — nome, "
+    "preferência, restrição, característica pessoal.\n"
+    "MEMORIA_ESQUECER: pede pra apagar o fato mais recente guardado sobre o usuário — 'apaga essa "
+    "memória sobre mim', 'apaga o que você guardou sobre mim'. Diferença de LEMBRETE_APAGAR: aquele "
+    "apaga uma TAREFA pendente; este apaga um FATO sobre a pessoa.\n"
     "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum, e qualquer "
     "menção a lembrar/anotar que não seja um pedido direto de ação (ex.: 'eu lembro que você "
     "me falou isso' é NENHUMA, é o usuário lembrando de algo, não pedindo pra você lembrar).\n"
     "Exemplos:\n"
-    "Lembra de ligar pro dentista amanhã de manhã -> LEMBRETE_CRIAR|Ligar pro dentista amanhã de manhã\n"
-    "Não deixa eu esquecer de pagar a conta de luz -> LEMBRETE_CRIAR|Pagar a conta de luz\n"
-    "Guarda essa ideia: usar madeira de demolição no projeto -> NOTA_CRIAR|Usar madeira de demolição no projeto\n"
-    "Escreve aí que a reunião de terça foi produtiva -> NOTA_CRIAR|A reunião de terça foi produtiva\n"
+    "Lembra de ligar pro dentista amanhã -> LEMBRETE_CRIAR|Ligar pro dentista amanhã\n"
+    "Lembra que eu prefiro respostas curtas -> MEMORIA_GUARDAR|prefere respostas curtas\n"
+    "Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR|seu nome é Rodrigo\n"
+    "Anota que eu sou alérgico a amendoim -> MEMORIA_GUARDAR|é alérgico a amendoim\n"
+    "Anota que a reunião de terça foi produtiva -> NOTA_CRIAR|A reunião de terça foi produtiva\n"
+    "Salva essa ideia: usar madeira de demolição -> NOTA_CRIAR|Usar madeira de demolição\n"
     "Apaga o lembrete que eu acabei de pedir -> LEMBRETE_APAGAR\n"
-    "Cancela essa nota, joga fora -> NOTA_APAGAR\n"
+    "Apaga essa memória sobre mim -> MEMORIA_ESQUECER\n"
+    "Apaga o que você guardou sobre mim -> MEMORIA_ESQUECER\n"
     "Eu lembro que você me falou sobre isso semana passada -> NENHUMA\n"
     "Você consegue lembrar de coisas entre sessões? -> NENHUMA\n"
 )
@@ -163,7 +180,7 @@ def parse_mutation_output(raw: str, truncated: bool) -> tuple[str, str | None]:
 
     if action not in MUTATION_NAMES:
         return ("NENHUMA", None)
-    if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR"):
+    if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR"):
         if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
             return ("NENHUMA", None)
         return (action, content)

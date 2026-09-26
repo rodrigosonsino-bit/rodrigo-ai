@@ -6,6 +6,7 @@ import os from 'node:os';
 import {
   LembreteTool,
   NotaTool,
+  MemoriaTool,
   mightBeMutation,
   selectMutatingToolByAction,
   createMutatingTools
@@ -58,6 +59,37 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
           mightBeMutation(frase),
           true,
           `Esperava que mightBeMutation fosse true para "${frase}"`
+        );
+      }
+    });
+
+    it('Fase 7: detecta intenções com memor e formas verbais de gravar, sem disparar em palavras não-mutantes', () => {
+      const novosPositivos = [
+        'Memorize que prefiro café sem açúcar',
+        'Grava isso pra mim',
+        'Grave essa preferência',
+        'Gravou o que eu disse?',
+        'Estou gravando meu nome',
+        'Pode gravar que eu moro em SP'
+      ];
+      for (const frase of novosPositivos) {
+        assert.equal(
+          mightBeMutation(frase),
+          true,
+          `Esperava que mightBeMutation fosse true para "${frase}"`
+        );
+      }
+
+      const falsosEvitados = [
+        'Temos um problema de gravidade',
+        'Ela está grávida de três meses',
+        'A gravitação universal é uma lei da física'
+      ];
+      for (const frase of falsosEvitados) {
+        assert.equal(
+          mightBeMutation(frase),
+          false,
+          `Esperava que mightBeMutation fosse false para "${frase}"`
         );
       }
     });
@@ -515,7 +547,9 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
 
       const result = createMutatingTools(tmpDir, customScheduler);
       assert.equal(result.scheduler, customScheduler);
-      assert.equal(result.tools.length, 2);
+      assert.equal(result.tools.length, 3);
+      assert.ok(result.memoriaStore);
+      assert.equal(result.tools.some((t) => t.name === 'MEMORIA'), true);
 
       customScheduler.shutdown();
     });
@@ -576,6 +610,125 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       assert.equal(notaData.items[0].dueAt, undefined);
 
       scheduler.shutdown();
+    });
+  });
+
+  describe('MemoriaTool (Fase 7 — H1)', () => {
+    it('isAvailable() retorna sempre true', () => {
+      const store = new JsonStore<StoredItem>(tmpDir, 'memorias.json');
+      const tool = new MemoriaTool(store);
+      assert.equal(tool.isAvailable(), true);
+      assert.equal(tool.name, 'MEMORIA');
+    });
+
+    it('preview() formula a pergunta correta e valida conteúdo', () => {
+      const store = new JsonStore<StoredItem>(tmpDir, 'memorias.json');
+      const tool = new MemoriaTool(store);
+
+      // MEMORIA_GUARDAR
+      assert.equal(
+        tool.preview('MEMORIA_GUARDAR', 'prefere respostas curtas'),
+        'Posso guardar isso sobre você: prefere respostas curtas?'
+      );
+
+      // Validação de conteúdo ausente em GUARDAR
+      assert.throws(
+        () => tool.preview('MEMORIA_GUARDAR', null),
+        /Conteúdo ausente para guardar memória\./
+      );
+      assert.throws(
+        () => tool.preview('MEMORIA_GUARDAR', '   '),
+        /Conteúdo ausente para guardar memória\./
+      );
+
+      // MEMORIA_ESQUECER: frase exata sem cauda
+      assert.equal(
+        tool.preview('MEMORIA_ESQUECER', null),
+        'Posso apagar a memória mais recente?'
+      );
+
+      // Ação inválida
+      assert.throws(
+        () => tool.preview('LEMBRETE_CRIAR', 'teste'),
+        /Ação inválida para MemoriaTool: LEMBRETE_CRIAR/
+      );
+    });
+
+    it('execute() guarda memória e deduplica contra o array inteiro (H1)', () => {
+      const store = new JsonStore<StoredItem>(tmpDir, 'memorias.json');
+      const tool = new MemoriaTool(store);
+
+      // 1. Guarda primeira memória
+      const r1 = tool.execute('MEMORIA_GUARDAR', 'prefere respostas curtas');
+      assert.equal(r1, 'Guardado.');
+      assert.equal(store.read().items.length, 1);
+      assert.equal(store.read().items[0].text, 'prefere respostas curtas');
+
+      // 2. Guarda segunda memória (diferente)
+      const r2 = tool.execute('MEMORIA_GUARDAR', 'seu nome é Rodrigo');
+      assert.equal(r2, 'Guardado.');
+      assert.equal(store.read().items.length, 2);
+
+      // 3. Tenta guardar a primeira memória novamente (não é o último item do array!)
+      // Achado 7 da rodada 1: deduplica contra o array inteiro, case-insensitive e trim
+      const r3 = tool.execute('MEMORIA_GUARDAR', '  PREFERE RESPOSTAS CURTAS  ');
+      assert.equal(r3, 'Isso já estava guardado.');
+      // O array deve continuar com 2 itens
+      assert.equal(store.read().items.length, 2);
+
+      // Validação de erro em conteúdo ausente
+      assert.throws(
+        () => tool.execute('MEMORIA_GUARDAR', null),
+        /Conteúdo ausente para guardar memória\./
+      );
+      assert.throws(
+        () => tool.execute('MEMORIA_GUARDAR', '  '),
+        /Conteúdo ausente para guardar memória\./
+      );
+    });
+
+    it('execute() apaga a memória mais recente ou avisa que está vazia', () => {
+      const store = new JsonStore<StoredItem>(tmpDir, 'memorias.json');
+      const tool = new MemoriaTool(store);
+
+      // Store vazia
+      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Não há nada guardado pra apagar.');
+
+      // Guarda dois itens
+      tool.execute('MEMORIA_GUARDAR', 'item 1');
+      tool.execute('MEMORIA_GUARDAR', 'item 2');
+      assert.equal(store.read().items.length, 2);
+
+      // Apaga o mais recente (item 2)
+      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Apagado.');
+      const dataAfterPop = store.read();
+      assert.equal(dataAfterPop.items.length, 1);
+      assert.equal(dataAfterPop.items[0].text, 'item 1');
+
+      // Apaga o remanescente (item 1)
+      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Apagado.');
+      assert.equal(store.read().items.length, 0);
+
+      // Agora vazia novamente
+      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Não há nada guardado pra apagar.');
+
+      // Ação inválida
+      assert.throws(
+        () => tool.execute('NOTA_APAGAR', null),
+        /Ação inválida para MemoriaTool: NOTA_APAGAR/
+      );
+    });
+
+    it('selectMutatingToolByAction() seleciona MemoriaTool para MEMORIA_GUARDAR e MEMORIA_ESQUECER', () => {
+      const { tools } = createMutatingTools(tmpDir);
+      const toolGuardar = selectMutatingToolByAction('MEMORIA_GUARDAR', tools);
+      assert.ok(toolGuardar);
+      assert.equal(toolGuardar.name, 'MEMORIA');
+
+      const toolEsquecer = selectMutatingToolByAction('MEMORIA_ESQUECER', tools);
+      assert.ok(toolEsquecer);
+      assert.equal(toolEsquecer.name, 'MEMORIA');
+      assert.equal(toolGuardar, toolEsquecer); // Mesma instância
     });
   });
 });
