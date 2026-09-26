@@ -1,0 +1,181 @@
+Como auditor adversarial em modo plan/read-only, realizei a **Rodada 2 de auditoria** sobre o plano de implementação [docs/phase-7-v2.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v2.md) diretamente contra o código real do repositório ([mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts), [sessionManager.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts), [voiceRuntime.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts), [voiceProtocol.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts), [worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py), [test_mutation_parser.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/test_mutation_parser.py), [mutatingTools.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts) e [voice.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts)), seguindo estritamente as instruções fornecidas.
+
+---
+
+### Avaliação Individual dos 11 Achados da Rodada 1
+
+#### 1. `parse_mutation_output()` em `worker.py`
+- **Verificação**: No código real ([scripts/worker/worker.py:166-170](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L166-L170)), a extração de conteúdo só ocorre se `action in ("LEMBRETE_CRIAR", "NOTA_CRIAR")`. O pseudocódigo do v2 (§4.4, linhas 276-280) altera para `if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR"):`, mantendo a validação de limite (`MAX_MUTATION_CONTENT_CHARS = 200`) e fallback `("NENHUMA", None)`. A ação `MEMORIA_ESQUECER` cai corretamente no `return (action, None)`.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 2. Frase de confirmação de `MEMORIA_ESQUECER`
+- **Verificação**: A pergunta proposta no v2 (§4.2, linha 105) é *"Posso apagar a memória mais recente que você me pediu para guardar?"*.
+  - Contra a Camada 0: respostas exatas como `"sim"`, `"claro"`, `"com certeza"`, `"positivo"` continuam em `CONFIRM_YES_EXACT` ([sessionManager.ts:35-45](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L35-L45)) e resolvem antes de qualquer gate.
+  - Contra a Camada 2: a resposta afirmativa mais esperada para *"Posso apagar..."* é `"pode apagar"` ou `"sim, pode apagar"`. `'pode apagar'` consta explicitamente em `AFFIRMATIVE_MARKERS` ([sessionManager.ts:98](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L98)), e `"apagar"` **não** está em `NEGATION_MARKERS`. O veto indevido provocado por `"esquece"`/`"esquecer"` no v1 foi eliminado.
+  - *Ressalva de cauda*: A inclusão da oração redundante *"que você me pediu para guardar?"* traz um risco secundário (analisado no Achado Novo 2 abaixo), mas o problema impeditivo da rodada 1 está superado.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 3. Assinatura de `createMutatingTools()`
+- **Verificação**: O v2 (§4.5, linhas 336-340) fixa a assinatura como:
+  ```ts
+  export interface MutatingToolsResult {
+    tools: IMutatingTool[];
+    scheduler: ReminderScheduler;
+    memoriaStore: JsonStore<StoredItem>;
+  }
+  ```
+  Executamos `git grep "createMutatingTools"` em todo o repositório. Todos os 13 call sites existentes desestruturam propriedades de objeto:
+  - `voiceRuntime.ts:95`: `const { tools: mutatingTools, scheduler: reminderScheduler } = ...`
+  - `mutatingTools.test.ts`: `const { tools } = ...` e `const { tools, scheduler } = ...`
+  - `voice.test.ts` (9 ocorrências): `const { tools: mutatingTools } = ...`
+  Nenhum call site faz desestruturação posicional. A adição de `memoriaStore` é puramente aditiva. O único teste que inspeciona a quantidade de ferramentas é `mutatingTools.test.ts:518` (`assert.equal(result.tools.length, 2)`), e o v2 já declarou essa alteração explicitamente em §5.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 4. Segunda instanciação de `JsonStore` em `voiceRuntime.ts`
+- **Verificação**: No v2 (§4.5, linha 371), `voiceRuntime.ts` desestrutura `memoriaStore` diretamente do retorno de `createMutatingTools(dataDir)`:
+  ```ts
+  const { tools: mutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
+  ```
+  Não há mais nenhuma chamada a `new JsonStore(dataDir, 'memorias.json')` em `voiceRuntime.ts`. A instância única criada dentro da factory é repassada intacta para `SessionManager`.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 5. `memoriaStore` opcional no construtor de `SessionManager`
+- **Verificação**: No código atual ([sessionManager.ts:204-212](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L204-L212)), a lista de parâmetros termina com `tools: readonly ITool[] = []` e `mutatingTools: readonly IMutatingTool[] = []`.
+  O v2 (§4.3, linhas 236-249) insere `memoriaStore: JsonStore<StoredItem> | null = null` como 8º parâmetro (na última posição).
+  - Em `setupHarness()` ([voice.test.ts:86-94](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts#L86-L94)), `new SessionManager` recebe 7 argumentos. O 8º assume `null` por default.
+  - Em produção ([voiceRuntime.ts:102](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/voiceRuntime.ts#L102)), são passados os 8 argumentos posicionais.
+  Não ocorre deslocamento de argumentos nem colisão de tipos.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 6. `try/catch` ao redor de `memoriaStore.read()` em `runTurn()`
+- **Verificação**: No v2 (§4.3, linhas 207-215):
+  ```ts
+  let memoryItems: readonly StoredItem[] = [];
+  if (this.memoriaStore) {
+    try {
+      memoryItems = this.memoriaStore.read().items;
+    } catch (err) {
+      memoryItems = [];
+      console.error('[memory] leitura de memórias falhou, seguindo sem elas:', err);
+    }
+  }
+  ```
+  Em [jsonStore.ts:26-56](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/storage/jsonStore.ts#L26-L56), qualquer erro de JSON corrompido, permissão ou I/O lança exceção. O `try/catch` captura o erro antes de atingir o fluxo de síntese, redefine `memoryItems` para `[]` e permite que o turno prossiga gerando o prompt sem o bloco de memória.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 7. Exemplos contrastivos para `NOTA_CRIAR` e `LEMBRETE_APAGAR`
+- **Verificação**: O v2 (§4.4, linhas 305-315) incorporou contrastes específicos:
+  - `Anota que a reunião de terça foi produtiva -> NOTA_CRIAR` vs. `Anota que eu sou alérgico a amendoim -> MEMORIA_GUARDAR`
+  - `Salva essa ideia: usar madeira... -> NOTA_CRIAR` vs. `Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR`
+  - `Apaga o lembrete que eu acabei de pedir -> LEMBRETE_APAGAR` vs. `Apaga essa memória sobre mim -> MEMORIA_ESQUECER`
+  A distinção semântica (tarefa futura vs. ideia/observação vs. fato permanente sobre o usuário) foi explicada no corpo do prompt.
+- **Status**: **GENUINAMENTE RESOLVIDO** (com ressalvas de ponta documentadas adiante).
+
+#### 8. Extração de conteúdo em predicado direto
+- **Verificação**: No v2 (§4.4, linhas 307-309), os exemplos foram alterados:
+  - `prefere respostas curtas` (em vez de `O usuário prefere respostas curtas`)
+  - `seu nome é Rodrigo` (em vez de `O nome do usuário é Rodrigo`)
+  - `é alérgico a amendoim` (em vez de `O usuário é alérgico a amendoim`)
+  Ao encaixar em `preview()`: *"Posso guardar isso sobre você: prefere respostas curtas?"*, a síntese TTS trata os dois pontos como uma pausa natural de fala e a frase soa perfeitamente inteligível e conversacional em português do Brasil.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 9. Deduplicação contra o array inteiro
+- **Verificação**: No v2 (§4.2, linhas 149-151):
+  ```ts
+  const normalized = content.trim().toLowerCase();
+  const isDuplicate = store.items.some((it) => it.text.trim().toLowerCase() === normalized);
+  if (isDuplicate) return 'Isso já estava guardado.';
+  ```
+  A checagem é por igualdade estrita do texto normalizado (trim + lower-case).
+  - *Performance*: Um array de até poucas centenas de itens em memória consome frações de microssegundo para uma busca linear via `.some()`.
+  - *Comportamento*: Não usa `includes`/substring, portanto variações legítimas de redação (ex.: "prefere respostas curtas" vs. "prefere respostas bem curtas e diretas") não são bloqueadas indevidamente.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 10. Tetos duplos (`MAX_MEMORIES_INJECTED=10`, `MAX_MEMORY_BLOCK_CHARS=1200`)
+- **Verificação**: O loop em `buildMemoryBlock` (§4.3, linhas 184-197):
+  ```ts
+  const recent = items.slice(-MAX_MEMORIES_INJECTED).reverse();
+  const lines: string[] = [];
+  let totalChars = 0;
+  for (const it of recent) {
+    const line = `- ${it.text}`;
+    if (totalChars + line.length > MAX_MEMORY_BLOCK_CHARS) break;
+    lines.push(line);
+    totalChars += line.length + 1;
+  }
+  ```
+  - `recent` seleciona no máximo os 10 mais recentes e os inverte (mais novo primeiro).
+  - A checagem `if (totalChars + line.length > MAX_MEMORY_BLOCK_CHARS) break;` é feita **antes** do `push`, impedindo a inserção de itens cortados pela metade.
+  - Ao estourar o orçamento, o loop encerra imediatamente via `break`, descartando primeiro as memórias mais antigas.
+  - Não há off-by-one; se a lista for vazia ou nenhuma linha couber, retorna `''`.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+#### 11. `MUTATION_GATE` com `memor` e `grav`
+- **Verificação**: No v2 (§4.1, linhas 88-90), `MUTATION_GATE` passa a incluir `memor|grav`. Frases como *"memorize que"* ou *"grave que"* agora retornam `mightBeMutation() === true` e chegam à classificação do worker.
+- **Status**: **GENUINAMENTE RESOLVIDO** (efeitos colaterais do radical `grav` avaliados no Achado Novo 3 abaixo).
+
+---
+
+### Novos Achados Identificados na Rodada 2
+
+---
+
+ACHADO: Inconsistência na instrução de formato de saída de `DETECT_MUTATION_SYSTEM_PROMPT` para `MEMORIA_GUARDAR`  
+EVIDÊNCIA: Em [scripts/worker/worker.py:109-112](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L109-L112):  
+```python
+DETECT_MUTATION_SYSTEM_PROMPT = (
+    "Você decide se a frase do usuário pede para CRIAR ou APAGAR um LEMBRETE ou uma NOTA, ou "
+    "NENHUMA das quatro. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR (o texto "
+    "exato do que deve ser lembrado/anotado, sem aspas, sem explicação extra).\n"
+```
+E em [docs/phase-7-v2.md:291-315](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v2.md#L291-L315).  
+GRAVIDADE: ALTA  
+CONFIANÇA: 95%  
+AÇÃO RECOMENDADA: O plano v2 especificou os blocos explicativos de `MEMORIA_GUARDAR`/`MEMORIA_ESQUECER` e os exemplos contrastivos, mas omitiu a reescrita do cabeçalho da instrução do prompt em [worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py). O cabeçalho atual afirma taxativamente:
+1. *"ou NENHUMA das quatro"* (agora são seis ações possíveis).
+2. *"AÇÃO|conteúdo para \*\_CRIAR"*. A nova ação se chama `MEMORIA_GUARDAR` (termina em `_GUARDAR`, não em `_CRIAR`).
+Se o modelo local (Qwen-4B) seguir a instrução do cabeçalho de que apenas ações `*_CRIAR` devem emitir `|conteúdo`, ele emitirá simplesmente `MEMORIA_GUARDAR`. Na linha 166 de `worker.py`, a ausência de conteúdo forçará o retorno para `("NENHUMA", None)`, descartando o salvamento.  
+O plano deve explicitar a modificação do cabeçalho de `DETECT_MUTATION_SYSTEM_PROMPT` em §4.4:
+```python
+"Você decide se a frase do usuário pede para CRIAR ou APAGAR um LEMBRETE, uma NOTA ou uma MEMÓRIA, ou "
+"NENHUMA das seis. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR e MEMORIA_GUARDAR (o texto "
+"do que deve ser lembrado/anotado/guardado, sem aspas, sem explicação extra).\n"
+```
+
+---
+
+ACHADO: Prolixidade e risco de falso afirmativo na cauda da pergunta de confirmação de `MEMORIA_ESQUECER`  
+EVIDÊNCIA: Em [docs/phase-7-v2.md:105, 138](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v2.md#L105):  
+```ts
+if (kind === 'MEMORIA_ESQUECER') return 'Posso apagar a memória mais recente que você me pediu para guardar?';
+```
+E em [src/backend/voice/sessionManager.ts:98](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L98):  
+```ts
+'pode apagar', 'pode guardar', 'pode salvar', 'pode anotar',
+```
+GRAVIDADE: BAIXA  
+CONFIANÇA: 85%  
+AÇÃO RECOMENDADA: Em [mutatingTools.ts:43, 136](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L43), as ferramentas irmãs usam frases concisas: *"Posso apagar o lembrete mais recente?"* e *"Posso apagar a nota mais recente?"*. A cauda *"que você me pediu para guardar?"* é prolixa para síntese de voz e introduz o verbo antagônico ("guardar") na pergunta de exclusão. Como `'pode guardar'` é um marcador afirmativo na Camada 2 (Fase 5c), se um usuário responder *"Pode guardar"* (com sentido de "não apague, deixe guardado"), o gate de segurança não barrará o eventual falso SIM do classificador.  
+Padronizar a frase de `MemoriaTool.preview()` em simetria estrita com as outras duas:  
+`return 'Posso apagar a memória mais recente?';`
+
+---
+
+ACHADO: Hiper-sensibilidade do radical `grav` em `MUTATION_GATE` em diálogos de virtologia e crise  
+EVIDÊNCIA: Em [docs/phase-7-v2.md:89](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-7-v2.md#L89):  
+```ts
+const MUTATION_GATE =
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grav)\w*\b/;
+```
+GRAVIDADE: BAIXA  
+CONFIANÇA: 90%  
+AÇÃO RECOMENDADA: O radical `grav` casa com palavras frequentes como `"grave"` ("estou com um problema grave", "situação grave"), `"gravidade"` e `"grávida"`. Embora isso não cause mutação indevida (o worker responderá `NENHUMA`), adiciona latência desnecessária de prefill/classificação (~200ms) em turnos de conversação sensíveis ou de aconselhamento.  
+Recomenda-se especificar o prefixo verbal do ato de gravar:  
+`/\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravad|gravac)\w*\b/` ou `\bgrav(a|e|ou|and|ar)\w*\b`.
+
+---
+
+### Veredito Final
+
+VEREDITO: **APROVADO COM RESSALVAS**  
+JUSTIFICATIVA: Todos os 11 achados da Rodada 1 foram verificados diretamente contra o código-fonte e encontram-se genuinamente solucionados no v2, restaurando a compilação limpa dos testes existentes, o tratamento resiliente de I/O em `SessionManager` e a integridade de `parse_mutation_output()`. A aprovação é acompanhada de ressalvas para ajustes cirúrgicos no cabeçalho de regras de `DETECT_MUTATION_SYSTEM_PROMPT` (para explicitar `MEMORIA_GUARDAR` ao lado de `*_CRIAR`) e na concisão da frase de confirmação de exclusão, permitindo que a fase avance com segurança para a implementação.

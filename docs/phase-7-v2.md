@@ -82,11 +82,16 @@ nenhuma mudança nessa função.
 **Filtro permissivo de pré-checagem** (`MUTATION_GATE`, `mutatingTools.ts:175-176`) — **corrigindo
 o achado 11 (BAIXA) da rodada 1**: o regex atual (`lembr|anot|guard|escrev|salv|apag|esquec|
 cancel|nota|lembrete|aviso|tarefa|compromisso|registr`) não reconhece "memorize" nem "grave".
-Adicionar os radicais `memor` e `grav`:
+Adicionar o radical `memor` (sem colisão conhecida) e uma forma verbal restrita de "gravar" —
+**achado novo, BAIXA, rodada 2 (agy)**: o radical solto `grav` casa também com "grave"
+("problema grave"), "gravidade" e "grávida", palavras comuns em conversas de aconselhamento
+(Teologia) que nada têm a ver com mutação — cada match aciona `detect_mutation` no worker
+desnecessariamente, custando latência sem risco de mutação incorreta (o worker classificaria como
+`NENHUMA`, só o gasto de uma chamada a mais). Restrito às formas verbais de "gravar":
 
 ```ts
 const MUTATION_GATE =
-  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grav)\w*\b/;
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar)\w*\b/;
 ```
 
 ### 4.2 `MemoriaTool` (`mutatingTools.ts`) — frase de confirmação corrigida, dedupe corrigido
@@ -102,8 +107,17 @@ não fazer uma pergunta cuja resposta natural contém a própria palavra de veto
 `LEMBRETE_APAGAR`/`NOTA_APAGAR` já fazem hoje, usando "apagar" em vez de "esquecer" na pergunta:
 
 ```ts
-if (kind === 'MEMORIA_ESQUECER') return 'Posso apagar a memória mais recente que você me pediu para guardar?';
+if (kind === 'MEMORIA_ESQUECER') return 'Posso apagar a memória mais recente?';
 ```
+
+**Achado novo, BAIXA, rodada 2 (agy)** — a primeira redação desta correção (`"Posso apagar a
+memória mais recente **que você me pediu para guardar**?"`) resolvia o problema do achado 2 mas
+introduzia um risco secundário: a cauda "que você me pediu para guardar" reintroduz o verbo
+antagônico ("guardar") na pergunta de exclusão, e `'pode guardar'` é ele mesmo um marcador
+afirmativo (`sessionManager.ts:98`) — um usuário respondendo "pode guardar" com o sentido de
+"não apaga, deixa guardado" seria lido como confirmação de exclusão pelo gate. Corrigido pra
+simetria estrita com `LEMBRETE_APAGAR`/`NOTA_APAGAR` (`"Posso apagar o lembrete mais recente?"`/
+`"Posso apagar a nota mais recente?"`, `mutatingTools.ts:43,136` hoje) — frase curta, um verbo só.
 
 **Corrigindo o achado 8 (MÉDIA) da rodada 1** — reescrita em 3ª pessoa não-natural para fala: a
 v1 tinha exemplos como `MEMORIA_GUARDAR|O nome do usuário é Rodrigo`, que soa estranho quando
@@ -135,7 +149,10 @@ export class MemoriaTool implements IMutatingTool {
     if (kind === 'MEMORIA_ESQUECER') {
       // Achado 2 (CRÍTICA, rodada 1): "apagar", nunca "esquecer" — a palavra "esquece" está em
       // NEGATION_MARKERS (sessionManager.ts) e vetaria a própria confirmação afirmativa.
-      return 'Posso apagar a memória mais recente que você me pediu para guardar?';
+      // Achado novo (BAIXA, rodada 2): frase curta, simétrica a LEMBRETE_APAGAR/NOTA_APAGAR —
+      // uma cauda como "...que você me pediu para guardar?" reintroduziria "guardar", que é ele
+      // mesmo um marcador afirmativo ('pode guardar'), abrindo espaço pra ambiguidade contrária.
+      return 'Posso apagar a memória mais recente?';
     }
     throw new Error(`Ação inválida para MemoriaTool: ${kind}`);
   }
@@ -289,7 +306,25 @@ exemplo contrastivo para `LEMBRETE_CRIAR` vs. `MEMORIA_GUARDAR`. A rodada 1 iden
 outras colisões reais: `NOTA_CRIAR` também usa "anota"/"salva"/"registra" (mesmos verbos que
 `MEMORIA_GUARDAR` usaria para fatos pessoais), e `LEMBRETE_APAGAR` já usa "esquece o que eu pedi
 pra lembrar" (colidindo com `MEMORIA_ESQUECER`). `DETECT_MUTATION_SYSTEM_PROMPT` corrigido,
-cobrindo as três frentes de colisão:
+cobrindo as três frentes de colisão.
+
+**Achado novo, ALTA, rodada 2 (agy)** — a v2 original corrigiu o corpo do prompt (as descrições
+de cada ação e os exemplos) mas deixou o **cabeçalho** da instrução intocado
+(`worker.py:109-112`, hoje): *"Você decide se a frase do usuário pede para CRIAR ou APAGAR um
+LEMBRETE ou uma NOTA, ou NENHUMA das **quatro**"* e *"AÇÃO|conteúdo para **\*\_CRIAR**"*.
+`MEMORIA_GUARDAR` não termina em `_CRIAR` — se o modelo seguir o cabeçalho ao pé da letra em vez
+dos exemplos, ele pode responder só `MEMORIA_GUARDAR` sem o `|conteúdo`, reintroduzindo por outra
+via o mesmo efeito do achado 1 (CRÍTICA) da rodada 1 que este plano já corrigiu. O cabeçalho
+precisa ser reescrito explicitamente, não só o corpo:
+
+```python
+DETECT_MUTATION_SYSTEM_PROMPT = (
+    "Você decide se a frase do usuário pede para CRIAR ou APAGAR um LEMBRETE, uma NOTA ou uma "
+    "MEMÓRIA, ou NENHUMA das seis. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR e "
+    "MEMORIA_GUARDAR (o texto do que deve ser lembrado/anotado/guardado, sem aspas, sem "
+    "explicação extra).\n"
+    ...
+```
 
 ```
 MEMORIA_GUARDAR: um FATO ou PREFERÊNCIA sobre o próprio usuário, pra você lembrar quem ele é —
@@ -470,3 +505,19 @@ src/backend/__tests__/voice.test.ts       testes de integração novos (memória
 | 9 | Dedupe só contra o último item, memória duplicaria com repetição meses depois | MÉDIA | Dedupe contra o array inteiro, case-insensitive | §4.2 |
 | 10 | Sem teto de caracteres, risco de latência/TTFT não quantificado | MÉDIA | Teto duplo (quantidade + caracteres), quantidade padrão reduzida de 20 para 10 | §4.3 |
 | 11 | `MUTATION_GATE` não reconhece "memorize"/"grave" | BAIXA | Radicais `memor`/`grav` adicionados ao regex permissivo | §4.1 |
+
+## 10. Auditoria da v2 (agy, rodada 2) — APROVADO COM RESSALVAS, 3 achados aplicados
+
+Rodada 2 verificou os 11 achados da rodada 1 **contra o código real**, não contra a alegação da
+tabela acima — todos os 11 confirmados como genuinamente resolvidos, item por item, com evidência
+de arquivo:linha (`docs/audits/phase-7-v2-agy-rodada2-2026-09-26.log`). Achou 3 problemas novos,
+introduzidos pela própria correção da v2 (o tipo de coisa que uma segunda rodada existe pra
+pegar), todos aplicados diretamente neste documento:
+
+| Achado (rodada 2) | Gravidade | Resolução |
+|---|---|---|
+| Cabeçalho de `DETECT_MUTATION_SYSTEM_PROMPT` ("...das quatro", "AÇÃO\|conteúdo para `*_CRIAR`") nunca foi reescrito — só o corpo/exemplos. `MEMORIA_GUARDAR` não termina em `_CRIAR`; se o modelo seguir o cabeçalho ao pé da letra, reintroduz o mesmo efeito do achado 1 (CRÍTICA) da rodada 1 por outra via. | ALTA | Cabeçalho reescrito explicitamente em §4.4: "...das seis", "AÇÃO\|conteúdo para `*_CRIAR` e `MEMORIA_GUARDAR`" |
+| A frase de confirmação corrigida do achado 2 tinha uma cauda ("...que você me pediu para guardar?") que reintroduzia "guardar" — que é ele mesmo um marcador afirmativo (`'pode guardar'`), abrindo uma ambiguidade nova na direção oposta. | BAIXA | Frase encurtada para simetria estrita com `LEMBRETE_APAGAR`/`NOTA_APAGAR`: "Posso apagar a memória mais recente?" |
+| Radical solto `grav` no `MUTATION_GATE` casa com "grave" (problema grave), "gravidade", "grávida" — custo de latência desnecessário em conversas de aconselhamento, sem risco de mutação incorreta. | BAIXA | Restrito a formas verbais de "gravar" (`grava\|grave\|gravou\|gravand\|gravar`) — a ambiguidade entre "grave" adjetivo e "grave" imperativo de "gravar" é irredutível por regex, aceita como custo residual baixo |
+
+Log completo: `docs/audits/phase-7-v2-agy-rodada2-2026-09-26.log`. Plano pronto para implementação.
