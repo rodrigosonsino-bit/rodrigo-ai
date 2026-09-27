@@ -2,12 +2,20 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+export interface RecurrenceRule {
+  type: 'daily' | 'weekly';
+  hour: number;
+  minute: number;
+  weekday?: number; // 0 (domingo) a 6 (sábado), Date.getDay()
+}
+
 export interface StoredItem {
   id: string;
   text: string;
   createdAt: string;
   dueAt?: string | null;      // NOVO — ISO 8601, preenchido quando há agendamento; NotaTool nunca escreve.
   notifiedAt?: string | null; // NOVO — ISO 8601, preenchido SOMENTE após o disparo bem-sucedido da notificação.
+  recurrence?: RecurrenceRule | null;
 }
 
 export class JsonStore<T = StoredItem> {

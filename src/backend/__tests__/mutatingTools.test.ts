@@ -1091,4 +1091,147 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       scheduler.shutdown();
     });
   });
+
+  describe('Fase 9 — Recorrência em LembreteTool (H3, H6, H7, H8)', () => {
+    it('H3 — criação de lembrete recorrente persiste recurrence + dueAt, agenda timer e formata respostas', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      const previewText = tool.preview('LEMBRETE_CRIAR', 'me lembra todo dia às 8 da manhã de tomar o remédio');
+      assert.equal(
+        previewText,
+        'Posso criar o lembrete de me lembra de tomar o remédio, todo dia às 8 horas?'
+      );
+
+      const execText = tool.execute('LEMBRETE_CRIAR', 'me lembra todo dia às 8 da manhã de tomar o remédio');
+      assert.equal(
+        execText,
+        'Lembrete criado, vou te avisar todo dia às 8 horas.'
+      );
+
+      const items = store.read().items;
+      assert.equal(items.length, 1);
+      const item = items[0];
+      assert.equal(item.text, 'me lembra de tomar o remédio');
+      assert.deepEqual(item.recurrence, { type: 'daily', hour: 8, minute: 0 });
+      assert.ok(item.dueAt);
+      assert.equal(item.notifiedAt, null);
+      assert.equal(scheduler.hasTimer(item.id), true);
+
+      // Deduplicação considerando recurrence:
+      // Tentar criar exatamente a mesma recorrência -> duplicata
+      const dup = tool.execute('LEMBRETE_CRIAR', 'me lembra todo dia às 8 da manhã de tomar o remédio');
+      assert.equal(dup, 'Isso já estava salvo.');
+      assert.equal(store.read().items.length, 1);
+
+      scheduler.shutdown();
+    });
+
+    it('H3 — deduplicação não bloqueia indevidamente lembrete único com mesmo texto', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      // Cria lembrete recorrente
+      tool.execute('LEMBRETE_CRIAR', 'todo dia às 9h tomar café');
+      assert.equal(store.read().items.length, 1);
+
+      // Cria lembrete não-recorrente com mesmo texto
+      const resNonRec = tool.execute('LEMBRETE_CRIAR', 'tomar café');
+      assert.equal(resNonRec, 'Lembrete criado.');
+      assert.equal(store.read().items.length, 2);
+      assert.equal(store.read().items[1].recurrence, undefined);
+
+      scheduler.shutdown();
+    });
+
+    it('H6 — LEMBRETE_APAGAR cancela recorrência e timer no scheduler', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      tool.execute('LEMBRETE_CRIAR', 'todo domingo de manhã passear');
+      assert.equal(store.read().items.length, 1);
+      const id = store.read().items[0].id;
+      assert.equal(scheduler.hasTimer(id), true);
+
+      const previewApagar = tool.preview('LEMBRETE_APAGAR', null);
+      assert.equal(previewApagar, 'Posso apagar o lembrete mais recente?');
+
+      const execApagar = tool.execute('LEMBRETE_APAGAR', null);
+      assert.equal(execApagar, 'Lembrete apagado.');
+
+      assert.equal(store.read().items.length, 0);
+      assert.equal(scheduler.hasTimer(id), false);
+
+      scheduler.shutdown();
+    });
+
+    it('H7 — LEMBRETE_EDITAR recusa frase de recorrência com mensagem específica de §4.8', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      tool.execute('LEMBRETE_CRIAR', 'tomar vitamina');
+
+      const frasesRecorrentes = [
+        'todo dia às 8h tomar vitamina',
+        'tomar vitamina todo dia às 8 da manhã',
+        'toda segunda às 9h tomar vitamina',
+        'todo domingo de manhã passear',
+        'tomar vitamina todo dia de tarde'
+      ];
+
+      for (const frase of frasesRecorrentes) {
+        const res = tool.execute('LEMBRETE_EDITAR', frase);
+        assert.equal(
+          res,
+          'Não dá pra mudar a recorrência editando o texto — apague e crie um lembrete novo.',
+          `Esperava recusa com mensagem de recorrência para: "${frase}"`
+        );
+      }
+
+      // O lembrete original não foi alterado
+      assert.equal(store.read().items[0].text, 'tomar vitamina');
+
+      // Frase com horário simples continua retornando a mensagem de horário da Fase 8
+      const resHorario = tool.execute('LEMBRETE_EDITAR', 'tomar vitamina amanhã às 10');
+      assert.equal(
+        resHorario,
+        'Não dá pra mudar o horário editando o texto — apague e crie um lembrete novo com o horário certo.'
+      );
+
+      // Edição de texto pura continua funcionando normalmente
+      const resOk = tool.execute('LEMBRETE_EDITAR', 'tomar vitamina C');
+      assert.equal(resOk, 'Lembrete atualizado.');
+      assert.equal(store.read().items[0].text, 'tomar vitamina C');
+
+      scheduler.shutdown();
+    });
+
+    it('H8 — Regressão: lembrete não-recorrente funciona identicamente', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      const previewRes = tool.preview('LEMBRETE_CRIAR', 'comprar pão amanhã de manhã');
+      assert.ok(previewRes.includes('Posso criar o lembrete de comprar pão para'));
+
+      const execRes = tool.execute('LEMBRETE_CRIAR', 'comprar pão amanhã de manhã');
+      assert.ok(execRes.includes('Lembrete criado para'));
+
+      const items = store.read().items;
+      assert.equal(items.length, 1);
+      assert.equal(items[0].recurrence, undefined);
+      assert.ok(items[0].dueAt);
+      assert.equal(items[0].notifiedAt, null);
+
+      // Deduplicação não-recorrente funciona
+      const dup = tool.execute('LEMBRETE_CRIAR', 'comprar pão amanhã de manhã');
+      assert.equal(dup, 'Isso já estava salvo.');
+
+      scheduler.shutdown();
+    });
+  });
 });

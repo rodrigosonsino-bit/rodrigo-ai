@@ -6,7 +6,10 @@ import { ReminderScheduler } from './reminderScheduler.js';
 import {
   parseRelativeTime,
   formatHumanRelative,
-  type ParsedRelativeTime
+  parseRecurrence,
+  formatRecurrenceHuman,
+  type ParsedRelativeTime,
+  type ParsedRecurrence
 } from './relativeTimeParser.js';
 
 export { type IMutatingTool };
@@ -15,6 +18,7 @@ export class LembreteTool implements IMutatingTool {
   readonly name = 'LEMBRETE';
   readonly description = 'Gerencia lembretes locais.';
   private lastParsed: { raw: string; parsed: ParsedRelativeTime } | null = null;
+  private lastParsedRecurrence: { raw: string; parsed: ParsedRecurrence } | null = null;
 
   constructor(
     private readonly store: JsonStore<StoredItem>,
@@ -30,6 +34,16 @@ export class LembreteTool implements IMutatingTool {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de lembrete.');
       }
+
+      const recurrenceParsed = parseRecurrence(content);
+      if (recurrenceParsed.recurrence) {
+        this.lastParsedRecurrence = { raw: content, parsed: recurrenceParsed };
+        this.lastParsed = null;
+        const finalText = recurrenceParsed.residualText.trim() || content;
+        return `Posso criar o lembrete de ${finalText}, ${formatRecurrenceHuman(recurrenceParsed.recurrence)}?`;
+      }
+      this.lastParsedRecurrence = null;
+
       const parsed = parseRelativeTime(content);
       this.lastParsed = { raw: content, parsed };
 
@@ -58,7 +72,9 @@ export class LembreteTool implements IMutatingTool {
     // deixar `lastParsed` sobrevivendo para contaminar uma criação de lembrete não relacionada
     // mais tarde. `cachedParsed` guarda o valor capturado antes da limpeza, pro ramo CRIAR usar.
     const cachedParsed = this.lastParsed;
+    const cachedRecurrence = this.lastParsedRecurrence;
     this.lastParsed = null;
+    this.lastParsedRecurrence = null;
 
     if (kind === 'LEMBRETE_EDITAR') {
       if (!content || !content.trim()) {
@@ -76,6 +92,11 @@ export class LembreteTool implements IMutatingTool {
       }
 
       const trimmed = content.trim();
+
+      const wouldBeRecurrent = parseRecurrence(trimmed).recurrence !== null;
+      if (wouldBeRecurrent) {
+        return 'Não dá pra mudar a recorrência editando o texto — apague e crie um lembrete novo.';
+      }
 
       const wouldScheduleTime = parseRelativeTime(trimmed).dueAt !== null;
       if (wouldScheduleTime) {
@@ -96,6 +117,44 @@ export class LembreteTool implements IMutatingTool {
         throw new Error('Conteúdo ausente para criação de lembrete.');
       }
 
+      const recurrenceParsed =
+        cachedRecurrence && cachedRecurrence.raw === content
+          ? cachedRecurrence.parsed
+          : parseRecurrence(content);
+
+      if (recurrenceParsed.recurrence) {
+        const { recurrence, dueAt, residualText } = recurrenceParsed;
+        const finalText = residualText.trim() || content;
+        const store = this.store.read();
+        const last = store.items[store.items.length - 1];
+
+        // Dedupe considera recurrence agora (achado 6) — sem isso, um lembrete único com o mesmo
+        // texto/horário da primeira ocorrência de um recorrente seria barrado por engano:
+        const isDuplicate =
+          last &&
+          last.text === finalText &&
+          (last.dueAt ?? null) === (dueAt ?? null) &&
+          JSON.stringify(last.recurrence ?? null) === JSON.stringify(recurrence) &&
+          last.notifiedAt === null;
+
+        if (isDuplicate) {
+          return 'Isso já estava salvo.';
+        }
+
+        const id = crypto.randomUUID();
+        store.items.push({
+          id,
+          text: finalText,
+          createdAt: new Date().toISOString(),
+          dueAt,
+          notifiedAt: null,
+          recurrence
+        });
+        this.store.write(store);
+        this.scheduler.schedule({ id, text: finalText, dueAt: dueAt! });
+        return `Lembrete criado, vou te avisar ${formatRecurrenceHuman(recurrence)}.`;
+      }
+
       // Reusa o parsing validado na pergunta ou roda fallback se chamado diretamente
       const parsed =
         cachedParsed && cachedParsed.raw === content
@@ -113,6 +172,7 @@ export class LembreteTool implements IMutatingTool {
         last &&
         last.text === finalText &&
         (last.dueAt ?? null) === (dueAt ?? null) &&
+        JSON.stringify(last.recurrence ?? null) === JSON.stringify(null) &&
         last.notifiedAt === null;
 
       if (isDuplicate) {

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
+import { computeNextOccurrence } from './relativeTimeParser.js';
 
 export const OVERDUE_CUTOFF_MS = 24 * 60 * 60 * 1000; // 24 horas
 
@@ -27,6 +28,7 @@ export class ReminderScheduler {
     const expiredIds: string[] = []; // achado MÉDIA (Hermes v2): persistir em bloco, não por item
                                      // mutado em memória — evita perder writes se algo lançar
                                      // no meio do loop, sem precisar de um write por iteração
+    const recurringReschedules: Array<{ id: string; nextDueAt: string }> = [];
     let lateDelayMs = 0; // achado MÉDIA (Hermes v2): sequenciar disparos, nunca simultâneos
 
     for (const item of items) {
@@ -57,12 +59,20 @@ export class ReminderScheduler {
           this.timers.set(item.id, lateTimer);
           lateDelayMs += 200;
         } else {
-          // Vencido há mais de 24h: registra log explícito, não dispara no SO, acumula pra
-          // persistir em bloco no fim do loop (nunca dentro dele — ver expiredIds acima).
-          console.warn(
-            `[ReminderScheduler] Lembrete id=${item.id} ("${item.text}") expirado há mais de 24h (${item.dueAt}). Não será disparado.`
-          );
-          expiredIds.push(item.id);
+          // Vencido há mais de 24h: registra log explícito, não dispara no SO
+          if (item.recurrence) {
+            const nextDueAt = computeNextOccurrence(item.recurrence, now);
+            console.warn(
+              `[ReminderScheduler] Lembrete recorrente id=${item.id} perdeu ocorrência(ões) durante ` +
+              `downtime — pulando direto para a próxima: ${nextDueAt}.`
+            );
+            recurringReschedules.push({ id: item.id, nextDueAt });
+          } else {
+            console.warn(
+              `[ReminderScheduler] Lembrete id=${item.id} ("${item.text}") expirado há mais de 24h (${item.dueAt}). Não será disparado.`
+            );
+            expiredIds.push(item.id);
+          }
         }
       } else {
         // Agendamento futuro normal
@@ -70,13 +80,20 @@ export class ReminderScheduler {
       }
     }
 
-    if (expiredIds.length > 0) {
+    if (expiredIds.length > 0 || recurringReschedules.length > 0) {
       // Uma leitura fresca + um write só, depois que o loop inteiro terminou sem lançar —
       // se o loop lançar no meio, nenhum item expirado é marcado, e a próxima subida do
       // processo reprocessa exatamente os mesmos itens (idempotente, nunca perde o registro).
       const fresh = this.store.read();
+      const reschedMap = new Map(recurringReschedules.map((r) => [r.id, r.nextDueAt]));
       for (const it of fresh.items) {
         if (expiredIds.includes(it.id)) it.notifiedAt = new Date().toISOString();
+        const nextDueAt = reschedMap.get(it.id);
+        if (nextDueAt) {
+          it.dueAt = nextDueAt;
+          it.notifiedAt = null;
+          this.schedule({ id: it.id, text: it.text, dueAt: nextDueAt }); // agenda no mesmo loop, sem find()
+        }
       }
       this.store.write(fresh);
     }
@@ -146,13 +163,22 @@ export class ReminderScheduler {
       try {
         const store = this.store.read();
         const idx = store.items.findIndex((i) => i.id === item.id);
-        if (idx !== -1) {
-          store.items[idx] = { ...store.items[idx], notifiedAt: new Date().toISOString() };
+        if (idx === -1) return;
+
+        const current = store.items[idx];
+        if (current.recurrence) {
+          const reference = new Date(Math.max(Date.now(), new Date(current.dueAt!).getTime()));
+          const nextDueAt = computeNextOccurrence(current.recurrence, reference);
+          store.items[idx] = { ...current, dueAt: nextDueAt, notifiedAt: null };
+          this.store.write(store);
+          this.schedule({ id: current.id, text: current.text, dueAt: nextDueAt });
+        } else {
+          store.items[idx] = { ...current, notifiedAt: new Date().toISOString() };
           this.store.write(store);
         }
       } catch (err) {
         console.error(
-          `[ReminderScheduler] Erro ao persistir notifiedAt para lembrete id=${item.id}:`,
+          `[ReminderScheduler] Erro ao processar disparo do lembrete id=${item.id}:`,
           err
         );
       }

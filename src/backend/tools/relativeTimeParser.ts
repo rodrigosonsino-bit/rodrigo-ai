@@ -1,3 +1,5 @@
+import type { RecurrenceRule } from '../storage/jsonStore.js';
+
 /** Teto de sanidade para minutos/horas por extenso ou dígito — ver achado 4 (Hermes, 2026-09-24). */
 const MAX_REASONABLE_UNITS = 100_000;
 
@@ -246,4 +248,174 @@ export function formatHumanRelative(dueAtIso: string, now: Date = new Date()): s
   }
   const mWord = m === 1 ? 'um minuto' : `${m} minutos`;
   return `daqui a ${hWord} e ${mWord}`;
+}
+
+export function computeNextOccurrence(rule: RecurrenceRule, now: Date = new Date()): string {
+  const candidate = new Date(now);
+  candidate.setHours(rule.hour, rule.minute, 0, 0);
+
+  if (rule.type === 'daily') {
+    if (candidate <= now) candidate.setDate(candidate.getDate() + 1);
+    return candidate.toISOString();
+  }
+
+  // weekly — salto exato em dias via aritmética modular, nunca incremento cego de 7 em 7
+  // (achado 1, CRÍTICA, rodada 1):
+  let daysAhead = (rule.weekday! - now.getDay() + 7) % 7;
+  if (daysAhead === 0 && candidate <= now) daysAhead = 7;
+  candidate.setDate(candidate.getDate() + daysAhead);
+  return candidate.toISOString();
+}
+
+function formatHourPart(hour: number, minute: number): string {
+  if (hour === 9 && minute === 0) return 'de manhã';
+  if (hour === 14 && minute === 0) return 'de tarde';
+  if (hour === 19 && minute === 0) return 'de noite';
+  if (minute === 0) return `às ${hour} horas`;
+  if (minute === 30) return `às ${hour} e meia`;
+  return `às ${hour} e ${minute}`;
+}
+
+export function formatRecurrenceHuman(rule: RecurrenceRule): string {
+  const hora = formatHourPart(rule.hour, rule.minute);
+  if (rule.type === 'daily') return `todo dia ${hora}`;
+  const dias = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  return `toda ${dias[rule.weekday!]} ${hora}`;
+}
+
+const DIAS_SEMANA: Record<string, number> = {
+  domingo: 0,
+  segunda: 1,
+  terça: 2,
+  terca: 2,
+  quarta: 3,
+  quinta: 4,
+  sexta: 5,
+  sábado: 6,
+  sabado: 6
+};
+
+export interface ParsedRecurrence {
+  recurrence: RecurrenceRule | null;
+  dueAt: string | null;
+  residualText: string;
+}
+
+export function parseRecurrence(text: string, now: Date = new Date()): ParsedRecurrence {
+  if (!text || !text.trim()) {
+    return { recurrence: null, dueAt: null, residualText: text };
+  }
+
+  // 1. Semanal — período do dia (ex.: "todo domingo de manhã", "toda segunda-feira à tarde")
+  const weeklyPeriodRegex =
+    /(?:todo|toda)\s+(domingo|segunda|terça|terca|quarta|quinta|sexta|sábado|sabado)(?:-feira)?\s+(?:(?:a|à|de|pela)\s+)?(manh[ãa]|tarde|noite)/i;
+  const wpMatch = text.match(weeklyPeriodRegex);
+  if (wpMatch && wpMatch.index !== undefined) {
+    const weekday = DIAS_SEMANA[wpMatch[1].toLowerCase()];
+    const p = wpMatch[2].toLowerCase();
+    const hour = p.startsWith('manh') ? 9 : p === 'tarde' ? 14 : 19;
+    const rule: RecurrenceRule = { type: 'weekly', weekday, hour, minute: 0 };
+    const dueAt = computeNextOccurrence(rule, now);
+    const residual = cleanResidualText(
+      text.slice(0, wpMatch.index) + ' ' + text.slice(wpMatch.index + wpMatch[0].length)
+    );
+    return { recurrence: rule, dueAt, residualText: residual };
+  }
+
+  // 2. Semanal — hora explícita (ex.: "todo domingo às 8 da manhã", "toda segunda às 9h", "toda quarta às 15h30")
+  const weeklyHourRegex =
+    /(?:todo|toda)\s+(domingo|segunda|terça|terca|quarta|quinta|sexta|sábado|sabado)(?:-feira)?\s+(?:(?:às?|as?|de|pela)\s+)?(\d{1,2}|[a-zçã]+)(?:\s*(?:horas?|h\b))?(?:\s*(?:[:h]\s*(\d{1,2})|\s+e\s+(meia|\d{1,2}|[a-zçã]+(?:\s+e\s+[a-zçã]+)?)))?(?:\s+(?:da\s+|de\s+|pela\s+|à\s+|a\s+)?(manh[ãa]|tarde|noite))?/i;
+  const whMatch = text.match(weeklyHourRegex);
+  if (whMatch && whMatch.index !== undefined) {
+    const weekday = DIAS_SEMANA[whMatch[1].toLowerCase()];
+    const hourRaw = parseNumberOrWord(whMatch[2]);
+    if (hourRaw !== null && hourRaw >= 0 && hourRaw <= 23) {
+      let hour = hourRaw;
+      let minute = 0;
+      const minRaw = whMatch[3] ?? whMatch[4];
+      if (minRaw) {
+        if (minRaw.toLowerCase() === 'meia') {
+          minute = 30;
+        } else {
+          const parsedMin = parseNumberOrWord(minRaw);
+          if (parsedMin !== null && parsedMin >= 0 && parsedMin <= 59) {
+            minute = parsedMin;
+          } else {
+            return { recurrence: null, dueAt: null, residualText: text };
+          }
+        }
+      }
+      const period = whMatch[5];
+      if (period) {
+        const p = period.toLowerCase();
+        if (p === 'noite' && hour === 12) {
+          hour = 0;
+        } else if ((p === 'tarde' || p === 'noite') && hour < 12) {
+          hour += 12;
+        }
+      }
+      const rule: RecurrenceRule = { type: 'weekly', weekday, hour, minute };
+      const dueAt = computeNextOccurrence(rule, now);
+      const residual = cleanResidualText(
+        text.slice(0, whMatch.index) + ' ' + text.slice(whMatch.index + whMatch[0].length)
+      );
+      return { recurrence: rule, dueAt, residualText: residual };
+    }
+  }
+
+  // 3. Diário — período do dia (ex.: "todo dia de manhã", "todo dia à tarde", "todo dia pela manhã")
+  const dailyPeriodRegex = /(?:todo|toda)\s+dia\s+(?:(?:a|à|de|pela)\s+)?(manh[ãa]|tarde|noite)/i;
+  const dpMatch = text.match(dailyPeriodRegex);
+  if (dpMatch && dpMatch.index !== undefined) {
+    const p = dpMatch[1].toLowerCase();
+    const hour = p.startsWith('manh') ? 9 : p === 'tarde' ? 14 : 19;
+    const rule: RecurrenceRule = { type: 'daily', hour, minute: 0 };
+    const dueAt = computeNextOccurrence(rule, now);
+    const residual = cleanResidualText(
+      text.slice(0, dpMatch.index) + ' ' + text.slice(dpMatch.index + dpMatch[0].length)
+    );
+    return { recurrence: rule, dueAt, residualText: residual };
+  }
+
+  // 4. Diário — hora explícita (ex.: "todo dia às 8 da manhã", "todo dia às 8h", "todo dia às 8 e meia")
+  const dailyHourRegex =
+    /(?:todo|toda)\s+dia\s+(?:(?:às?|as?|de|pela)\s+)?(\d{1,2}|[a-zçã]+)(?:\s*(?:horas?|h\b))?(?:\s*(?:[:h]\s*(\d{1,2})|\s+e\s+(meia|\d{1,2}|[a-zçã]+(?:\s+e\s+[a-zçã]+)?)))?(?:\s+(?:da\s+|de\s+|pela\s+|à\s+|a\s+)?(manh[ãa]|tarde|noite))?/i;
+  const dhMatch = text.match(dailyHourRegex);
+  if (dhMatch && dhMatch.index !== undefined) {
+    const hourRaw = parseNumberOrWord(dhMatch[1]);
+    if (hourRaw !== null && hourRaw >= 0 && hourRaw <= 23) {
+      let hour = hourRaw;
+      let minute = 0;
+      const minRaw = dhMatch[2] ?? dhMatch[3];
+      if (minRaw) {
+        if (minRaw.toLowerCase() === 'meia') {
+          minute = 30;
+        } else {
+          const parsedMin = parseNumberOrWord(minRaw);
+          if (parsedMin !== null && parsedMin >= 0 && parsedMin <= 59) {
+            minute = parsedMin;
+          } else {
+            return { recurrence: null, dueAt: null, residualText: text };
+          }
+        }
+      }
+      const period = dhMatch[4];
+      if (period) {
+        const p = period.toLowerCase();
+        if (p === 'noite' && hour === 12) {
+          hour = 0;
+        } else if ((p === 'tarde' || p === 'noite') && hour < 12) {
+          hour += 12;
+        }
+      }
+      const rule: RecurrenceRule = { type: 'daily', hour, minute };
+      const dueAt = computeNextOccurrence(rule, now);
+      const residual = cleanResidualText(
+        text.slice(0, dhMatch.index) + ' ' + text.slice(dhMatch.index + dhMatch[0].length)
+      );
+      return { recurrence: rule, dueAt, residualText: residual };
+    }
+  }
+
+  return { recurrence: null, dueAt: null, residualText: text };
 }

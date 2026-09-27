@@ -4,8 +4,12 @@ import {
   parseRelativeTime,
   parseNumberOrWord,
   formatHumanRelative,
+  computeNextOccurrence,
+  formatRecurrenceHuman,
+  parseRecurrence,
   CARDINAL_WORDS
 } from '../tools/relativeTimeParser.js';
+import type { RecurrenceRule } from '../storage/jsonStore.js';
 
 describe('relativeTimeParser (Fase 6 — H1 & H2)', () => {
   const fixedNow = new Date('2026-09-24T10:00:00.000Z');
@@ -312,6 +316,178 @@ describe('relativeTimeParser (Fase 6 — H1 & H2)', () => {
       assert.doesNotThrow(() => parseRelativeTime('daqui a 99999999999999999999999999 minutos', fixedNow));
       const r = parseRelativeTime('daqui a 99999999999999999999999999 minutos', fixedNow);
       assert.equal(r.dueAt, null); // acima do teto de sanidade -> tratado como não reconhecido
+    });
+  });
+
+  describe('Fase 9 — H1: computeNextOccurrence sem loop infinito e cálculo exato de calendário', () => {
+    it('cobre todas as 49 combinações (7 dias atuais x 7 dias alvo da semana), com horário antes e depois de now', () => {
+      // Começa num domingo de referência (2026-09-20T12:00:00.000Z, getDay() === 0)
+      const baseSunday = new Date('2026-09-20T12:00:00.000Z');
+
+      for (let nowDay = 0; nowDay < 7; nowDay++) {
+        const currentNow = new Date(baseSunday);
+        currentNow.setDate(currentNow.getDate() + nowDay);
+        assert.equal(currentNow.getDay(), nowDay);
+
+        for (let targetWeekday = 0; targetWeekday < 7; targetWeekday++) {
+          // Caso 1: horário alvo (15:00) ainda não passou hoje (now é 12:00)
+          const ruleLater: RecurrenceRule = {
+            type: 'weekly',
+            weekday: targetWeekday,
+            hour: 15,
+            minute: 0
+          };
+          const nextIsoLater = computeNextOccurrence(ruleLater, currentNow);
+          const nextDateLater = new Date(nextIsoLater);
+
+          // Deve ser estritamente no futuro
+          assert.ok(
+            nextDateLater > currentNow,
+            `nextDateLater deve ser no futuro para nowDay=${nowDay}, target=${targetWeekday}`
+          );
+          // Deve cair no dia da semana pedido
+          assert.equal(nextDateLater.getDay(), targetWeekday);
+          assert.equal(nextDateLater.getHours(), 15);
+          assert.equal(nextDateLater.getMinutes(), 0);
+
+          // Se targetWeekday === nowDay, deve ser hoje (0 dias de salto)
+          if (targetWeekday === nowDay) {
+            const diffDays = Math.round(
+              (nextDateLater.getTime() - currentNow.getTime()) / (24 * 3600_000)
+            );
+            assert.equal(diffDays, 0);
+          } else {
+            // Se for dia diferente, deve ser no futuro dentro de 1 a 6 dias
+            const diffMs = nextDateLater.getTime() - currentNow.getTime();
+            assert.ok(diffMs > 0 && diffMs <= 7 * 24 * 3600_000);
+          }
+
+          // Caso 2: horário alvo (09:00) JÁ passou hoje (now é 12:00)
+          const ruleEarlier: RecurrenceRule = {
+            type: 'weekly',
+            weekday: targetWeekday,
+            hour: 9,
+            minute: 0
+          };
+          const nextIsoEarlier = computeNextOccurrence(ruleEarlier, currentNow);
+          const nextDateEarlier = new Date(nextIsoEarlier);
+
+          assert.ok(
+            nextDateEarlier > currentNow,
+            `nextDateEarlier deve ser no futuro para nowDay=${nowDay}, target=${targetWeekday}`
+          );
+          assert.equal(nextDateEarlier.getDay(), targetWeekday);
+          assert.equal(nextDateEarlier.getHours(), 9);
+          assert.equal(nextDateEarlier.getMinutes(), 0);
+
+          // Se targetWeekday === nowDay e horário já passou hoje, DEVE pular exatamente 7 dias
+          if (targetWeekday === nowDay) {
+            const diffDays = Math.round(
+              (nextDateEarlier.getTime() - currentNow.getTime()) / (24 * 3600_000)
+            );
+            assert.equal(diffDays, 7);
+          }
+        }
+      }
+    });
+
+    it('recorrência diária calcula hoje se horário não passou, ou amanhã se já passou', () => {
+      const now = new Date('2026-09-24T12:00:00.000Z');
+
+      // Horário futuro hoje (15:00)
+      const dailyLater: RecurrenceRule = { type: 'daily', hour: 15, minute: 0 };
+      const resLater = new Date(computeNextOccurrence(dailyLater, now));
+      assert.ok(resLater > now);
+      assert.equal(resLater.getDate(), now.getDate());
+      assert.equal(resLater.getHours(), 15);
+
+      // Horário passado hoje (09:00)
+      const dailyEarlier: RecurrenceRule = { type: 'daily', hour: 9, minute: 0 };
+      const resEarlier = new Date(computeNextOccurrence(dailyEarlier, now));
+      assert.ok(resEarlier > now);
+      assert.equal(resEarlier.getDate(), now.getDate() + 1);
+      assert.equal(resEarlier.getHours(), 9);
+    });
+  });
+
+  describe('Fase 9 — H2: parseRecurrence e formatRecurrenceHuman', () => {
+    it('cobre exemplos centrais do plano (todo domingo de manhã, todo dia às 8 da manhã)', () => {
+      const p1 = parseRecurrence('todo domingo de manhã', fixedNow);
+      assert.deepEqual(p1.recurrence, { type: 'weekly', weekday: 0, hour: 9, minute: 0 });
+      assert.equal(p1.residualText, '');
+
+      const p2 = parseRecurrence('me lembra todo dia às 8 da manhã de tomar o remédio', fixedNow);
+      assert.deepEqual(p2.recurrence, { type: 'daily', hour: 8, minute: 0 });
+      assert.equal(p2.residualText, 'me lembra de tomar o remédio');
+    });
+
+    it('cobre gênero gramatical de sábado e domingo ("todo" e "toda")', () => {
+      const pSab = parseRecurrence('todo sábado de tarde', fixedNow);
+      assert.deepEqual(pSab.recurrence, { type: 'weekly', weekday: 6, hour: 14, minute: 0 });
+
+      const pSabToda = parseRecurrence('toda sábado de tarde', fixedNow);
+      assert.deepEqual(pSabToda.recurrence, { type: 'weekly', weekday: 6, hour: 14, minute: 0 });
+
+      const pDom = parseRecurrence('todo domingo às 10 horas', fixedNow);
+      assert.deepEqual(pDom.recurrence, { type: 'weekly', weekday: 0, hour: 10, minute: 0 });
+
+      const pSeg = parseRecurrence('toda segunda de manhã', fixedNow);
+      assert.deepEqual(pSeg.recurrence, { type: 'weekly', weekday: 1, hour: 9, minute: 0 });
+    });
+
+    it('cobre minutos opcionais (dígitos, por extenso e "e meia")', () => {
+      const p1 = parseRecurrence('todo dia às 8h30', fixedNow);
+      assert.deepEqual(p1.recurrence, { type: 'daily', hour: 8, minute: 30 });
+
+      const p2 = parseRecurrence('todo dia às 8:30', fixedNow);
+      assert.deepEqual(p2.recurrence, { type: 'daily', hour: 8, minute: 30 });
+
+      const p3 = parseRecurrence('todo dia às 8 e meia', fixedNow);
+      assert.deepEqual(p3.recurrence, { type: 'daily', hour: 8, minute: 30 });
+
+      const p4 = parseRecurrence('toda quarta às 15 e vinte', fixedNow);
+      assert.deepEqual(p4.recurrence, { type: 'weekly', weekday: 3, hour: 15, minute: 20 });
+    });
+
+    it('cobre preposições variadas (a/à/de/pela)', () => {
+      const p1 = parseRecurrence('todo dia à tarde', fixedNow);
+      assert.deepEqual(p1.recurrence, { type: 'daily', hour: 14, minute: 0 });
+
+      const p2 = parseRecurrence('todo dia a tarde', fixedNow);
+      assert.deepEqual(p2.recurrence, { type: 'daily', hour: 14, minute: 0 });
+
+      const p3 = parseRecurrence('todo dia de tarde', fixedNow);
+      assert.deepEqual(p3.recurrence, { type: 'daily', hour: 14, minute: 0 });
+
+      const p4 = parseRecurrence('todo dia pela manhã', fixedNow);
+      assert.deepEqual(p4.recurrence, { type: 'daily', hour: 9, minute: 0 });
+
+      const p5 = parseRecurrence('todo dia de noite', fixedNow);
+      assert.deepEqual(p5.recurrence, { type: 'daily', hour: 19, minute: 0 });
+
+      const p6 = parseRecurrence('todo dia à noite', fixedNow);
+      assert.deepEqual(p6.recurrence, { type: 'daily', hour: 19, minute: 0 });
+    });
+
+    it('formatRecurrenceHuman formata corretamente horários fixos e falados', () => {
+      assert.equal(formatRecurrenceHuman({ type: 'daily', hour: 9, minute: 0 }), 'todo dia de manhã');
+      assert.equal(formatRecurrenceHuman({ type: 'daily', hour: 14, minute: 0 }), 'todo dia de tarde');
+      assert.equal(formatRecurrenceHuman({ type: 'daily', hour: 19, minute: 0 }), 'todo dia de noite');
+      assert.equal(formatRecurrenceHuman({ type: 'daily', hour: 8, minute: 0 }), 'todo dia às 8 horas');
+      assert.equal(formatRecurrenceHuman({ type: 'daily', hour: 8, minute: 30 }), 'todo dia às 8 e meia');
+      assert.equal(formatRecurrenceHuman({ type: 'daily', hour: 8, minute: 20 }), 'todo dia às 8 e 20');
+      assert.equal(formatRecurrenceHuman({ type: 'weekly', weekday: 1, hour: 9, minute: 0 }), 'toda segunda de manhã');
+      assert.equal(formatRecurrenceHuman({ type: 'weekly', weekday: 3, hour: 15, minute: 0 }), 'toda quarta às 15 horas');
+    });
+
+    it('retorna null se não houver expressão de recorrência', () => {
+      const res = parseRecurrence('comprar pão amanhã às 9h', fixedNow);
+      assert.equal(res.recurrence, null);
+      assert.equal(res.dueAt, null);
+      assert.equal(res.residualText, 'comprar pão amanhã às 9h');
+
+      const empty = parseRecurrence('');
+      assert.equal(empty.recurrence, null);
     });
   });
 });
