@@ -1807,5 +1807,130 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       }
     });
   });
+
+  describe('Edição por voz e novos marcadores afirmativos (Fase 8)', () => {
+    let tmpPhase8Dir: string;
+    let currentH: Harness | null = null;
+    let currentSse: ReturnType<typeof readSse> | null = null;
+
+    beforeEach(() => {
+      tmpPhase8Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-voice-phase8-test-'));
+    });
+
+    afterEach(async () => {
+      try {
+        currentSse?.close();
+      } catch {}
+      if (currentH) {
+        await teardownHarness(currentH);
+        currentH = null;
+      }
+      currentSse = null;
+      try {
+        fs.rmSync(tmpPhase8Dir, { recursive: true, force: true });
+      } catch {}
+    });
+
+    it('H4 — teste de regressão provando que pode trocar/editar/corrigir/ser/mudar não são vetados por hasAffirmativeMarker', () => {
+      // Marcadores afirmativos de edição
+      assert.equal(hasAffirmativeMarker('pode trocar'), true);
+      assert.equal(hasAffirmativeMarker('pode editar'), true);
+      assert.equal(hasAffirmativeMarker('pode corrigir'), true);
+      assert.equal(hasAffirmativeMarker('pode ser'), true);
+      assert.equal(hasAffirmativeMarker('pode mudar'), true);
+
+      // Com variações coloquiais e pontuação
+      assert.equal(hasAffirmativeMarker('Pode trocar, por favor.'), true);
+      assert.equal(hasAffirmativeMarker('sim, pode editar'), true);
+      assert.equal(hasAffirmativeMarker('Pode corrigir agora!'), true);
+      assert.equal(hasAffirmativeMarker('pode ser, obrigado'), true);
+      assert.equal(hasAffirmativeMarker('pode mudar isso'), true);
+
+      // Prova que negações na mesma frase continuam vetadas
+      assert.equal(hasAffirmativeMarker('não, pode trocar'), false);
+      assert.equal(hasAffirmativeMarker('pode editar não'), false);
+      assert.equal(hasAffirmativeMarker('nem pensar, pode corrigir'), false);
+      assert.equal(hasAffirmativeMarker('cancela, pode ser'), false);
+      assert.equal(hasAffirmativeMarker('nunca, pode mudar'), false);
+    });
+
+    it('fluxo end-to-end: LEMBRETE_EDITAR por voz confirmado com "Pode trocar" atualiza lembrete mantendo dueAt', async (t) => {
+      const { tools: mutatingTools, memoriaStore } = createMutatingTools(tmpPhase8Dir);
+      const lembreteStore = new JsonStore<StoredItem>(tmpPhase8Dir, 'lembretes.json');
+      const dueAt = new Date(Date.now() + 3600_000).toISOString();
+      lembreteStore.write({
+        items: [
+          { id: 'rem-1', text: 'comprar café em pó', createdAt: new Date().toISOString(), dueAt, notifiedAt: null }
+        ]
+      });
+
+      const h = await setupHarness(null, [], mutatingTools, memoriaStore);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Troca esse lembrete pra comprar café solúvel';
+        h.engine.mutationToReturn = ['LEMBRETE_EDITAR', 'comprar café solúvel'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        // Turno 1: gera preview
+        const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+        await sse.waitFor(8, 5000);
+
+        const previewEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+          | { type: 'sentence_audio_ready'; text: string }
+          | undefined;
+        assert.equal(previewEvent?.text, 'Posso trocar o lembrete mais recente para: comprar café solúvel?');
+
+        // Confirma reprodução da pergunta
+        await fetch(`${h.baseUrl}/api/voice/session/played`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId: turnId1, text: previewEvent!.text })
+        });
+
+        // Turno 2: resposta afirmativa com "Pode trocar"
+        h.engine.fixedTranscript = 'Pode trocar';
+        const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes2.status, 200);
+        await sse.waitFor(15, 5000);
+
+        const executedEvent = sse.events
+          .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+          .pop() as { type: 'sentence_audio_ready'; text: string };
+        assert.equal(executedEvent?.text, 'Lembrete atualizado.');
+
+        // Verifica que o item foi atualizado e preservou o dueAt
+        const saved = lembreteStore.read();
+        assert.equal(saved.items.length, 1);
+        assert.equal(saved.items[0].text, 'comprar café solúvel');
+        assert.equal(saved.items[0].id, 'rem-1');
+        assert.equal(saved.items[0].dueAt, dueAt);
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
+  });
 });
+
 

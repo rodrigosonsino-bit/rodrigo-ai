@@ -39,6 +39,12 @@ export class LembreteTool implements IMutatingTool {
       }
       return `Posso criar o lembrete: ${finalText}?`;
     }
+    if (kind === 'LEMBRETE_EDITAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para editar lembrete.');
+      }
+      return `Posso trocar o lembrete mais recente para: ${content.trim()}?`;
+    }
     if (kind === 'LEMBRETE_APAGAR') {
       return 'Posso apagar o lembrete mais recente?';
     }
@@ -53,6 +59,37 @@ export class LembreteTool implements IMutatingTool {
     // mais tarde. `cachedParsed` guarda o valor capturado antes da limpeza, pro ramo CRIAR usar.
     const cachedParsed = this.lastParsed;
     this.lastParsed = null;
+
+    if (kind === 'LEMBRETE_EDITAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para editar lembrete.');
+      }
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhum lembrete para editar.';
+      }
+      const idx = store.items.length - 1;
+      const current = store.items[idx];
+
+      if (current.notifiedAt) {
+        return 'Esse lembrete já foi disparado, não é possível editar mais.';
+      }
+
+      const trimmed = content.trim();
+
+      const wouldScheduleTime = parseRelativeTime(trimmed).dueAt !== null;
+      if (wouldScheduleTime) {
+        return 'Não dá pra mudar o horário editando o texto — apague e crie um lembrete novo com o horário certo.';
+      }
+
+      if (current.text === trimmed) {
+        return 'Isso já era o texto do lembrete.';
+      }
+
+      store.items[idx] = { ...current, text: trimmed };
+      this.store.write(store);
+      return 'Lembrete atualizado.';
+    }
 
     if (kind === 'LEMBRETE_CRIAR') {
       if (!content || !content.trim()) {
@@ -132,6 +169,12 @@ export class NotaTool implements IMutatingTool {
       }
       return `Posso guardar a nota: ${content}?`;
     }
+    if (kind === 'NOTA_EDITAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para editar nota.');
+      }
+      return `Posso trocar a nota mais recente para: ${content.trim()}?`;
+    }
     if (kind === 'NOTA_APAGAR') {
       return 'Posso apagar a nota mais recente?';
     }
@@ -139,6 +182,27 @@ export class NotaTool implements IMutatingTool {
   }
 
   execute(kind: MutationName, content: string | null): string {
+    if (kind === 'NOTA_EDITAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para editar nota.');
+      }
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhuma nota para editar.';
+      }
+      const idx = store.items.length - 1;
+      const current = store.items[idx];
+      const trimmed = content.trim();
+
+      if (current.text === trimmed) {
+        return 'Isso já era o texto da nota.';
+      }
+
+      store.items[idx] = { ...current, text: trimmed };
+      this.store.write(store);
+      return 'Nota atualizada.';
+    }
+
     if (kind === 'NOTA_CRIAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de nota.');
@@ -188,6 +252,12 @@ export class MemoriaTool implements IMutatingTool {
       }
       return `Posso guardar isso sobre você: ${content}?`;
     }
+    if (kind === 'MEMORIA_EDITAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para editar memória.');
+      }
+      return `Posso trocar essa memória para: ${content.trim()}?`;
+    }
     if (kind === 'MEMORIA_ESQUECER') {
       // Achado 2 (CRÍTICA, rodada 1): "apagar", nunca "esquecer" — a palavra "esquece" está em
       // NEGATION_MARKERS (sessionManager.ts) e vetaria a própria confirmação afirmativa.
@@ -200,6 +270,34 @@ export class MemoriaTool implements IMutatingTool {
   }
 
   execute(kind: MutationName, content: string | null): string {
+    if (kind === 'MEMORIA_EDITAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para editar memória.');
+      }
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nada guardado para editar.';
+      }
+      const idx = store.items.length - 1;
+      const trimmed = content.trim();
+      const normalized = trimmed.toLowerCase();
+
+      if (store.items[idx].text.trim().toLowerCase() === normalized) {
+        return 'Isso já era o texto guardado.';
+      }
+
+      const isDuplicateOfOther = store.items.some(
+        (it, i) => i !== idx && it.text.trim().toLowerCase() === normalized
+      );
+      if (isDuplicateOfOther) {
+        return 'Isso já estava guardado.';
+      }
+
+      store.items[idx] = { ...store.items[idx], text: trimmed };
+      this.store.write(store);
+      return 'Atualizado.';
+    }
+
     if (kind === 'MEMORIA_GUARDAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para guardar memória.');
@@ -235,9 +333,9 @@ export class MemoriaTool implements IMutatingTool {
   }
 }
 
-/** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2 e atualizado na Fase 7 §4.1. */
+/** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2 e atualizado na Fase 7 §4.1 e Fase 8 §4.4. */
 const MUTATION_GATE =
-  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar)\w*\b/;
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar)\w*\b|\b(edita|editar|edite|editou|editando|troca|trocar|troque|trocou|trocando|corrige|corrigir|corrija|corrigiu|corrigindo)\b/;
 
 export function mightBeMutation(transcript: string): boolean {
   const n = transcript

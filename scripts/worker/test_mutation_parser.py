@@ -170,6 +170,95 @@ def main() -> None:
         ("NENHUMA", None),
     )
 
+    # Fase 8: testes dedicados para LEMBRETE_EDITAR, NOTA_EDITAR, MEMORIA_EDITAR
+    check(
+        "LEMBRETE_EDITAR canônico",
+        parse_mutation_output("LEMBRETE_EDITAR|Ligar pro médico", truncated=False),
+        ("LEMBRETE_EDITAR", "Ligar pro médico"),
+    )
+    check(
+        "LEMBRETE_EDITAR em minúsculas e com espaços",
+        parse_mutation_output(" lembrete_editar | trocar texto ", truncated=False),
+        ("LEMBRETE_EDITAR", "trocar texto"),
+    )
+    check(
+        "LEMBRETE_EDITAR contendo pipe (|)",
+        parse_mutation_output("LEMBRETE_EDITAR|café solúvel | em pó", truncated=False),
+        ("LEMBRETE_EDITAR", "café solúvel | em pó"),
+    )
+    check(
+        "LEMBRETE_EDITAR com conteúdo vazio",
+        parse_mutation_output("LEMBRETE_EDITAR|", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "LEMBRETE_EDITAR com conteúdo só de espaços",
+        parse_mutation_output("LEMBRETE_EDITAR|   ", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "LEMBRETE_EDITAR sem separador de conteúdo",
+        parse_mutation_output("LEMBRETE_EDITAR", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "LEMBRETE_EDITAR com exatamente 200 caracteres",
+        parse_mutation_output("LEMBRETE_EDITAR|" + "a" * 200, truncated=False),
+        ("LEMBRETE_EDITAR", "a" * 200),
+    )
+    check(
+        "LEMBRETE_EDITAR excedendo 200 caracteres (201) degrada para NENHUMA",
+        parse_mutation_output("LEMBRETE_EDITAR|" + "a" * 201, truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "truncated=True com LEMBRETE_EDITAR degrada para NENHUMA",
+        parse_mutation_output("LEMBRETE_EDITAR|Ligar pro médico", truncated=True),
+        ("NENHUMA", None),
+    )
+
+    check(
+        "NOTA_EDITAR canônico",
+        parse_mutation_output("NOTA_EDITAR|Comprar materiais na segunda", truncated=False),
+        ("NOTA_EDITAR", "Comprar materiais na segunda"),
+    )
+    check(
+        "NOTA_EDITAR em minúsculas e com espaços",
+        parse_mutation_output(" nota_editar | texto da nota ", truncated=False),
+        ("NOTA_EDITAR", "texto da nota"),
+    )
+    check(
+        "NOTA_EDITAR com conteúdo vazio",
+        parse_mutation_output("NOTA_EDITAR|", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "truncated=True com NOTA_EDITAR degrada para NENHUMA",
+        parse_mutation_output("NOTA_EDITAR|Comprar materiais", truncated=True),
+        ("NENHUMA", None),
+    )
+
+    check(
+        "MEMORIA_EDITAR canônico",
+        parse_mutation_output("MEMORIA_EDITAR|seu nome é Rodrigo Sonsino", truncated=False),
+        ("MEMORIA_EDITAR", "seu nome é Rodrigo Sonsino"),
+    )
+    check(
+        "MEMORIA_EDITAR em minúsculas e com espaços",
+        parse_mutation_output(" memoria_editar | prefere café sem açúcar ", truncated=False),
+        ("MEMORIA_EDITAR", "prefere café sem açúcar"),
+    )
+    check(
+        "MEMORIA_EDITAR com conteúdo vazio",
+        parse_mutation_output("MEMORIA_EDITAR|", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "truncated=True com MEMORIA_EDITAR degrada para NENHUMA",
+        parse_mutation_output("MEMORIA_EDITAR|seu nome é Rodrigo Sonsino", truncated=True),
+        ("NENHUMA", None),
+    )
+
     # Casos inválidos e bordas
     check(
         "NENHUMA canônico",

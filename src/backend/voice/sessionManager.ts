@@ -43,6 +43,9 @@ const CONFIRM_YES_EXACT = new Set([
   'positivo',
   'isso mesmo',
   'pode confirmar',
+  'pode trocar',
+  'pode editar',
+  'pode corrigir',
   'com certeza'
 ]);
 
@@ -98,6 +101,7 @@ const AFFIRMATIVE_MARKERS = [
   'isso mesmo', 'bora', 'beleza', 'fechou', 'fechado', 'manda',
   'pode sim', 'pode criar', 'pode marcar', 'pode fazer',
   'pode apagar', 'pode guardar', 'pode salvar', 'pode anotar',
+  'pode trocar', 'pode editar', 'pode corrigir', 'pode ser', 'pode mudar',
   'ta valendo', 'esta valendo',
   'perfeito', 'combinado', 'ta bom', 'esta bom',
   'blz', 'ok'

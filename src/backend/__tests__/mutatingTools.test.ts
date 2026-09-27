@@ -94,6 +94,43 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       }
     });
 
+    it('Fase 8: detecta intenções com edita/troca/corrige em formas fechadas, sem disparar em palavras como edital/trocadilho/trocado', () => {
+      const novosPositivos = [
+        'Troca esse lembrete pra ligar pro médico',
+        'Corrige a nota sobre a reunião',
+        'Estou editando o lembrete de amanhã',
+        'Edite o texto da nota',
+        'Edita essa memória sobre mim',
+        'Troque esse lembrete',
+        'Trocou a nota?',
+        'Trocando o texto da nota',
+        'Corrija o lembrete por favor',
+        'Corrigiu o que eu pedi?',
+        'Corrigindo a anotação'
+      ];
+      for (const frase of novosPositivos) {
+        assert.equal(
+          mightBeMutation(frase),
+          true,
+          `Esperava que mightBeMutation fosse true para "${frase}"`
+        );
+      }
+
+      const falsosEvitados = [
+        'Saiu o edital do concurso público',
+        'Não entendi esse trocadilho',
+        'Você tem trocado de dez reais?',
+        'Os editais estão abertos para inscrição'
+      ];
+      for (const frase of falsosEvitados) {
+        assert.equal(
+          mightBeMutation(frase),
+          false,
+          `Esperava que mightBeMutation fosse false para "${frase}"`
+        );
+      }
+    });
+
     it('não dispara em perguntas de domínio e conversas gerais', () => {
       const negativos = [
         'Explique a Aceitação dentro da Virtologia',
@@ -123,14 +160,29 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       const lembreteCriar = selectMutatingToolByAction('LEMBRETE_CRIAR', tools);
       assert.equal(lembreteCriar?.name, 'LEMBRETE');
 
+      const lembreteEditar = selectMutatingToolByAction('LEMBRETE_EDITAR', tools);
+      assert.equal(lembreteEditar?.name, 'LEMBRETE');
+
       const lembreteApagar = selectMutatingToolByAction('LEMBRETE_APAGAR', tools);
       assert.equal(lembreteApagar?.name, 'LEMBRETE');
 
       const notaCriar = selectMutatingToolByAction('NOTA_CRIAR', tools);
       assert.equal(notaCriar?.name, 'NOTA');
 
+      const notaEditar = selectMutatingToolByAction('NOTA_EDITAR', tools);
+      assert.equal(notaEditar?.name, 'NOTA');
+
       const notaApagar = selectMutatingToolByAction('NOTA_APAGAR', tools);
       assert.equal(notaApagar?.name, 'NOTA');
+
+      const memoriaGuardar = selectMutatingToolByAction('MEMORIA_GUARDAR', tools);
+      assert.equal(memoriaGuardar?.name, 'MEMORIA');
+
+      const memoriaEditar = selectMutatingToolByAction('MEMORIA_EDITAR', tools);
+      assert.equal(memoriaEditar?.name, 'MEMORIA');
+
+      const memoriaEsquecer = selectMutatingToolByAction('MEMORIA_ESQUECER', tools);
+      assert.equal(memoriaEsquecer?.name, 'MEMORIA');
 
       assert.equal(selectMutatingToolByAction('NENHUMA', tools), null);
       assert.equal(selectMutatingToolByAction('DESCONHECIDO', tools), null);
@@ -443,6 +495,30 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
         'limite estrutural conhecido e documentado — o texto residual não carrega mais a negação'
       );
     });
+
+    it('Fase 8: reconhece novos marcadores afirmativos de edição (pode trocar, pode editar, pode corrigir, pode ser, pode mudar)', () => {
+      assert.equal(hasAffirmativeMarker('pode trocar'), true);
+      assert.equal(hasAffirmativeMarker('pode editar'), true);
+      assert.equal(hasAffirmativeMarker('pode corrigir'), true);
+      assert.equal(hasAffirmativeMarker('pode ser'), true);
+      assert.equal(hasAffirmativeMarker('pode mudar'), true);
+      assert.equal(hasAffirmativeMarker('Pode trocar, por favor.'), true);
+      assert.equal(hasAffirmativeMarker('Sim, pode editar!'), true);
+
+      // Colisões com negação continuam vetadas
+      assert.equal(hasAffirmativeMarker('não, pode trocar'), false);
+      assert.equal(hasAffirmativeMarker('pode editar não'), false);
+      assert.equal(hasAffirmativeMarker('nem pensar, pode corrigir'), false);
+      assert.equal(hasAffirmativeMarker('cancela, pode ser'), false);
+      assert.equal(hasAffirmativeMarker('nunca, pode mudar'), false);
+
+      // Camada 0: CONFIRM_YES_EXACT ganha pode trocar, pode editar, pode corrigir
+      assert.equal(keywordConfirmation('pode trocar'), 'SIM');
+      assert.equal(keywordConfirmation('pode editar'), 'SIM');
+      assert.equal(keywordConfirmation('pode corrigir'), 'SIM');
+      assert.equal(keywordConfirmation('pode ser'), null); // resolve via Camada 1
+      assert.equal(keywordConfirmation('pode mudar'), null); // resolve via Camada 1
+    });
   });
 
   describe('Fase 6 — Agendamento de Lembretes, Deduplicação Temporal e Ciclo de Vida (H3, H4, H5, H9, H10)', () => {
@@ -729,6 +805,290 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       assert.ok(toolEsquecer);
       assert.equal(toolEsquecer.name, 'MEMORIA');
       assert.equal(toolGuardar, toolEsquecer); // Mesma instância
+    });
+  });
+
+  describe('Fase 8 — Edição de Lembrete, Nota e Memória (H1..H6)', () => {
+    it('H1 — LEMBRETE_EDITAR substitui só o text e preserva id, createdAt, dueAt, notifiedAt', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      tool.execute('LEMBRETE_CRIAR', 'comprar café em 2 horas');
+      const original = store.read().items[0];
+      assert.ok(original.dueAt);
+      assert.equal(original.notifiedAt, null);
+
+      const res = tool.execute('LEMBRETE_EDITAR', 'comprar café em grãos');
+      assert.equal(res, 'Lembrete atualizado.');
+
+      const updated = store.read().items[0];
+      assert.equal(updated.text, 'comprar café em grãos');
+      assert.equal(updated.id, original.id);
+      assert.equal(updated.createdAt, original.createdAt);
+      assert.equal(updated.dueAt, original.dueAt);
+      assert.equal(updated.notifiedAt, original.notifiedAt);
+
+      scheduler.shutdown();
+    });
+
+    it('H1 — NOTA_EDITAR e MEMORIA_EDITAR substituem só o text e preservam id e createdAt', () => {
+      const { tools, memoriaStore } = createMutatingTools(tmpDir);
+      const notaTool = tools.find((t) => t.name === 'NOTA')!;
+      const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
+      const notaStore = new JsonStore<StoredItem>(tmpDir, 'notas.json');
+
+      // Nota
+      notaTool.execute('NOTA_CRIAR', 'ideia inicial');
+      const notaOriginal = notaStore.read().items[0];
+      const resNota = notaTool.execute('NOTA_EDITAR', 'ideia aprimorada');
+      assert.equal(resNota, 'Nota atualizada.');
+      const notaUpdated = notaStore.read().items[0];
+      assert.equal(notaUpdated.text, 'ideia aprimorada');
+      assert.equal(notaUpdated.id, notaOriginal.id);
+      assert.equal(notaUpdated.createdAt, notaOriginal.createdAt);
+
+      // Memória
+      memoriaTool.execute('MEMORIA_GUARDAR', 'gosta de chá verde');
+      const memOriginal = memoriaStore.read().items[0];
+      const resMem = memoriaTool.execute('MEMORIA_EDITAR', 'gosta de chá preto');
+      assert.equal(resMem, 'Atualizado.');
+      const memUpdated = memoriaStore.read().items[0];
+      assert.equal(memUpdated.text, 'gosta de chá preto');
+      assert.equal(memUpdated.id, memOriginal.id);
+      assert.equal(memUpdated.createdAt, memOriginal.createdAt);
+    });
+
+    it('H2 — Store vazio retorna mensagem honesta específica por ferramenta sem lançar exceção', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const lembreteTool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const notaTool = tools.find((t) => t.name === 'NOTA')!;
+      const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
+
+      assert.equal(
+        lembreteTool.execute('LEMBRETE_EDITAR', 'novo texto'),
+        'Não há nenhum lembrete para editar.'
+      );
+      assert.equal(
+        notaTool.execute('NOTA_EDITAR', 'novo texto'),
+        'Não há nenhuma nota para editar.'
+      );
+      assert.equal(
+        memoriaTool.execute('MEMORIA_EDITAR', 'novo texto'),
+        'Não há nada guardado para editar.'
+      );
+
+      scheduler.shutdown();
+    });
+
+    it('H3 — Integração com ReminderScheduler: timer não é duplicado nem cancelado, e fire() usa o texto atualizado', () => {
+      let osascriptArgs: string[] = [];
+      const fakeExecFile = ((cmd: string, args: string[], options: any, callback: any) => {
+        osascriptArgs = args;
+        const cb = typeof options === 'function' ? options : callback;
+        cb(null, '', '');
+      }) as any;
+
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+      const scheduler = new ReminderScheduler(store, fakeExecFile);
+      const { tools } = createMutatingTools(tmpDir, scheduler);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+
+      // 1. Cria lembrete agendado
+      tool.execute('LEMBRETE_CRIAR', 'reunião amanhã de tarde');
+      assert.equal(scheduler.activeTimersCount, 1);
+      const item = store.read().items[0];
+      assert.equal(scheduler.hasTimer(item.id), true);
+
+      // 2. Edita o lembrete
+      const res = tool.execute('LEMBRETE_EDITAR', 'reunião estratégica de produto');
+      assert.equal(res, 'Lembrete atualizado.');
+
+      // 3. Timer não foi duplicado nem cancelado
+      assert.equal(scheduler.activeTimersCount, 1);
+      assert.equal(scheduler.hasTimer(item.id), true);
+
+      // 4. Disparo do scheduler lê o item do store fresco e usa o texto atualizado
+      (scheduler as any).fire(item.id);
+      assert.ok(osascriptArgs.length > 0);
+      assert.ok(
+        osascriptArgs.some((arg: string) => arg.includes('reunião estratégica de produto')),
+        `Script osascript deve conter o texto atualizado. Args: ${JSON.stringify(osascriptArgs)}`
+      );
+      assert.equal(
+        osascriptArgs.some((arg: string) => arg.includes('reunião amanhã de tarde')),
+        false,
+        'Script osascript não deve conter o texto antigo'
+      );
+      assert.equal(scheduler.activeTimersCount, 0);
+
+      scheduler.shutdown();
+    });
+
+    it('H4 — preview() formula a pergunta correta e valida conteúdo ausente em todas as ferramentas', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const lembreteTool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const notaTool = tools.find((t) => t.name === 'NOTA')!;
+      const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
+
+      // Lembrete
+      assert.equal(
+        lembreteTool.preview('LEMBRETE_EDITAR', 'ligar para o médico'),
+        'Posso trocar o lembrete mais recente para: ligar para o médico?'
+      );
+      assert.throws(
+        () => lembreteTool.preview('LEMBRETE_EDITAR', null),
+        /Conteúdo ausente para editar lembrete\./
+      );
+      assert.throws(
+        () => lembreteTool.preview('LEMBRETE_EDITAR', '   '),
+        /Conteúdo ausente para editar lembrete\./
+      );
+      assert.throws(
+        () => lembreteTool.execute('LEMBRETE_EDITAR', null),
+        /Conteúdo ausente para editar lembrete\./
+      );
+
+      // Nota
+      assert.equal(
+        notaTool.preview('NOTA_EDITAR', 'comprar materiais'),
+        'Posso trocar a nota mais recente para: comprar materiais?'
+      );
+      assert.throws(
+        () => notaTool.preview('NOTA_EDITAR', null),
+        /Conteúdo ausente para editar nota\./
+      );
+      assert.throws(
+        () => notaTool.preview('NOTA_EDITAR', '   '),
+        /Conteúdo ausente para editar nota\./
+      );
+      assert.throws(
+        () => notaTool.execute('NOTA_EDITAR', null),
+        /Conteúdo ausente para editar nota\./
+      );
+
+      // Memória
+      assert.equal(
+        memoriaTool.preview('MEMORIA_EDITAR', 'seu nome é Rodrigo Sonsino'),
+        'Posso trocar essa memória para: seu nome é Rodrigo Sonsino?'
+      );
+      assert.throws(
+        () => memoriaTool.preview('MEMORIA_EDITAR', null),
+        /Conteúdo ausente para editar memória\./
+      );
+      assert.throws(
+        () => memoriaTool.preview('MEMORIA_EDITAR', '   '),
+        /Conteúdo ausente para editar memória\./
+      );
+      assert.throws(
+        () => memoriaTool.execute('MEMORIA_EDITAR', null),
+        /Conteúdo ausente para editar memória\./
+      );
+
+      scheduler.shutdown();
+    });
+
+    it('H5 — LEMBRETE_EDITAR em lembrete já notificado é recusado com mensagem honesta', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      tool.execute('LEMBRETE_CRIAR', 'tomar remédio');
+      const current = store.read();
+      current.items[0].notifiedAt = new Date().toISOString();
+      store.write(current);
+
+      const res = tool.execute('LEMBRETE_EDITAR', 'tomar remédio depois');
+      assert.equal(res, 'Esse lembrete já foi disparado, não é possível editar mais.');
+
+      // Confirma que o texto não foi alterado
+      const after = store.read();
+      assert.equal(after.items[0].text, 'tomar remédio');
+
+      scheduler.shutdown();
+    });
+
+    it('H6 — No-op em lembrete, nota e memória é tratado sem modificar dados', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const lembreteTool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const notaTool = tools.find((t) => t.name === 'NOTA')!;
+      const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
+
+      // Lembrete
+      lembreteTool.execute('LEMBRETE_CRIAR', 'comprar pão');
+      assert.equal(
+        lembreteTool.execute('LEMBRETE_EDITAR', 'comprar pão'),
+        'Isso já era o texto do lembrete.'
+      );
+
+      // Nota
+      notaTool.execute('NOTA_CRIAR', 'minha anotação');
+      assert.equal(
+        notaTool.execute('NOTA_EDITAR', 'minha anotação'),
+        'Isso já era o texto da nota.'
+      );
+
+      // Memória
+      memoriaTool.execute('MEMORIA_GUARDAR', 'prefere café');
+      assert.equal(
+        memoriaTool.execute('MEMORIA_EDITAR', '  PREFERE CAFÉ  '),
+        'Isso já era o texto guardado.'
+      );
+
+      scheduler.shutdown();
+    });
+
+    it('H6 — MEMORIA_EDITAR recusa duplicata contra outros itens da lista (mas permite editar pro próprio texto caindo em no-op)', () => {
+      const { tools } = createMutatingTools(tmpDir);
+      const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'memorias.json');
+
+      // Guarda dois itens
+      memoriaTool.execute('MEMORIA_GUARDAR', 'item um');
+      memoriaTool.execute('MEMORIA_GUARDAR', 'item dois');
+      assert.equal(store.read().items.length, 2);
+
+      // Tenta editar o mais recente (item dois) para o texto do item um -> recusado
+      const resDup = memoriaTool.execute('MEMORIA_EDITAR', 'ITEM UM');
+      assert.equal(resDup, 'Isso já estava guardado.');
+
+      // Verifica que o item dois continua inalterado
+      assert.equal(store.read().items[1].text, 'item dois');
+
+      // Edita para algo inédito -> aceito
+      const resOk = memoriaTool.execute('MEMORIA_EDITAR', 'item três');
+      assert.equal(resOk, 'Atualizado.');
+      assert.equal(store.read().items[1].text, 'item três');
+    });
+
+    it('Defesa em profundidade: LEMBRETE_EDITAR recusa pedidos de troca de horário disfarçados de edição de texto', () => {
+      const { tools, scheduler } = createMutatingTools(tmpDir);
+      const tool = tools.find((t) => t.name === 'LEMBRETE')!;
+      const store = new JsonStore<StoredItem>(tmpDir, 'lembretes.json');
+
+      tool.execute('LEMBRETE_CRIAR', 'comprar pão');
+
+      const frasesComHorario = [
+        'comprar pão amanhã de tarde',
+        'comprar pão amanhã às 10',
+        'comprar pão daqui a meia hora',
+        'comprar pão em 20 minutos',
+        'amanhã de noite comprar pão'
+      ];
+
+      for (const frase of frasesComHorario) {
+        const res = tool.execute('LEMBRETE_EDITAR', frase);
+        assert.equal(
+          res,
+          'Não dá pra mudar o horário editando o texto — apague e crie um lembrete novo com o horário certo.',
+          `Esperava recusa com defesa em profundidade para: "${frase}"`
+        );
+      }
+
+      // Confirma que o texto do lembrete permanece intacto
+      assert.equal(store.read().items[0].text, 'comprar pão');
+
+      scheduler.shutdown();
     });
   });
 });

@@ -18,10 +18,13 @@ export function isToolName(v: unknown): v is ToolName {
 /** Fase 5c — nomes de mutações suportadas pelo sistema e detecção. */
 export const MUTATION_NAMES = [
   'LEMBRETE_CRIAR',
+  'LEMBRETE_EDITAR',
   'LEMBRETE_APAGAR',
   'NOTA_CRIAR',
+  'NOTA_EDITAR',
   'NOTA_APAGAR',
   'MEMORIA_GUARDAR',
+  'MEMORIA_EDITAR',
   'MEMORIA_ESQUECER',
   'NENHUMA'
 ] as const;
