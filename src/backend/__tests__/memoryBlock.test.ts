@@ -69,9 +69,11 @@ describe('buildMemoryBlock (Fase 7 — H2)', () => {
     assert.ok(lines[1].startsWith('- memoria_4_'));
     assert.ok(lines[2].startsWith('- memoria_3_'));
 
-    // Verifica que nenhum item ficou cortado pela metade
-    for (const line of lines) {
-      assert.equal(line.length, 2 + 290 + `memoria_5_`.length);
+    // Verifica que nenhum item ficou cortado pela metade — compara contra o próprio texto
+    // original do item, não contra um número mágico (achado BAIXA, auditoria Hermes, 2026-09-26).
+    for (let i = 0; i < lines.length; i++) {
+      const originalItem = items[items.length - 1 - i]; // lines está em ordem mais recente primeiro
+      assert.equal(lines[i].length, '- '.length + originalItem.text.length);
     }
   });
 

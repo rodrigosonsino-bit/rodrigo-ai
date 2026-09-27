@@ -1,0 +1,88 @@
+Agora tenho todos os arquivos. Vou analisar sistematicamente.
+
+**LEITURA CONCLUÍDA.** Abaixo, auditoria adversarial do código.
+
+---
+
+ACHADO: `MUTATION_GATE` aceita "gravitacao" como falso positivo — correção do radical `grav` é incompleta
+
+EVIDÊNCIA: `src/backend/tools/mutatingTools.ts:239-240`
+```
+const MUTATION_GATE =
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar)\w*\b/;
+```
+
+O regex tem `grava|grave|gravou|gravand|gravar` — quando o texto normalizado é "gravitacao" (ex.: "gravitação universal"), o motor do regex casa `grav` contra o início e `\w*` consome "itacao" inteiro; `\b` após "gravitacao" confirma. Resultado: `mightBeMutation("A gravitação universal é uma lei da física")` → `true`.
+
+Isso é um falso positivo real que o plano (§4.1, achado novo BAIXA rodada 2) não prevê: o plano cita apenas "grave" (adjetivo), "gravidade" e "grávida" como palavras de colisão. "Gravitacao" (e por extensão "gravitar", "gravitacional") não estava na lista de preocupação, mas o mesmo mecanismo de regex `grav\w*` que gera "gravidade" como falso positivo gera "gravitacao" igualmente.
+
+Rode mentalmente contra o teste existente `mutatingTools.test.ts:84-86`:
+```
+const falsosEvitados = [
+  'Temos um problema de gravidade',
+  'Ela está grávida de três meses',
+  'A gravitação universal é uma lei da física'
+];
+```
+"Gravidade" após normalização fica "gravidade" — o regex casa `grav` + `e` (via alternativa `grave`), depois `\w*` consome "dade" → `true`. **Este teste específico não está verificando o resultado corretamente** — ele afirma que `mightBeMutation` deve ser `false` para "gravidade", mas o regex atual retorna `true`. O mesmo vale para "gravitacao" (não há teste separate, mas o resultado é idêntico).
+
+GRAVIDADE: ALTA (falso positivo em material de Teologia/Virtologia; custo de latência desnecessário em toda frase que mencione "gravitação"/"gravidade"/"gravitar", e potencialmente mais seria "gravidade" também sendo falso positivo)
+
+CONFIANÇA: 85% (o teste `falsosEvitados` deveria falhar para "gravidade" com o regex atual; só não percebi ao ler o teste porque estou rastreando manualmente)
+
+AÇÃO RECOMENDADA: Reescrever o segmento de `grav*` para não capturar "gravit*". Opção 1: tirar `gravou`/`gravand`/`gravar` do regex e deixar apenas `grava|grave` (cobre imperativo e presente, que são os cases reais de "pra você gravar"); opção 2: usar alternativas exatas com limites mais estritos, ex.: `grav(a|e|ou|and|ar)\b` — mas `gravand` ainda é "gravando" truncado que casa com "gravitando"? Não: "gravitando" teria `gravitandon`... só "grav" + "itando". A opção mais segura é remover o radical solto e confiar apenas nas formas de "memor*"—`memor` já cobre "memorize", "memória", "memorando", "memorou" (todos verbais ou substantive de "memória"); a menos que "gravar" seja usado frequentemente no corpus, remover `grav*` inteiramente seria a solução mais limpa.
+
+---
+
+ACHADO: Teste de `buildMemoryBlock` tem verificação de comprimento de linha com expressão redundante/confusa
+
+EVIDÊNCIA: `src/backend/__tests__/memoryBlock.test.ts:73-75`
+```
+for (const line of lines) {
+  assert.equal(line.length, 2 + 290 + `memoria_5_`.length);
+}
+```
+
+`2 + 290 + "memoria_5_".length` = `292 + 9` = `301`. Cada linha de teste tem `"- "` (2) + texto de 290 chars + `"memoria_5_"` (9) = 301 chars. O teste passa, mas a expressão `2 + 290 + "memoria_5_".length` é semanticamente redundante — primeiro calcula `292 + 9 = 301` (soma numérica) e depois compara com `line.length`. O objetivo (provar que o item não foi cortado pela metade) está atendido, mas a escrita sugere que o desenvolvedor escreveu `"memoria_5_".length` achando que seria concatenado ao invés de somado ao número, ou que o teste estava originalmente planeado como `2 + 290 + item.length` para cada item individualmente (o que falharia porque o texto base tem 290 chars + prefixo "memoria_X_" variável).
+
+Isso é um "cheiro" de teste, não um bug real — o assert está correto e passa. Mas dificulta leitura e manutenção, e se algum dia o texto base mudar de 290 para outro tamanho, a soma fixa `2 + 290 + ...` seria uma armadilha.
+
+GRAVIDADE: BAIXA
+
+CONFIANÇA: 95%
+
+AÇÃO RECOMENDADA: Opcional — reescrever como `assert.equal(line.length, 2 + 290 + "memoria_5_".length)` → mais claro como `assert.equal(line.length, "- ".length + 290 + "memoria_5_".length)` ou usar o próprio texto do item (`it.text.length + 2`) para não depender de número mágico. Não bloqueia auditoria.
+
+---
+
+RESUMO DOS DEMais PONTOS AUDITADOS COM VERIFICAÇÃO POSITIVA (sem achado):
+
+1. **Achado CRÍTICO 1 (parse_mutation_output extrai content para MEMORIA_GUARDAR):** CONFIRMADO. `worker.py:183` — `if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR"):` extrai content. `worker.py:113-116` — cabeçalho reescrito: "ou NENHUMA das seis" e "AÇÃO|conteúdo para *_CRIAR e MEMORIA_GUARDAR". O `test_mutation_parser.py` cobre MEMORIA_GUARDAR com 10 casos (linhas 122-171). ✓
+
+2. **Achado CRÍTICO 2 (frase MEMORIA_ESQUECER sem conflito com gate):** CONFIRMADO. `mutatingTools.ts:197` — frase exata "Posso apagar a memória mais recente?" sem cauda. Nenhum marcador de negação (`esquece`/`esquecer`/`cancela`) presente. `hasAffirmativeMarker("sim")` e `hasAffirmativeMarker("pode apagar")` retornam `true` conforme testado em `voice.test.ts:1610-1613`. ✓ O `mutatingTools.test.ts:645-648` também verifica a frase exata. ✓
+
+3. **buildMemoryBlock — dois tetos interagem corretamente:** `items.slice(-10).reverse()` primeiramente (mantém 10 mais recentes), depois loop com `totalChars + line.length > MAX_MEMORY_BLOCK_CHARS` corta itens longos antes de atingir teto de quantidade. Off-by-one: não há — `totalChars` acumula `line.length + 1` (o +1 é o `\n` que `join` injeta), condição `> MAX_MEMORY_BLOCK_CHARS` quebra antes de ultrapassar. Ordem correta: mais recentes primeiro, descartando antigas primeiro. ✓
+
+4. **MemoriaTool dedupe e selectMutatingToolByAction:** `mutatingTools.ts:211` — `store.items.some((it) => it.text.trim().toLowerCase() === normalized)` checa array inteiro. `selectMutatingToolByAction("MEMORIA_GUARDAR", tools)` deriva prefixo "MEMORIA" e casa com `MemoriaTool.name = 'MEMORIA'`. `createMutatingTools()` devolve `{ tools: [..., memoriaTool], scheduler, memoriaStore }`. ✓
+
+5. **SessionManager — ordem de parâmetros:** `sessionManager.ts:208-226` — `memoriaStore: JsonStore<StoredItem> | null = null` é o ÚLTIMO parâmetro, sem deslocar `retriever`, `tools`, `mutatingTools`. Todos os call sites existentes (ex.: `voice.test.ts:86-94`) passam `memoriaStore` como último argumento, compatível. ✓
+
+6. **SessionManager — try/catch na leitura de memória:** `sessionManager.ts:585-593` — try/catch envolve EXATAMENTE `this.memoriaStore.read().items`; erro é logado com `console.error` e `memoryItems = []` fallback. `buildMemoryBlock([])` retorna `''`. O `try/catch` externo de `runTurn` não é atingido por erro de memória, apenas por outros erros. ✓
+
+7. **SessionManager — injeção do memoryBlock para os 4 rótulos:** `sessionManager.ts:596-603` — `memoryBlock` é injetado incondicionalmente no `systemPrompt` para GERAL/TEOLOGIA/VIRTOLOGIA/AMBIGUO. `voice.test.ts:1563-1596` testa os 4 rótulos explicitamente. ✓
+
+8. **voiceRuntime.ts — scheduler preservado:** `voiceRuntime.ts:95` — desestrutura corretamente `const { tools: mutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir)`. `reminderScheduler.bootstrap()` em linha 99, `reminderScheduler.shutdown()` na função `shutdown` (linha 112). Sem regressão. ✓
+
+9. **MUTATION_GATE — formas verbais restritas de "gravar":** `\b(grava|grave|gravou|gravand|gravar)\w*\b` está no código (`mutatingTools.ts:240`). Radicais `memor` e `grava|grave|gravou|gravand|gravar` presentes. ✓ (ver achado principal sobre "gravitacao" acima — a correção está aplicada mas é insuficiente para o caso "gravitacao")
+
+10. **Exemplos contrastivos no DETECT_MUTATION_SYSTEM_PROMPT cobrem as 3 colisões:** `worker.py:139-147`:
+   - LEMBRETE_CRIAR vs MEMORIA_GUARDAR: "Lembra de ligar pro dentista amanhã" vs "Lembra que eu prefiro respostas curtas" + "Guarda que meu nome é Rodrigo" + "Anota que eu sou alérgico a amendoim" (3 exemplos MEMORIA_GUARDAR)
+   - NOTA_CRIAR vs MEMORIA_GUARDAR: "Anota que a reunião de terça foi produtiva" (NOTA) vs "Anota que eu sou alérgico a amendoim" (MEMORIA — mesmo verbo "anota")
+   - LEMBRETE_APAGAR vs MEMORIA_ESQUECER: "Apaga o lembrete que eu acabei de pedir" vs "Apaga essa memória sobre mim" + "Apaga o que você guardou sobre mim"
+   Todos presentes. ✓
+
+---
+
+VEREDITO: **APROVADO COM RESSALVAS**
+
+JUSTIFICATIVA: O código resolve corretamente os dois achados CRÍTICOS da rodada 1 (extração de content para MEMORIA_GUARDAR no worker.py, frase de confirmação de MEMORIA_ESQUECER sem conflito com o gate) e todos os demais itens auditados da v2 (teto duplo em buildMemoryBlock, try/catch de memória, ordem de parâmetros, injeção em 4 rótulos, scheduler preservado, exemplos contrastivos completos). A deduplicação de MemoriaTool, a integração com createMutatingTools() e os testes de integração (H3/H4/H5/H6) estão implementados e cobertos corretamente. O único achado pendente é o `MUTATION_GATE` aceitar "gravitacao" (e potencialmente "gravidade" — confirme rodando o teste) como falso positivo: a restrição das formas verbais de "gravar" no regex (`grava|grave|gravou|gravand|gravar`) está aplicada, mas não bloqueia o radical "gravit*" que aparece em "gravitação"/"gravidade"/"gravitar", que são palavras legítimas de Teologia/Virtologia e não deveriam acionar a detecção. Recomenda-se ajuste no regex antes de promover para produção em ambientes onde o corpus teológico é ativo.
