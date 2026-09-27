@@ -1,0 +1,174 @@
+Relatório de auditoria adversarial do plano de implementação da **Fase 9 — Recorrência de Lembretes (`docs/phase-9-v1.md`)**.
+
+---
+
+### ACHADO 1: Loop infinito no cálculo da próxima ocorrência semanal em `computeNextOccurrence`
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:130-134`:
+  > `// implementação: mapa de nomes de dia da semana -> índice 0-6 (domingo=0, igual a Date.getDay()), calcula candidato pra hoje com a hora pedida; se already passou (ou não é o dia certo pro caso semanal), avança em incrementos de 1 dia (diário) ou 7 dias (semanal) até achar a primeira ocorrência estritamente no futuro.`
+- **GRAVIDADE**: CRÍTICA
+- **CONFIANÇA**: 100%
+- **AÇÃO RECOMENDADA**: Substituir o algoritmo em prosa por uma fórmula explícita de calendário. Se hoje for quarta-feira (`getDay() === 3`) e o usuário pedir "toda segunda às 9h" (`weekday === 1`), somar 7 dias iterativamente a partir de quarta-feira gerará apenas quartas-feiras sucessivas, entrando em loop infinito (`while (candidate.getDay() !== rule.weekday)`) e travando o *event loop* do Node.js a 100% de CPU. A regra semanal deve calcular o salto exato em dias:
+  ```ts
+  let daysAhead = (rule.weekday - now.getDay() + 7) % 7;
+  if (daysAhead === 0 && candidate <= now) daysAhead = 7;
+  candidate.setDate(now.getDate() + daysAhead);
+  ```
+
+---
+
+### ACHADO 2: Variável `current` inexistente no pseudocódigo de `bootstrap()` provoca `ReferenceError` na inicialização
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:211-212` vs `src/backend/tools/reminderScheduler.ts:32`:
+  > No plano:
+  > ```ts
+  > if (current.recurrence) {
+  >   const nextDueAt = computeNextOccurrence(current.recurrence, now);
+  > ```
+  > No código real:
+  > ```ts
+  > for (const item of items) {
+  > ```
+- **GRAVIDADE**: ALTA
+- **CONFIANÇA**: 100%
+- **AÇÃO RECOMENDADA**: Corrigir o identificador no pseudocódigo de `bootstrap()` de `current.recurrence` para `item.recurrence`. No escopo desse loop, a variável do item iterado é `item`. Do jeito que está no plano, se o servidor reiniciar com qualquer lembrete recorrente vencido há mais de 24h, o processo lançará `ReferenceError: current is not defined`, abortando a inicialização do `ReminderScheduler` e derrubando o servidor de voz (`voiceRuntime.ts:74`).
+
+---
+
+### ACHADO 3: Referência à função inexistente `formatHourSpoken()` em `relativeTimeParser.ts`
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:148-150` vs `src/backend/tools/relativeTimeParser.ts:220-226`:
+  > No plano:
+  > ```ts
+  > const hora = formatHourSpoken(rule.hour, rule.minute); // reaproveita lógica de formatação de
+  >                                                         // horário por extenso já usada em
+  >                                                         // formatHumanRelative para "amanhã às X horas"
+  > ```
+  > No código real de `relativeTimeParser.ts`: nenhuma função chamada `formatHourSpoken` existe. O trecho de "amanhã às X horas" é montado de forma inline simples:
+  > ```ts
+  > return `amanhã às ${hours} horas`;
+  > ```
+- **GRAVIDADE**: ALTA
+- **CONFIANÇA**: 100%
+- **AÇÃO RECOMENDADA**: O autor do plano assumiu que existia um helper modular de horas faladas. O plano precisa fornecer a implementação concreta de formatação falada das horas e minutos, cobrindo também os períodos do dia prometidos no escopo (ex.: 09:00 -> "de manhã", 14:00 -> "de tarde", 19:00 -> "de noite"), para que o retorno "vou te avisar toda segunda de manhã" (§3, linha 69) não vire "vou te avisar toda segunda às 9 horas".
+
+---
+
+### ACHADO 4: Regexes de `parseRecurrence` (§4.2) falham nos próprios exemplos centrais do plano
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:117-124`:
+  1. Regex semanal: `/toda\s+(segunda|terça|quarta|quinta|sexta|sábado|domingo)...`
+     - O plano declara em §0.1 (linha 9): `"todo domingo de manhã"`. Como domingo e sábado são masculinos em português ("todo domingo", "todo sábado"), o regex exige "toda" e não faz match no próprio exemplo do escopo.
+  2. Regex diário com hora explícita: `/todo\s+dia\s+(?:a|à)s?\s+(\d{1,2})\s*h(?:oras?)?/`
+     - O objetivo em §1 (linha 17) é: `"me lembra todo dia às 8 da manhã de tomar o remédio"`. "8 da manhã" não possui "h" nem "horas", falhando na correspondência obrigatória `\s*h(?:oras?)?`.
+  3. Período do dia: `/todo\s+dia\s+(?:de\s+)?tarde/`
+     - Falha para "todo dia à tarde" ou "todo dia a tarde" (ao contrário de `relativeTimeParser.ts:139`, que aceita `(?:(?:a|à|de)\s+)?tarde`).
+  4. Minutos:
+     - Não há suporte a minutos em hora explícita (ex.: "todo dia às 8h30" ou "todo dia às 8 e meia"). O regex consome apenas a hora inteira, deixando os minutos vazarem para o texto residual da tarefa ("30 de tomar o remédio").
+- **GRAVIDADE**: ALTA
+- **CONFIANÇA**: 98%
+- **AÇÃO RECOMENDADA**: Ajustar os regexes em §4.2 para:
+  - Aceitar gênero gramatical correto: `/(?:todo|toda)\s+(segunda|terça|quarta|quinta|sexta|sábado|domingo|dia)...`
+  - Aceitar "da manhã" após o dígito da hora e capturar minutos opcionais (`(\d{1,2})(?:[:h](\d{2}))?` ou parsing com `parseNumberOrWord`).
+  - Alinhar com as preposições já tratadas na Fase 6 (`(?:(?:a|à|de|pela)\s+)?`).
+
+---
+
+### ACHADO 5: Contradição interna sobre comportamento em downtime para atrasos inferiores a 24 horas
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:241-244` e `§7:294-297` vs `docs/phase-9-v1.md:210-221` e `src/backend/tools/reminderScheduler.ts:44-58`:
+  > Em §4.4 (linhas 241-244): *"Contrato explícito, sem decisão em aberto: itens recorrentes vencidos NUNCA recebem notifiedAt — sempre recebem um dueAt novo no futuro, sempre com console.warn, nunca disparam popup pras ocorrências perdidas."*
+  > E em §7: *"bootstrap() nunca dispara ocorrências perdidas, só pula direto pra próxima futura"*.
+  > No entanto, o pseudocódigo em §4.4 altera APENAS o bloco `else` (vencido há mais de 24h). O bloco `diffMs <= OVERDUE_CUTOFF_MS` permanece intocado no código real:
+  > ```ts
+  > if (diffMs <= OVERDUE_CUTOFF_MS) {
+  >   const lateTimer = setTimeout(() => {
+  >     this.timers.delete(item.id);
+  >     this.notify(item, { late: true });
+  >   }, lateDelayMs);
+  > ```
+- **GRAVIDADE**: MÉDIA
+- **CONFIANÇA**: 95%
+- **AÇÃO RECOMENDADA**: Resolver a contradição entre a prosa e o código. Se a máquina ficou suspensa por 30 minutos e ligou às 08:30 (com lembrete de 08:00), o código atual dispara um popup "Lembrete (atrasado)" e então reagenda para amanhã via `notify()`. Se a regra é que lembretes recorrentes **nunca** disparam popup de ocorrência perdida no boot (nem mesmo <= 24h), o ramo `diffMs <= OVERDUE_CUTOFF_MS` precisa bifurcar para itens com `recurrence` também pularem direto para o próximo horário futuro sem disparar `lateTimer`. Se a intenção é disparar o popup de atraso quando <= 24h, o texto de §4.4 e §7 deve ser corrigido para deixar isso explícito, restringindo o pulo silencioso apenas para atrasos > 24h.
+
+---
+
+### ACHADO 6: Omissão de pseudocódigo e quebra de tipagem em `LembreteTool` (`lastParsed`, `isDuplicate` e persistência)
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:137-141` vs `src/backend/tools/mutatingTools.ts:17, 111-130`:
+  1. `this.lastParsed` está tipado como `{ raw: string; parsed: ParsedRelativeTime } | null`. O retorno de `parseRecurrence` é `ParsedRecurrence`. Se o `preview()` armazenar o resultado da recorrência em `this.lastParsed`, o compilador TypeScript acusará erro de tipagem.
+  2. A persistência em `LembreteTool.execute('LEMBRETE_CRIAR')` (`mutatingTools.ts:123-129`) dá `store.items.push({...})` sem incluir o campo `recurrence`. Sem pseudocódigo explícito, o implementador pode esquecer de persistir `recurrence: parsed.recurrence`, fazendo o lembrete disparar apenas uma vez e nunca se reagendar.
+  3. A deduplicação temporal em `mutatingTools.ts:112-117` verifica apenas `last.text === finalText && (last.dueAt ?? null) === (dueAt ?? null) && last.notifiedAt === null`. Se houver um lembrete único com o mesmo texto e horário que a primeira ocorrência do recorrente, o recorrente é indevidamente barrado como duplicata ("Isso já estava salvo."), pois `isDuplicate` não compara `recurrence`.
+- **GRAVIDADE**: MÉDIA
+- **CONFIANÇA**: 95%
+- **AÇÃO RECOMENDADA**: Adicionar uma subseção técnica em §4 com o pseudocódigo das alterações em `LembreteTool` (`mutatingTools.ts`), atualizando a tipagem de `lastParsed`, incluindo `recurrence` no `store.items.push` e ajustando `isDuplicate` para levar em conta `last.recurrence`.
+
+---
+
+### ACHADO 7: Lacuna de especificação na defesa em profundidade de `LEMBRETE_EDITAR` (§7 / H7)
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:298-303` vs `src/backend/tools/mutatingTools.ts:80-84`:
+  > Em `mutatingTools.ts`:
+  > ```ts
+  > const wouldScheduleTime = parseRelativeTime(trimmed).dueAt !== null;
+  > if (wouldScheduleTime) {
+  >   return 'Não dá pra mudar o horário editando o texto — apague e crie um lembrete novo com o horário certo.';
+  > }
+  > ```
+- **GRAVIDADE**: MÉDIA
+- **CONFIANÇA**: 90%
+- **AÇÃO RECOMENDADA**: O plano cita o risco em §7 e exige o critério H7, mas não fornece a linha de código exata a ser inserida em `LEMBRETE_EDITAR` nem a mensagem de retorno esperada. Deve-se definir explicitamente se a mensagem é a mesma de troca de horário ou se haverá mensagem específica (ex.: "Não dá pra mudar a recorrência editando o texto..."), além de detalhar a condição:
+  ```ts
+  const wouldBeRecurrent = parseRecurrence(trimmed).recurrence !== null;
+  if (wouldScheduleTime || wouldBeRecurrent) {
+    return 'Não dá pra mudar o horário editando o texto — apague e crie um lembrete novo com o horário certo.';
+  }
+  ```
+
+---
+
+### ACHADO 8: Contradição entre normalização NFD com remoção de acentos e regexes com caracteres acentuados
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:116`:
+  > `* Padrões (case-insensitive, mesma normalização NFD de mightBeMutation):`
+  > Logo abaixo, os regexes trazem: `(segunda|terça|...|sábado)`, `(a|à)s?`, `manh[ãa]`.
+- **GRAVIDADE**: BAIXA
+- **CONFIANÇA**: 95%
+- **AÇÃO RECOMENDADA**: Remover a menção à "normalização NFD de `mightBeMutation`". Em `mightBeMutation`, `replace(/[\u0300-\u036f]/g, '')` remove diacríticos (transformando "terça" em "terca" e "sábado" em "sabado"). Se o parser aplicar esse pré-processamento, os regexes com `ç`, `á` e `à` nunca encontrarão correspondência. O parsing de `relativeTimeParser.ts` opera de forma insensível a maiúsculas (`/i`), mas preservando acentos (como em `amanh[ãa]`).
+
+---
+
+### ACHADO 9: Ausência de assinatura, export e definição formal dos módulos de `computeNextOccurrence`
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:190-194` e `§5`:
+  > O plano indica que `computeNextOccurrence` é compartilhada entre `relativeTimeParser.ts` e `reminderScheduler.ts`, mas não detalha sua assinatura, seus tipos nem as importações necessárias.
+- **GRAVIDADE**: BAIXA
+- **CONFIANÇA**: 90%
+- **AÇÃO RECOMENDADA**: Declarar formalmente em §4 a assinatura:
+  ```ts
+  export function computeNextOccurrence(rule: RecurrenceRule, now?: Date): string;
+  ```
+  E especificar que `relativeTimeParser.ts` deve importar `RecurrenceRule` de `../storage/jsonStore.js`, e `reminderScheduler.ts` deve importar `computeNextOccurrence` de `./relativeTimeParser.js`.
+
+---
+
+### ACHADO 10: Ineficiência $O(n^2)$ e asserção não-nula insegura em `bootstrap()`
+- **EVIDÊNCIA**: `docs/phase-9-v1.md:234-237`:
+  > ```ts
+  > for (const r of recurringReschedules) {
+  >   const it = fresh.items.find((i) => i.id === r.id)!;
+  >   this.schedule({ id: it.id, text: it.text, dueAt: r.nextDueAt });
+  > }
+  > ```
+- **GRAVIDADE**: BAIXA
+- **CONFIANÇA**: 85%
+- **AÇÃO RECOMENDADA**: Realizar o agendamento diretamente no loop `for (const it of fresh.items)` anterior (ou usando um `Map`), dispensando a busca linear `find()` dentro do loop de `recurringReschedules` e eliminando o uso do operador `!`.
+
+---
+
+### VERIFICAÇÃO DOS ITENS ESPECÍFICOS SOLICITADOS
+
+1. **`notify()` bifurcado por recorrência (§4.4)**: A estrutura de callback do `execFile` e o `try/catch` são consistentes com o código atual de `reminderScheduler.ts`. Contudo, ao usar `new Date()` como referência para reagendamento, se um timer disparar com alguns milissegundos de antecedência em relação ao horário exato agendado devido a jitter de relógio, `computeNextOccurrence` poderá calcular a ocorrência de hoje novamente em vez da próxima. Recomenda-se avançar a partir de `Math.max(Date.now(), new Date(current.dueAt).getTime())`.
+2. **`bootstrap()` com duas coleções**: Há o erro crítico de variável não declarada (`current.recurrence` em vez de `item.recurrence`, Achado 2), além da contradição no tratamento de itens vencidos há <= 24h (Achado 5). Entre `expiredIds` e `recurringReschedules` dentro do bloco `else`, a separação por `if/else` impede duplicações mútuas.
+3. **`computeNextOccurrence()` e importações**: As dependências entre módulos formam um grafo acíclico (`jsonStore` -> `relativeTimeParser` -> `reminderScheduler` -> `mutatingTools`), sem ciclo. No entanto, o plano omitiu a assinatura e as importações (Achado 9).
+4. **Cálculo da próxima ocorrência semanal**: Algoritmo falho com risco de loop infinito (Achado 1).
+5. **Defesa em profundidade de `LEMBRETE_EDITAR`**: Omissão do código concreto e da mensagem a ser retornada (Achado 7).
+6. **`formatRecurrenceHuman()` e `formatHourSpoken()`**: `formatHourSpoken()` é inexistente no código real (Achado 3).
+7. **"MUTATION_NAMES/worker.py não mudam"**: Embora a premissa seja válida para o classificador LLM, comandos como "todo dia às 8h tomar remédio" (sem "lembra" ou "anota") não batem no `MUTATION_GATE` em Node (`mutatingTools.ts:337-347`) e serão engolidos pelo fallback de chat geral. Além disso, se o usuário disser "corrige o lembrete pra toda segunda às 9h", o `worker.py` pode classificar como `NENHUMA` antes mesmo de atingir a defesa em profundidade em Node.
+8. **Interação com `LEMBRETE_APAGAR`**: Confirmada como verdadeira no código real. `execute('LEMBRETE_APAGAR')` remove o item via `pop()` e chama `this.scheduler.cancel(removed.id)`, cancelando o timer em memória e persistindo o store limpo sem necessidade de alteração de código.
+
+---
+
+VEREDITO: **REJEITADO**  
+JUSTIFICATIVA: O plano contém um erro algorítmico crítico que provoca loop infinito e travamento de CPU no cálculo de recorrência semanal, uma referência a variável inexistente (`current`) que causa `ReferenceError` na inicialização do servidor com lembretes atrasados, dependência de uma função inexistente (`formatHourSpoken`) e regexes centrais que falham nas próprias frases de exemplo do escopo. O documento precisa ser revisado (v2) antes de qualquer implementação.
