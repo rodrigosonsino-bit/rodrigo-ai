@@ -44,7 +44,7 @@ mesmo padrão que toda extensão de vocabulário de confirmação já seguiu nes
 - Substituir o `text` do item mais recente, preservando `id`/`createdAt`/`dueAt`/`notifiedAt`.
 - Confirmação de voz obrigatória, reutilizando a Camada 0/1 sem mudança — a Camada 2
   (`AFFIRMATIVE_MARKERS`) ganha os marcadores específicos de edição (§4.2, corrigindo o achado 1).
-- **Corrigindo o achado 6 (MÉDIA) da rodada 1** — edição de um lembrete que já disparou
+- **Corrigindo o achado 7 (MÉDIA) da rodada 1** — edição de um lembrete que já disparou
   (`notifiedAt !== null`): recusada com mensagem honesta, não silenciosamente aceita como se o
   lembrete ainda fosse disparar.
 
@@ -75,15 +75,51 @@ específicos, mesmo padrão de bigramas já usado pra `pode criar`/`pode apagar`
 
 ```ts
 // sessionManager.ts — AFFIRMATIVE_MARKERS ganha, ao lado de 'pode criar', 'pode apagar', etc.:
-'pode trocar', 'pode editar', 'pode corrigir',
+'pode trocar', 'pode editar', 'pode corrigir', 'pode ser', 'pode mudar',
 ```
 
 Isto significa que **`src/backend/voice/sessionManager.ts` muda nesta fase**, ao contrário do que
 a v1 afirmava — corrigido em §5 abaixo.
 
+**Achado novo 4 (MÉDIA, rodada 2)**, duas partes:
+1. `'pode ser'`/`'pode mudar'` adicionados acima — respostas afirmativas coloquiais igualmente
+   naturais à pergunta "Posso trocar...?" que os três bigramas originais não cobriam.
+2. `CONFIRM_YES_EXACT` (Camada 0, `sessionManager.ts:36-47`) também ganha `'pode trocar'`,
+   `'pode editar'`, `'pode corrigir'` — sem isso, essas três respostas resolvem só na Camada 1
+   (chamada ao worker MLX, ~3.2s de latência local) em vez de na Camada 0 (0ms, resolução
+   síncrona), mesma otimização que `'pode confirmar'` já tem:
+
+```ts
+// sessionManager.ts — CONFIRM_YES_EXACT ganha, ao lado de 'pode confirmar':
+'pode trocar', 'pode editar', 'pode corrigir'
+```
+
 **Corrigindo o achado 4 (ALTA) da rodada 1** — deduplicação e no-op não tratados: a v1 não
 especificava o que acontece se o novo texto for igual a outro item já existente (memória) ou ao
-próprio texto atual (qualquer um dos três). Corrigido, uniformemente:
+próprio texto atual (qualquer um dos três). Corrigido, uniformemente.
+
+**`preview()` — achado novo 2 (ALTA, rodada 2): a v2 anterior omitiu por completo o pseudocódigo
+de `preview()`, deixando só `execute()`. Documento tem que ser autocontido — reintroduzido aqui:**
+
+```ts
+// LembreteTool.preview():
+if (kind === 'LEMBRETE_EDITAR') {
+  if (!content || !content.trim()) throw new Error('Conteúdo ausente para editar lembrete.');
+  return `Posso trocar o lembrete mais recente para: ${content.trim()}?`;
+}
+// NotaTool.preview():
+if (kind === 'NOTA_EDITAR') {
+  if (!content || !content.trim()) throw new Error('Conteúdo ausente para editar nota.');
+  return `Posso trocar a nota mais recente para: ${content.trim()}?`;
+}
+// MemoriaTool.preview():
+if (kind === 'MEMORIA_EDITAR') {
+  if (!content || !content.trim()) throw new Error('Conteúdo ausente para editar memória.');
+  return `Posso trocar essa memória para: ${content.trim()}?`;
+}
+```
+
+**`execute()`:**
 
 ```ts
 // LembreteTool.execute(), ramo LEMBRETE_EDITAR:
@@ -100,6 +136,17 @@ if (kind === 'LEMBRETE_EDITAR') {
   if (current.notifiedAt) return 'Esse lembrete já foi disparado, não é possível editar mais.';
 
   const trimmed = content.trim();
+
+  // Achado novo 3 (MÉDIA, rodada 2) — defesa em profundidade: não confiar só no prompt do
+  // worker pra barrar pedidos de troca de horário disfarçados de edição de texto ("troca o
+  // lembrete pra: reunião amanhã às dez"). O modelo local é 4B quantizado — já erra em outros
+  // pontos do projeto (H-mutação nunca passou de 76,5%, Fase 5c) — então o backend TypeScript
+  // precisa da própria checagem, não depender 100% do LLM seguir a instrução do prompt (§4.3).
+  const wouldScheduleTime = parseRelativeTime(trimmed).dueAt !== null;
+  if (wouldScheduleTime) {
+    return 'Não dá pra mudar o horário editando o texto — apague e crie um lembrete novo com o horário certo.';
+  }
+
   if (current.text === trimmed) return 'Isso já era o texto do lembrete.'; // no-op, achado 4
 
   store.items[idx] = { ...current, text: trimmed };
@@ -109,8 +156,10 @@ if (kind === 'LEMBRETE_EDITAR') {
 ```
 
 ```ts
-// NotaTool.execute(), ramo NOTA_EDITAR: mesmo formato, sem a checagem de notifiedAt (notas não
-// têm); no-op se current.text === trimmed -> 'Isso já era o texto da nota.'
+// NotaTool.execute(), ramo NOTA_EDITAR: mesmo formato de LembreteTool (sem a checagem de
+// notifiedAt nem de parseRelativeTime — notas não têm horário, então a defesa em profundidade
+// contra horário não se aplica); no-op se current.text === trimmed -> 'Isso já era o texto da
+// nota.'; sucesso -> 'Nota atualizada.'
 
 // MemoriaTool.execute(), ramo MEMORIA_EDITAR: mesmo formato, MAIS a checagem de duplicata contra
 // os OUTROS itens (achado 4 — memória é lista estática de fatos únicos, mesmo cuidado que o
@@ -139,7 +188,10 @@ if (kind === 'MEMORIA_EDITAR') {
 }
 ```
 
-**Corrigindo o achado 9 (BAIXA) da rodada 1** — mensagens de store vazio uniformizadas e
+`LembreteTool` precisa importar `parseRelativeTime` de `relativeTimeParser.ts` — já importado
+hoje pra `LEMBRETE_CRIAR` (`mutatingTools.ts`), reaproveitado aqui sem import novo.
+
+**Corrigindo o achado 10 (BAIXA) da rodada 1** — mensagens de store vazio uniformizadas e
 gramaticalmente corretas por ferramenta (não uma fórmula genérica "Não há nenhum X"):
 - Lembrete: `'Não há nenhum lembrete para editar.'`
 - Nota: `'Não há nenhuma nota para editar.'`
@@ -190,7 +242,7 @@ Na verdade, corrige o lembrete: é café solúvel, não em pó -> LEMBRETE_EDITA
 Muda esse lembrete pra sexta em vez de quinta -> NENHUMA
 ```
 
-**Corrigindo o achado 5 (MÉDIA) da rodada 1** — faltava exemplo de `NOTA_EDITAR` e um negativo
+**Corrigindo o achado 6 (MÉDIA) da rodada 1** — faltava exemplo de `NOTA_EDITAR` e um negativo
 pro verbo "trocar" (muito comum em português fora do contexto de mutação — "trocar de assunto",
 "trocar de roupa"):
 
@@ -211,7 +263,7 @@ Na verdade, corrige isso que eu falei: meu nome é Rodrigo Sonsino -> MEMORIA_ED
 Vamos trocar de assunto agora -> NENHUMA
 ```
 
-**Corrigindo o achado 8 (BAIXA) da rodada 1** — `DETECT_CONFIRMATION_SYSTEM_PROMPT`
+**Corrigindo o achado 9 (BAIXA) da rodada 1** — `DETECT_CONFIRMATION_SYSTEM_PROMPT`
 (`worker.py`) ainda descreve a pergunta que o usuário ouviu como sendo só "criar ou apagar algo".
 Atualizado pra mencionar editar também:
 
@@ -223,8 +275,22 @@ DETECT_CONFIRMATION_SYSTEM_PROMPT = (
 )
 ```
 
-`parse_mutation_output()`: inalterado da v1 — o ramo que extrai `content` já incluía os três
-`*_EDITAR` corretamente (não era o problema; o problema era só o cabeçalho, achado 2).
+**`parse_mutation_output()` — achado novo 1 (ALTA, rodada 2): a v2 anterior só disse em prosa
+"inalterado da v1, já cobria" sem reproduzir o código — mas a v1 nunca foi implementada
+(REJEITADA), e um documento de plano tem que ser autocontido. Sem este bloco explícito aqui, o
+código real de produção hoje (`worker.py`) não extrai `content` pra nenhum `*_EDITAR`, e a
+implementação sairia quebrada por omissão de leitura, não por erro de lógica.** Reproduzido:
+
+```python
+if action not in MUTATION_NAMES:
+    return ("NENHUMA", None)
+if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR",
+              "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR"):
+    if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
+        return ("NENHUMA", None)
+    return (action, content)
+return (action, None)
+```
 
 ### 4.4 `MUTATION_GATE` (`mutatingTools.ts`) — formas fechadas, sem `\w*` aberto nos termos novos
 
@@ -248,12 +314,20 @@ mesmo problema nas formas novas, não reabre uma discussão já resolvida sobre 
 
 ```
 src/shared/voiceProtocol.ts               MUTATION_NAMES ganha LEMBRETE_EDITAR/NOTA_EDITAR/MEMORIA_EDITAR
-src/backend/tools/mutatingTools.ts        3 novos ramos preview()/execute() (com checagem de
-                                           notifiedAt, no-op e dedupe); MUTATION_GATE corrigido (§4.4)
+src/backend/tools/mutatingTools.ts        3 novos ramos preview() E execute() (com checagem de
+                                           notifiedAt, defesa contra horário via parseRelativeTime,
+                                           no-op e dedupe); MUTATION_GATE corrigido (§4.4)
 src/backend/voice/sessionManager.ts       AFFIRMATIVE_MARKERS ganha 'pode trocar'/'pode editar'/
-                                           'pode corrigir' (achado 1, CRÍTICA — NOVO nesta v2,
-                                           a v1 afirmava incorretamente que este arquivo não mudava)
-scripts/worker/worker.py                  MUTATION_NAMES, DETECT_MUTATION_SYSTEM_PROMPT (cabeçalho
+                                           'pode corrigir'/'pode ser'/'pode mudar' (achado 1 CRÍTICA
+                                           + achado novo 4 MÉDIA — NOVO nesta v2, a v1 afirmava
+                                           incorretamente que este arquivo não mudava);
+                                           CONFIRM_YES_EXACT ganha 'pode trocar'/'pode editar'/
+                                           'pode corrigir' (achado novo 4 — resolve na Camada 0,
+                                           sem chamar o worker MLX, ~3.2s de latência evitada)
+scripts/worker/worker.py                  MUTATION_NAMES, parse_mutation_output() (extração de
+                                           content pros 3 *_EDITAR — achado novo 1, reproduzido
+                                           explicitamente em §4.3, não só citado em prosa),
+                                           DETECT_MUTATION_SYSTEM_PROMPT (cabeçalho
                                            corrigido com MEMORIA_GUARDAR, exemplo de horário
                                            removido, NOTA_EDITAR e negativo de "trocar" incluídos),
                                            DETECT_CONFIRMATION_SYSTEM_PROMPT (menciona "editar")
@@ -264,7 +338,7 @@ src/backend/__tests__/mutatingTools.test.ts  testes novos para os 3 ramos EDITAR
                                            preservados, store vazio, no-op, dedupe de memória,
                                            lembrete já notificado recusado, timer do
                                            ReminderScheduler não duplicado nem cancelado — teste
-                                           de integração corrigido para este arquivo, achado 7 da
+                                           de integração corrigido para este arquivo, achado 8 da
                                            rodada 1, não voice.test.ts como a v1 apontava)
 src/backend/__tests__/voice.test.ts       teste de regressão: "pode trocar"/"pode editar"/
                                            "pode corrigir" não são vetados por hasAffirmativeMarker
@@ -319,7 +393,9 @@ assinatura).
 - Precedente de arquitetura reaproveitado: `docs/phase-5c-v9.md`, `docs/phase-7-v2.md` §4.3/§4.4.
 - Precedente do risco de `MUTATION_GATE`: `docs/audits/phase-7-codigo-hermes-2026-09-26.log`.
 
-## 9. Achados da rodada 1 (agy) e como foram resolvidos
+## 9. Achados das duas rodadas de auditoria (agy) e como foram resolvidos
+
+### Rodada 1 (10 achados, veredito REJEITADO)
 
 | # | Achado | Gravidade | Resolução no v2 | Seção |
 |---|---|---|---|---|
@@ -328,7 +404,18 @@ assinatura).
 | 3 | Exemplo contrastivo ensina o modelo a tratar mudança de dia como edição de texto — corromperia `dueAt` silenciosamente | ALTA | Exemplo trocado por correção estritamente textual; exemplo negativo de horário → `NENHUMA`; regra explícita no corpo do prompt | §4.3 |
 | 4 | `MEMORIA_EDITAR` sem tratamento de duplicata contra outros itens nem no-op | ALTA | Checagem de no-op e de duplicata contra os outros itens adicionada às três ferramentas | §4.2 |
 | 5 | `MUTATION_GATE` com `\w*` aberto gera falsos positivos ("edital", "trocadilho") | MÉDIA | Formas novas isoladas num grupo fechado, sem `\w*` de cauda; verificado em Node | §4.4 |
-| 6 | Lembrete já notificado editado silenciosamente, sem nunca mais disparar | MÉDIA | Edição recusada com mensagem honesta se `notifiedAt !== null` | §4.2 |
-| 7 | §5 apontava o teste de integração do scheduler pro arquivo errado (`voice.test.ts`) | BAIXA | Corrigido para `mutatingTools.test.ts`, mesmo padrão da Fase 6 | §5 |
-| 8 | `DETECT_CONFIRMATION_SYSTEM_PROMPT` não menciona "editar" | BAIXA | Texto atualizado | §4.3 |
-| 9 | Mensagens de store vazio inconsistentes entre seções, fórmula genérica gramaticalmente errada pra memória | BAIXA | Strings exatas por ferramenta especificadas em §4.2 | §4.2 |
+| 6 | Faltava exemplo contrastivo de `NOTA_EDITAR` e negativo do verbo "trocar" → `NENHUMA` | MÉDIA | Exemplos adicionados: `Troca essa nota pra... -> NOTA_EDITAR\|...` e `Vamos trocar de assunto agora -> NENHUMA` | §4.3 |
+| 7 | Lembrete já notificado editado silenciosamente, sem nunca mais disparar | MÉDIA | Edição recusada com mensagem honesta se `notifiedAt !== null` | §4.2 |
+| 8 | §5 apontava o teste de integração do scheduler pro arquivo errado (`voice.test.ts`) | BAIXA | Corrigido para `mutatingTools.test.ts`, mesmo padrão da Fase 6 | §5 |
+| 9 | `DETECT_CONFIRMATION_SYSTEM_PROMPT` não menciona "editar" | BAIXA | Texto atualizado | §4.3 |
+| 10 | Mensagens de store vazio inconsistentes entre seções, fórmula genérica gramaticalmente errada pra memória | BAIXA | Strings exatas por ferramenta especificadas em §4.2 | §4.2 |
+
+### Rodada 2 sobre a v2 (5 achados novos, veredito APROVADO COM RESSALVAS — todos aplicados)
+
+| # | Achado | Gravidade | Resolução | Seção |
+|---|---|---|---|---|
+| 1 | `parse_mutation_output()` só citado em prosa ("inalterado da v1"), sem o código — v1 nunca foi implementada, documento tem que ser autocontido | ALTA | Bloco de código reproduzido explicitamente; `parse_mutation_output()` listado em §5 | §4.3, §5 |
+| 2 | `preview()` das três ferramentas totalmente omitido da v2, só `execute()` estava presente | ALTA | Pseudocódigo de `preview()` das 3 ferramentas reintroduzido | §4.2 |
+| 3 | Sem defesa em profundidade no backend contra frases mistas texto+horário ("troca o lembrete pra: reunião amanhã às dez") — dependia 100% do LLM local (4B quantizado) seguir a regra do prompt | MÉDIA | `LembreteTool.execute('LEMBRETE_EDITAR')` chama `parseRelativeTime()` e recusa se detectar horário, independente do que o worker classificou | §4.2 |
+| 4 | `AFFIRMATIVE_MARKERS` ainda vetava "pode ser"/"pode mudar"; `CONFIRM_YES_EXACT` não ganhou os bigramas (resolveria só via Camada 1, ~3,2s a mais) | MÉDIA | `'pode ser'`/`'pode mudar'` adicionados a `AFFIRMATIVE_MARKERS`; `'pode trocar'`/`'pode editar'`/`'pode corrigir'` adicionados a `CONFIRM_YES_EXACT` | §4.2 |
+| 5 | Tabela de rastreabilidade da v2 anterior tinha só 9 linhas pros 10 achados da rodada 1 (uma foi perdida na reescrita) | BAIXA | Tabela corrigida para 10 linhas, numeração realinhada com o log original | §9 |

@@ -1,0 +1,285 @@
+# Relatório de Auditoria Adversarial — Rodada 2: Plano da Fase 8 (v2)
+
+**Documentos auditados:**
+- [docs/audits/phase-8-v1-agy-rodada1-2026-09-27.log](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-8-v1-agy-rodada1-2026-09-27.log) (Rodada 1)
+- [docs/phase-8-v2.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md) (Plano v2)
+- Código real do repositório:
+  - [src/backend/tools/mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts)
+  - [src/backend/tools/reminderScheduler.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/reminderScheduler.ts)
+  - [src/backend/tools/relativeTimeParser.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/relativeTimeParser.ts)
+  - [src/backend/voice/sessionManager.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts)
+  - [src/shared/voiceProtocol.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts)
+  - [scripts/worker/worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py)
+  - [scripts/worker/test_mutation_parser.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/test_mutation_parser.py)
+  - [src/backend/__tests__/mutatingTools.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts)
+  - [src/backend/__tests__/voice.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts)
+  - [CLAUDE.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/CLAUDE.md)
+
+---
+
+## 1. Verificação Detalhada dos 10 Achados da Rodada 1
+
+### Ponto 1: O achado CRÍTICO — `AFFIRMATIVE_MARKERS` ganhando 'pode trocar'/'pode editar'/'pode corrigir' (§4.2 do v2)
+- **Verificação**: Em [sessionManager.ts:111](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L111), `AFFIRMATIVE_REGEX = new RegExp(`\\b(?:${AFFIRMATIVE_MARKERS.join('|')})\\b`)`. Com a adição de `'pode trocar', 'pode editar', 'pode corrigir'` proposta em §4.2, `hasAffirmativeMarker("pode trocar")` agora avalia como `true`. O veto impeditivo da rodada 1 foi superado para essas 3 expressões.
+- **Ressalvas e Gaps Residuais**:
+  1. **Camada 0 (`CONFIRM_YES_EXACT`) foi esquecida**: O v2 adicionou as expressões apenas em `AFFIRMATIVE_MARKERS` (Camada 2), mas **não** em `CONFIRM_YES_EXACT` ([sessionManager.ts:36-47](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L36-L47)). Portanto, quando o usuário responde exatamente `"pode trocar"`, `keywordConfirmation` retorna `null` e o sistema é **forçado** a chamar o worker Python MLX (`detectConfirmation`, ~3.2s de latência local), em vez de resolver em 0ms como faz para `"sim"` ou `"pode confirmar"`.
+  2. **Expressões afirmativas coloquiais que ainda são vetadas pela Camada 2**:
+     - `"Pode ser"`: É uma das formas afirmativas mais universais do português falado para perguntas iniciadas por *"Posso..."*. O token `"pode"` isolado não é marcador, e `"pode ser"` não está na lista. Logo, `hasAffirmativeMarker("pode ser")` retorna `false`, e a resposta é **rebaixada para NÃO e cancelada**.
+     - `"Pode mudar"` / `"Pode alterar"`: Sinônimos diretos e naturais de "pode trocar". Retornam `false`.
+     - `"Troca"` / `"Troca aí"` / `"Troca por favor"`: O usuário repetindo o verbo no imperativo. Como só o bigrama `pode trocar` foi adicionado, `"troca"` isolado não casa e é **vetado**.
+- **Status**: **RESOLVIDO PARA OS 3 TERMOS, COM GAPS COLOQUIAIS E DE LATÊNCIA (ver Achado Novo 4)**.
+
+---
+
+### Ponto 2: Cabeçalho corrigido de `DETECT_MUTATION_SYSTEM_PROMPT` (§4.3)
+- **Verificação**: Em [worker.py:113-117](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L113-L117), o código atual dizia:
+  `"...ou NENHUMA das seis. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para *_CRIAR e MEMORIA_GUARDAR..."`
+  O v2 propõe (§4.3, linhas 162-167):
+  ```python
+  DETECT_MUTATION_SYSTEM_PROMPT = (
+      "Você decide se a frase do usuário pede para CRIAR, EDITAR ou APAGAR um LEMBRETE, uma NOTA "
+      "ou uma MEMÓRIA, ou NENHUMA das nove. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para "
+      "*_CRIAR, *_EDITAR e MEMORIA_GUARDAR (o texto do que deve ser lembrado/anotado/guardado/"
+      "corrigido, sem aspas, sem explicação extra).\n"
+  ```
+  - Total de ações corrigido: 9 (3 ferramentas x 3 ações).
+  - Ações com conteúdo explicitadas: `*_CRIAR`, `*_EDITAR` e `MEMORIA_GUARDAR`.
+  - Formato sintático perfeitamente compatível com o estilo de concatenação de strings do arquivo.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+---
+
+### Ponto 3: Exemplo de horário removido e regra explícita adicionada (§4.3)
+- **Verificação**: O exemplo perigoso da v1 (`"é sexta, não quinta -> LEMBRETE_EDITAR"`) foi removido. Foi substituído pelo exemplo puramente textual:
+  `Na verdade, corrige o lembrete: é café solúvel, não em pó -> LEMBRETE_EDITAR|Comprar café solúvel, não em pó`
+  E pelo exemplo negativo:
+  `Muda esse lembrete pra sexta em vez de quinta -> NENHUMA`
+  Além da instrução taxativa no corpo do prompt:
+  `"IMPORTANTE: se o pedido for pra mudar o DIA ou HORÁRIO do lembrete (não o texto), NÃO é LEMBRETE_EDITAR — é NENHUMA..."`
+- **Ressalva de Defesa em Profundidade**:
+  No prompt do LLM, a regra está bem explicada. Porém, o modelo em produção é um modelo local de 4B quantizado em 4-bit (`Qwen3-4B-Instruct-2507-4bit`). Em frases mistas de texto + horário (ex.: *"Troca o lembrete pra: levar as crianças às seis"* ou *"Troca o lembrete pra amanhã às dez comprar pão"*), o LLM pode emitir `LEMBRETE_EDITAR|levar as crianças às seis`.
+  Como `LembreteTool.execute('LEMBRETE_EDITAR')` no v2 **não chama `parseRelativeTime()`**, ele aceitará cegamente o texto com a expressão de horário e manterá o `dueAt` original (ou `null`), gerando silenciosamente o mesmo bug de corrupção. A dependência 100% no prompt sem salvaguarda em código no backend é uma vulnerabilidade de arquitetura.
+- **Status**: **RESOLVIDO NO PROMPT (mas vulnerável no backend — ver Achado Novo 3)**.
+
+---
+
+### Ponto 4: Lógica de dedupe/no-op para `MEMORIA_EDITAR` (e LembreteTool/NotaTool) em §4.2
+- **Verificação**:
+  - `MemoriaTool.execute('MEMORIA_EDITAR')` (§4.2, linhas 118-140):
+    ```ts
+    if (store.items[idx].text.trim().toLowerCase() === normalized) {
+      return 'Isso já era o texto guardado.'; // no-op
+    }
+    const isDuplicateOfOther = store.items.some(
+      (it, i) => i !== idx && it.text.trim().toLowerCase() === normalized
+    );
+    if (isDuplicateOfOther) return 'Isso já estava guardado.';
+    ```
+    - Se a lista tem 1 item só (`idx = 0`), a condição `i !== idx` é sempre falsa, portanto a checagem não bloqueia a si própria.
+    - Se o usuário editar para o mesmo texto com espaçamento ou caixa diferente, o no-op captura corretamente.
+    - Se o usuário editar para um texto que já existe em outro índice `i !== idx`, bloqueia com `'Isso já estava guardado.'`, mantendo a lista de memórias estática e limpa para injeção de contexto.
+  - `LembreteTool.execute('LEMBRETE_EDITAR')`:
+    `if (current.text === trimmed) return 'Isso já era o texto do lembrete.';` -> Correto.
+  - `NotaTool.execute('NOTA_EDITAR')`:
+    Descrito em prosa nas linhas 111-114.
+- **Status**: **GENUINAMENTE RESOLVIDO** (com ressalva de documentação para NotaTool).
+
+---
+
+### Ponto 5: O regex corrigido do `MUTATION_GATE` (§4.4)
+- **Verificação**: O v2 propõe (§4.4, linha 238):
+  ```ts
+  const MUTATION_GATE =
+    /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar)\w*\b|\b(edita|editar|edite|editou|editando|troca|trocar|troque|trocou|trocando|corrige|corrigir|corrija|corrigiu|corrigindo)\b/;
+  ```
+  - **Precedência de alternação**: Em RegExp do JavaScript, o operador `|` possui a menor precedência. A expressão avalia como `(Ramo 1) OU (Ramo 2)`.
+  - **Fronteiras de palavra**: O `\b` inicial e final de cada ramo é delimitado estritamente para o seu respectivo grupo.
+  - **Casos de teste verificados**:
+    - `"edital"` e `"editais"`: Não casam no Ramo 1. No Ramo 2, `edita\b` exige fronteira de palavra; como a letra `'l'` é caractere de palavra (`\w`), não há `\b` após `edita`. Retorna `false`.
+    - `"trocadilho"` e `"trocado"`: Não casam no Ramo 2 porque `'d'` é `\w`. Retorna `false`.
+    - `"editando"`: Casa no Ramo 2 (`\beditando\b`). Retorna `true`.
+    - `"vou trocar"`: Casa no Ramo 2 (`\btrocar\b`). Retorna `true`.
+    - `"Na verdade, corrige isso..."`: Casa no Ramo 2 (`\bcorrigir\b` / `\bcorrige\b`). Retorna `true`.
+  - Não há quantificadores aninhados nem risco de backtracking catastrófico.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+---
+
+### Ponto 6: Checagem de `notifiedAt` para recusar edição de lembrete já disparado (§4.2)
+- **Verificação**: Em [reminderScheduler.ts:110-118](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/reminderScheduler.ts#L110-L118), ao disparar um lembrete, `this.timers.delete(id)` é executado e `notifiedAt` é persistido. Se o item mais recente for editado após o disparo, o timer não existe mais.
+  O v2 adicionou a checagem no caminho de execução real (§4.2, linhas 100-101):
+  ```ts
+  if (current.notifiedAt) return 'Esse lembrete já foi disparado, não é possível editar mais.';
+  ```
+  Isso impede que um lembrete histórico morto seja alterado dando ao usuário a falsa impressão de que ele irá soar no futuro. Itens atemporais (`dueAt: null`, `notifiedAt: null`) ou lembretes pendentes continuam podendo ser editados normalmente.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+---
+
+### Ponto 7: Arquivo de teste corrigido para `mutatingTools.test.ts` em vez de `voice.test.ts` (§5)
+- **Verificação**: Em [mutatingTools.test.ts:448-555](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts#L448-L555), encontram-se todos os testes unitários e de integração de `ReminderScheduler` (`activeTimersCount`, `hasTimer`, cancelamento e disparo). Em [voice.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/voice.test.ts), o `setupHarness` sequer expõe a instância do scheduler. O v2 corrigiu a seção 5 e o critério H3 (§6) apontando para [mutatingTools.test.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/__tests__/mutatingTools.test.ts), mantendo a integridade da suíte.
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+---
+
+### Ponto 8: `DETECT_CONFIRMATION_SYSTEM_PROMPT` atualizado (§4.3)
+- **Verificação**: Em [worker.py:152-155](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L152-L155), o prompt instruía o LLM que a pergunta era sobre "criar ou apagar algo". O v2 (§4.3, linhas 218-223) atualizou para `"criar, editar ou apagar algo"`, mantendo o alinhamento semântico com a pergunta que o usuário ouve via TTS (*"Posso trocar..."*).
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+---
+
+### Ponto 9: Mensagens de store vazio uniformizadas e gramaticais (§4.2)
+- **Verificação**: O v2 (§4.2, linhas 142-147) padronizou as mensagens exatas:
+  - Lembrete: `'Não há nenhum lembrete para editar.'`
+  - Nota: `'Não há nenhuma nota para editar.'`
+  - Memória: `'Não há nada guardado para editar.'`
+  As três strings são gramaticalmente corretas no português, respeitam o gênero dos substantivos e estão perfeitamente sincronizadas com o pseudocódigo (§4.2) e com o critério de aceite H2 (§6).
+- **Status**: **GENUINAMENTE RESOLVIDO**.
+
+---
+
+### Ponto 10 (Achado 6 da Rodada 1): Exemplos contrastivos para `NOTA_EDITAR` e negativos de "trocar"
+- **Verificação**: O v2 (§4.3, linhas 198-212) adicionou:
+  - `Troca essa nota pra: comprar materiais na segunda -> NOTA_EDITAR|Comprar materiais na segunda`
+  - `Vamos trocar de assunto agora -> NENHUMA`
+  Isso protege o classificador de falsos positivos com o verbo coloquial "trocar" e dá suporte few-shot a notas.
+- **Ressalva**: Conforme detalhado no Achado Novo 5, esta resolução está no texto de §4.3, mas foi acidentalmente omitida da Tabela 9.
+- **Status**: **GENUINAMENTE RESOLVIDO NO TEXTO (com vício na tabela de rastreabilidade)**.
+
+---
+
+## 2. Novos Achados Identificados na Rodada 2
+
+Abaixo estão os achados novos introduzidos pelo plano v2:
+
+---
+
+### ACHADO NOVO 1: Omissão do código e do registro de alteração de `parse_mutation_output()` em `scripts/worker/worker.py`
+EVIDÊNCIA: Em [docs/phase-8-v2.md:226-228](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L226-L228):
+> `parse_mutation_output(): inalterado da v1 — o ramo que extrai content já incluía os três *_EDITAR corretamente (não era o problema; o problema era só o cabeçalho, achado 2).`
+
+Em [docs/phase-8-v2.md:256-261](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L256-L261) (§5, Arquivos afetados):
+```
+scripts/worker/worker.py                  MUTATION_NAMES, DETECT_MUTATION_SYSTEM_PROMPT (cabeçalho
+                                           corrigido com MEMORIA_GUARDAR, exemplo de horário
+                                           removido, NOTA_EDITAR e negativo de "trocar" incluídos),
+                                           DETECT_CONFIRMATION_SYSTEM_PROMPT (menciona "editar")
+scripts/worker/test_mutation_parser.py    casos novos para os 3 *_EDITAR (parse_mutation_output
+                                           já cobria o ramo de extração corretamente na v1)
+```
+E no código real em [scripts/worker/worker.py:181-187](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L181-L187):
+```python
+    if action not in MUTATION_NAMES:
+        return ("NENHUMA", None)
+    if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR"):
+        if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
+            return ("NENHUMA", None)
+        return (action, content)
+    return (action, None)
+```
+GRAVIDADE: ALTA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: Na v1 (linhas 174-179 de [phase-8-v1.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v1.md#L174-L179)), o trecho de código alterando a tupla para incluir `"LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR"` constava explicitamente. Na v2, o autor removeu o bloco de código de §4.3 assumindo erroneamente que "já cobria na v1", e removeu `parse_mutation_output()` da lista de alterações em `worker.py` na seção 5.
+Como o v1 foi REJEITADO, nada foi implementado. No código atual de `worker.py:183`, `*_EDITAR` **não** está presente. Se um implementador seguir o plano v2, `parse_mutation_output()` retornará `(action, None)`. No backend, `execute()` lançará `Error('Conteúdo ausente para editar...')` e todas as edições falharão com `"Não consegui salvar isso agora."`.
+O plano DEVE incluir explicitamente o bloco de código em §4.3 e listar `parse_mutation_output()` em §5:
+```python
+if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR",
+              "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR"):
+    if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
+        return ("NENHUMA", None)
+    return (action, content)
+```
+
+---
+
+### ACHADO NOVO 2: Omissão completa da especificação e pseudocódigo de `preview()` para as três ferramentas em §4.2
+EVIDÊNCIA: Em [docs/phase-8-v2.md:88-140](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L88-L140) (§4.2):
+A seção apresenta apenas o método `execute()` para as ferramentas, omitindo completamente a implementação de `preview()`.
+Em [docs/phase-8-v2.md:251-252](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L251-L252) (§5):
+> `src/backend/tools/mutatingTools.ts 3 novos ramos preview()/execute() (com checagem de notifiedAt, no-op e dedupe); MUTATION_GATE corrigido (§4.4)`
+E no código real em [src/backend/tools/mutatingTools.ts:45, 138, 199](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts#L45):
+```ts
+throw new Error(`Ação inválida para LembreteTool: ${kind}`);
+```
+GRAVIDADE: ALTA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: Ao reescrever §4.2 para detalhar `execute()`, o autor apagou os ramos de `preview()`. Hoje, chamar `preview('LEMBRETE_EDITAR')` lança exceção em tempo de execução. O plano não define o comportamento de `preview()` para `content` vazio/espaços nem os templates exatos das perguntas. Além disso, a linha 251 afirma erroneamente que `preview()` possui checagem de `notifiedAt, no-op e dedupe` (essas checagens pertencem a `execute()`, pois `preview()` apenas formata a pergunta).
+Adicionar explicitamente em §4.2 o pseudocódigo de `preview()` para as três ferramentas:
+```ts
+// LembreteTool.preview():
+if (kind === 'LEMBRETE_EDITAR') {
+  if (!content || !content.trim()) throw new Error('Conteúdo ausente para editar lembrete.');
+  return `Posso trocar o lembrete mais recente para: ${content.trim()}?`;
+}
+// NotaTool.preview():
+if (kind === 'NOTA_EDITAR') {
+  if (!content || !content.trim()) throw new Error('Conteúdo ausente para editar nota.');
+  return `Posso trocar a nota mais recente para: ${content.trim()}?`;
+}
+// MemoriaTool.preview():
+if (kind === 'MEMORIA_EDITAR') {
+  if (!content || !content.trim()) throw new Error('Conteúdo ausente para editar memória.');
+  return `Posso trocar essa memória para: ${content.trim()}?`;
+}
+```
+
+---
+
+### ACHADO NOVO 3: Ausência de defesa em profundidade no backend contra expressões temporais em `LembreteTool.execute('LEMBRETE_EDITAR')`
+EVIDÊNCIA: Em [docs/phase-8-v2.md:89-108](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L89-L108) (§4.2):
+```ts
+  const trimmed = content.trim();
+  if (current.text === trimmed) return 'Isso já era o texto do lembrete.'; // no-op, achado 4
+
+  store.items[idx] = { ...current, text: trimmed };
+  this.store.write(store);
+  return 'Lembrete atualizado.';
+```
+E no código real em [src/backend/tools/relativeTimeParser.ts:4-7](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/relativeTimeParser.ts#L4-L7).  
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 95%  
+AÇÃO RECOMENDADA: O plano confia exclusivamente no prompt do LLM (`Qwen-4B`) para classificar qualquer frase com horário como `NENHUMA`. Contudo, em falas coloquiais com comandos mistos de texto e tempo (ex.: *"Troca o lembrete pra: reunião com o Pedro amanhã às dez"*), o classificador pode emitir `LEMBRETE_EDITAR|reunião com o Pedro amanhã às dez`.
+Como `LembreteTool.execute` substitui apenas o texto e preserva o `dueAt` anterior (ou `null`), o lembrete disparará no horário velho (ou nunca disparará se era atemporal), gerando corrupção silenciosa de dados.
+Em obediência ao princípio de defesa em profundidade do [CLAUDE.md:32](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/CLAUDE.md#L32), o backend TypeScript deve validar o conteúdo com `parseRelativeTime()`:
+```ts
+const parsedTime = parseRelativeTime(trimmed);
+if (parsedTime.dueAt !== null) {
+  return 'Não é possível alterar o horário de um lembrete por aqui. Apague e crie um novo.';
+}
+```
+
+---
+
+### ACHADO NOVO 4: `AFFIRMATIVE_MARKERS` ainda veta afirmações coloquiais naturais de confirmação ("pode ser", "pode mudar") e `CONFIRM_YES_EXACT` omite os novos termos
+EVIDÊNCIA: Em [docs/phase-8-v2.md:76-80](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L76-L80):
+```ts
+// sessionManager.ts — AFFIRMATIVE_MARKERS ganha, ao lado de 'pode criar', 'pode apagar', etc.:
+'pode trocar', 'pode editar', 'pode corrigir',
+```
+E em [src/backend/voice/sessionManager.ts:36-47](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L36-L47):
+```ts
+const CONFIRM_YES_EXACT = new Set([
+  'sim', 'claro', 'confirmo', 'certo', 'exato', 'exatamente', 'positivo',
+  'isso mesmo', 'pode confirmar', 'com certeza'
+]);
+```
+GRAVIDADE: MÉDIA  
+CONFIANÇA: 95%  
+AÇÃO RECOMENDADA:
+1. Adicionar `'pode ser'` e `'pode mudar'` a `AFFIRMATIVE_MARKERS`. Quando perguntado *"Posso trocar o lembrete...?"*, a resposta *"Pode ser"* é uma das mais espontâneas em PT-BR. Atualmente ela é vetada na Camada 2 e a mutação é cancelada.
+2. Adicionar `'pode trocar'`, `'pode editar'`, `'pode corrigir'` em `CONFIRM_YES_EXACT` (Camada 0). Isso permite que a confirmação direta resolva em 0ms no Node sem disparar inferência do modelo local em Python.
+
+---
+
+### ACHADO NOVO 5: Omissão na Tabela 9 da resolução sobre `NOTA_EDITAR` e colisão de numeração nos achados da Rodada 1
+EVIDÊNCIA: Em [docs/phase-8-v2.md:324-335](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L324-L335) (Tabela 9) constam apenas 9 linhas. Em [docs/phase-8-v2.md:193](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L193) e [docs/phase-8-v2.md:231](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L231), o texto rotula dois achados distintos como "achado 5 (MÉDIA)". Além disso, em [docs/phase-8-v2.md:111-113](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-8-v2.md#L111-L113), o pseudocódigo de `NotaTool.execute('NOTA_EDITAR')` está truncado em prosa e não explicita a mensagem de sucesso (`'Nota atualizada.'`).  
+GRAVIDADE: BAIXA  
+CONFIANÇA: 100%  
+AÇÃO RECOMENDADA: Atualizar a Tabela 9 para conter as 10 linhas correspondentes aos 10 achados auditados, corrigir a numeração no corpo do texto e explicitar a string de retorno de sucesso de `NotaTool.execute`.
+
+---
+
+## 3. Veredito Final
+
+VEREDITO: **APROVADO COM RESSALVAS**  
+JUSTIFICATIVA: Os 10 achados da Rodada 1 tiveram suas causas-raiz conceituais resolvidas no v2 — o gate de confirmação foi destravado, o cabeçalho do worker preserva `MEMORIA_GUARDAR`, o exemplo de horário foi expurgado, o dedupe de memórias foi protegido e o `MUTATION_GATE` foi blindado contra falsos positivos lexicais. A aprovação é concedida sob a condição mandatória de incorporar na implementação as ressalvas identificadas: reintroduzir o bloco de código de `parse_mutation_output()` em [worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py), explicitar os 3 templates de `preview()` em [mutatingTools.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/tools/mutatingTools.ts), adicionar salvaguarda de rejeição temporal via `parseRelativeTime()` em `LembreteTool` e estender os marcadores afirmativos com `'pode ser'` e `'pode mudar'` (além de `CONFIRM_YES_EXACT`).
