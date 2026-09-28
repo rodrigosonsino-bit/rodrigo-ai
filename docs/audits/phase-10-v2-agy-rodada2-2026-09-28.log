@@ -1,0 +1,150 @@
+### Relatório de Auditoria Adversarial — Fase 10 (v2)
+
+Auditoria adversarial rigorosa do plano [docs/phase-10-v2.md](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md), confrontado diretamente contra o código real do repositório ([scripts/worker/worker.py](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py), [src/backend/voice/sessionManager.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts), [src/frontend/voice.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts), [src/backend/voice/mlxWorkerEngine.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts), [scripts/worker/requirements.in](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/requirements.in), [src/shared/voiceProtocol.ts](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/shared/voiceProtocol.ts)) e contra o relatório da rodada 1 ([docs/audits/phase-10-v1-agy-rodada1-2026-09-28.log](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/audits/phase-10-v1-agy-rodada1-2026-09-28.log)).
+
+---
+
+### Verificação Explícita dos 10 Achados da Rodada 1
+
+#### 1. Coalescing de papéis em `to_gemini_contents()` (§4.2)
+* **Simulação mental passo a passo**:
+  * Entrada: `messages = [System, User("Pergunta 1"), Asst("Frase 1"), Asst("Frase 2"), Asst("Frase 3"), User("Pergunta 2")]`.
+  * Extração de sistema: `system_parts = ["System"]` $\rightarrow$ `system_instruction = "System"`.
+  * Filtro não-sistema: `non_system = [User("Pergunta 1"), Asst("Frase 1"), Asst("Frase 2"), Asst("Frase 3"), User("Pergunta 2")]`.
+  * Laço de consolidação:
+    1. `User("Pergunta 1")`: `contents` vazio $\rightarrow$ cria `{"role": "user", "parts": [{"text": "Pergunta 1"}]}`.
+    2. `Asst("Frase 1")`: `contents[-1]["role"]` é `"user"` $\neq$ `"model"` $\rightarrow$ cria `{"role": "model", "parts": [{"text": "Frase 1"}]}`.
+    3. `Asst("Frase 2")`: `contents[-1]["role"]` é `"model"` $==$ `"model"` $\rightarrow$ anexa a `parts`: `{"role": "model", "parts": [{"text": "Frase 1"}, {"text": "Frase 2"}]}`.
+    4. `Asst("Frase 3")`: `contents[-1]["role"]` é `"model"` $==$ `"model"` $\rightarrow$ anexa a `parts`: `{"role": "model", "parts": [{"text": "Frase 1"}, {"text": "Frase 2"}, {"text": "Frase 3"}]}`.
+    5. `User("Pergunta 2")`: `contents[-1]["role"]` é `"model"` $\neq$ `"user"` $\rightarrow$ cria `{"role": "user", "parts": [{"text": "Pergunta 2"}]}`.
+  * Verificação de alternância: `contents` resultante possui exatamente 3 itens: `user` $\rightarrow$ `model` (com 3 partes) $\rightarrow$ `user`. Alternância estrita garantida, sem dois papéis repetidos consecutivos.
+* **Caso de histórico iniciando com `'assistant'` (ex.: após corte por `trimHistory`)**:
+  * O laço `while contents and contents[0]["role"] != "user": contents.pop(0)` descarta corretamente os blocos `model` do prefixo até encontrar o primeiro `user`.
+  * **Pode esvaziar `contents` em produção?** Não. No runtime de voz ([src/backend/voice/sessionManager.ts:376](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L376)), `session.history.push({ role: 'user', content: transcript })` é executado **antes** de chamar `engine.generate()`. Portanto, o último elemento de `session.history` em uma sessão real é invariavelmente uma mensagem de `user`. Mesmo que `trimHistory()` corte os itens mais antigos, o item do usuário corrente sempre permanece no final do array. Logo, `contents` sempre terá pelo menos esse item `user`, impedindo o esvaziamento total. *(Nota: em testes unitários sintéticos sem nenhuma mensagem `user`, `contents` pode ficar vazio — ver Novo Achado 3).*
+
+#### 2. `emit("done")` incondicional (§4.3)
+* Confirmado no pseudocódigo de `docs/phase-10-v2.md:175-180`:
+  ```python
+  if not handle.cancel_event.is_set():
+      if not loop_detected:
+          leftover = buffer.strip()
+          if leftover and not _is_near_duplicate_sentence(leftover, emitted_normalized):
+              emit({"event": "sentence", "reqId": req_id, "turnId": turn_id,
+                    "index": sentence_index, "text": leftover})
+      emit({"event": "done", "reqId": req_id, "turnId": turn_id})
+  ```
+  A linha `emit({"event": "done", ...})` está desindentada para fora de `if not loop_detected:`, exatamente no mesmo nível e escopo do código real de [scripts/worker/worker.py:699-713](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L699-L713). **Resolvido**.
+
+#### 3. Remoção de `stream.close()` (§4.3)
+* No Python, romper a iteração (`break`) sobre um gerador ou iterador desacopla a referência local. Quando `handle_generate()` finaliza, o objeto `stream` sai de escopo e seu contador de referências chega a zero, disparando a finalização do gerador e o fechamento do stream HTTP subjacente (`httpx.Response.close()`).
+* As conexões físicas TCP são gerenciadas pelo pool HTTP persistente do `genai.Client`. Como o cliente agora é reaproveitado e possui timeout de 20s, não há risco de vazamento de sockets ou conexões zumbis consumindo recursos indefinidamente. **Resolvido**.
+
+#### 4. Erro condicional a `expectedSentences.size === 0` (§4.4)
+* **Verificação de consistência de estado**:
+  * **Cenário A (nenhum progresso real, `expectedSentences.size === 0`)**: Sintetiza `GENERATION_FAILURE_TEXT` com índice 0, empurra a Promise para `turn.pendingSynthesis`, aguarda `Promise.allSettled`, emite `turn_done`, transiciona para `ouvindo` e anula `session.activeTurn`. O frontend ouve o áudio de erro e confirma via `markPlayed()`.
+  * **Cenário B (progresso parcial, `expectedSentences.size > 0`)**: Não sintetiza texto de erro (evitando colisão de índices e sobreposição semântica no frontend). Não relança o erro, mas aguarda `Promise.allSettled(turn.pendingSynthesis)` para garantir que as frases parciais já em curso no TTS finalizem. Em seguida, emite `turn_done`, transiciona para `ouvindo` e limpa `activeTurn = null`.
+  * O encerramento em ambos os casos é idêntico e consistente com as invariantes de [src/backend/voice/sessionManager.ts:537-545](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L537-L545). O turno nunca fica pendurado nem perde o `turn_done`. **Resolvido**.
+
+#### 5. Separação do system prompt por papel, não posição (§4.2)
+* Em [src/backend/voice/sessionManager.ts:617-620](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L617-L620), o backend monta `[{ role: 'system', content: systemPrompt }, ...session.history]`. Como `session.history` só recebe `'user'` e `'assistant'`, atualmente existe **no máximo uma** mensagem com papel `'system'`.
+* A agregação `"\n\n".join(system_parts)` é puramente defensiva, mas garante que futuras extensões ou suítes de teste com múltiplos prompts de sistema sejam tratadas sem descartar conteúdo. **Resolvido**.
+
+#### 6. Cliente Gemini único no `__init__` (§4.3)
+* **PROBLEMA CRÍTICO IDENTIFICADO**: No SDK `google-genai`, passar `api_key=""` (string vazia) quando não há variável de ambiente setada levanta imediatamente `ValueError: Missing key inputs argument!` no construtor.
+* Em [scripts/worker/worker.py:787](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L787), `worker = Worker()` é executado na função `main()` **fora** de qualquer bloco `try/except`. Se o processo iniciar sem `GEMINI_API_KEY`, o worker aborta antes de carregar modelos locais (Whisper e Qwen3) e antes de iniciar a thread de stdin.
+* Isso anula o tratamento de erro em `handle_generate()` (`if not os.environ.get("GEMINI_API_KEY"): raise RuntimeError(...)`), que se torna código morto. O cliente deve ser inicializado de forma lazy. *(Ver Novo Achado 1)*. **Resolução Insuficiente / Reaberto como Novo Achado**.
+
+#### 7. Timeout de 20s no cliente (§4.3)
+* Confirmado: no SDK oficial `google-genai` (unificado), a configuração de transporte HTTP é realizada através da classe `genai.types.HttpOptions(timeout=20_000)`.
+* O parâmetro `timeout` no SDK é medido expressamente em **milissegundos** (`20_000` ms = 20 s). O pseudocódigo está correto e alinhado à documentação oficial do SDK. **Resolvido**.
+
+#### 8. `scripts/worker/requirements.in` (§4.1)
+* Confirmado no repositório: o arquivo [scripts/worker/requirements.in](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/requirements.in) existe e contém `mlx-lm` e `mlx-whisper`.
+* Em [scripts/setup-voice.mjs:55-66](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/setup-voice.mjs#L55-L66), o comando `pip install -r scripts/worker/requirements.in` é executado pelo `uv` e em seguida congela as versões resolvidas em `.runtime/voice-requirements.lock.txt`. Adicionar `google-genai` a `requirements.in` é a única alteração necessária no fluxo de dependências. **Resolvido**.
+
+#### 9. Meta de latência provisória em H9 (§6)
+* A meta de mediana $\le 4{,}0\text{s}$ e p95 $\le 8{,}0\text{s}$ da ponta a ponta (fim de fala até primeiro áudio) faz sentido sob a perspectiva de produto ("sem regressão perceptível pro usuário"). A soma das etapas (STT Whisper $\approx 800\text{ms}$ + Classificação local $\approx 300\text{ms}$ + Gemini TTFC $\approx 800\text{ms}$ + TTS $\approx 600\text{ms}$) totaliza $\approx 2{,}5\text{s}$, cabendo na margem estipulada.
+* Contudo, é uma meta incompleta porque não define um teto isolado para a chamada de rede (Time-to-First-Chunk $\le 1{,}5\text{s}$), impedindo identificar se um eventual estouro decorre do STT local ou da API do Gemini. *(Ver Novo Achado 5)*. **Resolvido com ressalva**.
+
+#### 10. `return` em vez de `throw err` (§4.4)
+* Confirmado em [src/backend/voice/sessionManager.ts:556](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L556): o padrão do arquivo para turnos desativados por barge-in é `if (session.activeTurn !== turn) return;`. Como o catch externo de `runTurn()` (linha 643) descarta erros quando `activeTurn !== turn`, relançar a exceção gerava processamento inútil. **Resolvido**.
+
+---
+
+### Achados da Auditoria (Novos e Reabertos)
+
+ACHADO: Crash imediato do daemon do worker no boot se `GEMINI_API_KEY` estiver ausente devido a `genai.Client` no `Worker.__init__`
+EVIDÊNCIA: [docs/phase-10-v2.md:114-116](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md#L114-L116):
+```python
+self._gemini_client = genai.Client(
+    api_key=os.environ.get("GEMINI_API_KEY", ""),
+    http_options=genai.types.HttpOptions(timeout=20_000),
+)
+```
+em contraste com [scripts/worker/worker.py:787](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L787) (`worker = Worker()`) e [docs/phase-10-v2.md:130-132](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md#L130-L132)
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: No SDK `google-genai`, instanciar `genai.Client(api_key="")` quando a variável de ambiente não está presente levanta `ValueError: Missing key inputs argument!`. Em `worker.py`, `worker = Worker()` é executado na função `main()` fora de qualquer bloco `try/except`. Se o ambiente for iniciado sem a chave (ex.: primeira execução, ambiente de testes ou antes do `.env` ser configurado), o worker Python aborta com traceback não capturado antes mesmo de carregar os modelos locais ou iniciar a thread de stdin. Isso derruba STT e Classificação (que deveriam ser 100% locais e resilientes) e torna o bloco `if not os.environ.get("GEMINI_API_KEY"): raise RuntimeError(...)` em `handle_generate()` código morto. Além disso, o comentário no v2 de que `self._llm` é carregado no `__init__` é factualmente incorreto: em `worker.py:327-336`, `__init__` apenas inicializa variáveis com `None`, e todo o carregamento pesado ocorre em `load_models()`. O cliente Gemini deve ser inicializado preguiçosamente (*lazy initialization*):
+```python
+class Worker:
+    def __init__(self) -> None:
+        # ...
+        self._gemini_client: Optional[Any] = None
+
+# em handle_generate():
+if not os.environ.get("GEMINI_API_KEY"):
+    raise RuntimeError("GEMINI_API_KEY ausente — configure a variável de ambiente.")
+
+if self._gemini_client is None:
+    from google import genai
+    self._gemini_client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options=genai.types.HttpOptions(timeout=20_000),
+    )
+```
+
+ACHADO: Omissão de `max_output_tokens` em `GenerateContentConfig` expõe o pipeline a monólogos longos do Gemini e timeout de 60s com `SIGKILL`
+EVIDÊNCIA: [docs/phase-10-v2.md:143](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md#L143) (`config=genai.types.GenerateContentConfig(system_instruction=system_instruction)`) e [docs/phase-10-v2.md:193](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md#L193) (*"Nenhuma mudança em MAX_TURN_TOKENS — inalterado da v1, específico do laço de amostragem local, não se aplica ao Gemini."*) em contraste com [src/backend/voice/mlxWorkerEngine.ts:468-477](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L468-L477) (`VOICE_LIMITS.TURN_TIMEOUT_MS = 60_000`)
+GRAVIDADE: ALTA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: O plano assume erroneamente que `MAX_TURN_TOKENS = 160` era exclusivo do laço local da MLX. No pipeline de voz, essa restrição é uma salvaguarda fundamental: respostas longas (500-1000 tokens) geram 15 a 25 frases individuais enviadas ao TTS em [src/backend/voice/sessionManager.ts:628](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L628). Sintetizar essa quantidade de frases sequencialmente no TTS excede com folga os 60 segundos do timeout do Node (`VOICE_LIMITS.TURN_TIMEOUT_MS`), disparando `child.kill('SIGKILL')` e matando o worker. O SDK `google-genai` suporta `max_output_tokens` diretamente em `GenerateContentConfig`. O plano deve restabelecer o limite:
+```python
+config=genai.types.GenerateContentConfig(
+    system_instruction=system_instruction,
+    max_output_tokens=MAX_TURN_TOKENS,
+)
+```
+
+ACHADO: `to_gemini_contents()` esvazia `contents` quando não há mensagens de usuário, disparando HTTP 400 sem erro semântico
+EVIDÊNCIA: [docs/phase-10-v2.md:73-74](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md#L73-L74):
+```python
+while contents and contents[0]["role"] != "user":
+    contents.pop(0)
+```
+GRAVIDADE: MÉDIA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: Se a função `to_gemini_contents()` for invocada com uma lista que contenha apenas mensagens `'system'` ou apenas mensagens `'assistant'` (como previsto nos testes unitários isolados descritos em §5), o descarte do prefixo remove todos os elementos e retorna `contents = []`. Enviar `contents=[]` à API do Gemini gera erro de validação de schema (HTTP 400). A função pura deve validar a presença de ao menos um item de usuário e lançar uma exceção clara ou registrar aviso defensivo:
+```python
+if not contents:
+    raise ValueError("Histórico não contém nenhuma mensagem válida do usuário para envio ao Gemini.")
+```
+
+ACHADO: Quebra do padrão arquitetural de imports tardios em `worker.py` afeta testes standalone
+EVIDÊNCIA: [scripts/worker/test_repetition_detector.py:6-17](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/test_repetition_detector.py#L6-L17) e [scripts/worker/worker.py:1-40](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L1-L40)
+GRAVIDADE: BAIXA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: Todas as bibliotecas externas em `worker.py` (`mlx.core`, `mlx_lm`, `mlx_whisper`) são importadas de forma tardia dentro dos respectivos métodos, permitindo que scripts como `test_repetition_detector.py` importem funções de `worker.py` utilizando o interpretador padrão sem falhar por dependências ausentes. O plano v2 não especifica onde `google-genai` será importado. Se `from google import genai` for colocado no topo do módulo, testes unitários de funções puras quebrarão fora do venv. Manter o import de `genai` dentro do método de inicialização/geração.
+
+ACHADO: Critério H9 carece de métrica de Time-to-First-Chunk (TTFC) para isolar latência de rede
+EVIDÊNCIA: [docs/phase-10-v2.md:289-295](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v2.md#L289-L295) (H9)
+GRAVIDADE: BAIXA
+CONFIANÇA: 85%
+AÇÃO RECOMENDADA: A meta de latência de ponta a ponta (mediana $\le 4{,}0\text{s}$) combina STT, classificação, rede e TTS. Para evitar diagnósticos ambíguos durante os testes com áudio real previstos em H9, estipular uma métrica de TTFC específica da API (Time-to-First-Chunk $\le 1{,}5\text{s}$) e registrá-la em stderr no `log_diag` do worker ao receber o primeiro chunk.
+
+---
+
+### Veredito Final
+
+**VEREDITO**: **REJEITADO**
+
+**JUSTIFICATIVA**: O plano v2 resolveu com excelência técnica a maioria das falhas da primeira rodada (notadamente a consolidação de papéis repetidos no histórico e o `emit("done")` incondicional), mas introduziu uma regressão crítica de ciclo de vida ao instanciar `genai.Client` no `Worker.__init__` com `api_key=""`, o que fará o daemon do worker abortar imediatamente no boot na ausência da variável de ambiente, impedindo até o funcionamento de recursos 100% locais. Somado à omissão perigosa de `max_output_tokens` na API (que expõe o worker a respostas longas e assassinato por `SIGKILL` de 60s do Node), o plano necessita de uma revisão v3 incorporando inicialização preguiçosa (*lazy*) do cliente e o restabelecimento do teto de tokens de saída para ser seguro em produção.
