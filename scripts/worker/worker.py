@@ -695,13 +695,7 @@ class Worker:
             loop_detected = False
 
             stream = self._gemini_client.models.generate_content_stream(
-                # Temporário (2026-09-28, decisão explícita do usuário): gemini-flash-latest
-                # estava com 503 "high demand" persistente (~30min, ~10 tentativas) do lado do
-                # Google no tier desta chave; gemini-flash-lite-latest confirmado funcional na
-                # hora. Reverter para gemini-flash-latest quando normalizar (§0.7 do plano
-                # original escolheu flash, não lite) — não é uma decisão de produto nova, é
-                # contorno de indisponibilidade temporária do provedor.
-                model="gemini-flash-lite-latest",
+                model="gemini-flash-latest",
                 contents=contents,
                 config=genai.types.GenerateContentConfig(
                     system_instruction=system_instruction,
