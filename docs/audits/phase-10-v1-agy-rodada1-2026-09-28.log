@@ -1,0 +1,105 @@
+Relatório de auditoria adversarial do plano [`docs/phase-10-v1.md`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md), confrontado diretamente contra os arquivos e código real do repositório.
+
+---
+
+### Respostas aos 11 pontos de verificação específica
+
+1. **`to_gemini_contents()` (§4.2) e suposição de `messages[0]`**:
+   Hoje em [`src/backend/voice/sessionManager.ts:617-620`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L617-L620), `messagesForEngine` é montado como `[{ role: 'system', content: systemPrompt }, ...session.history]`. Logo, no runtime atual de voz, o índice 0 é de fato o system prompt. Porém, se a função receber uma lista sem system prompt (ex.: testes unitários da função pura em Python ou refatoração no Node), o fatiamento incondicional `messages[1:]` **descarta silenciosamente** a mensagem do índice 0 (se for do usuário, a pergunta é perdida e `contents` fica vazio, estourando HTTP 400). Pior ainda: o histórico `session.history` registra frases individualmente via [`markPlayed()`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L675-L686), gerando mensagens `assistant` consecutivas que a API do Gemini rejeita com HTTP 400 (ver Achados 1 e 5).
+2. **Pseudocódigo de `handle_generate()` (§4.3) vs. `worker.py` atual**:
+   A afirmação do plano de que reaproveita "EXATAMENTE o mesmo laço" é **falsa**. No [`scripts/worker/worker.py:699-713`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L699-L713), `emit({"event": "done", ...})` é executado **fora** de `if not loop_detected:`. No pseudocódigo do plano (§4.3, linhas 197-202), `emit("done")` foi indentado **dentro** de `if not handle.cancel_event.is_set() and not loop_detected:`. Se um loop for detectado, o evento `done` nunca é emitido, travando o Node por 60s até disparar `SIGKILL` no worker (ver Achado 2).
+3. **Cancelamento e `stream.close()`**:
+   No SDK oficial `google-genai`, o iterador retornado por `client.models.generate_content_stream` **não possui o método `close()`**. Chamar `stream.close()` dispara `AttributeError`, que é capturado pelo `except Exception`, fazendo com que um cancelamento cooperativo normal emita um evento de erro espúrio (ver Achado 3).
+4. **Tratamento de erro (§4.3, §4.4) e inicialização do cliente**:
+   O `except Exception` genérico em Python captura `KeyError` e erros de conexão. No entanto, se o erro ocorrer no meio do streaming (após frases já terem sido enviadas para síntese TTS), o bloco `catch` em `sessionManager.ts` hardcoda `turn.expectedSentences.add(0)` e sintetiza `GENERATION_FAILURE_TEXT` com `index: 0`, causando colisão de índices na fila do frontend e falando "Não consegui pensar..." após já ter respondido parte da pergunta (ver Achado 4). Além disso, instanciar `genai.Client` dentro de `handle_generate` a cada turno vaza pools de conexões (ver Achado 6).
+5. **Novo try/catch em `sessionManager.ts` (§4.4) e `activeTurn`**:
+   O pseudocódigo usa `if (session.activeTurn !== turn) throw err;` com o comentário `// deixa o catch externo tratar`. Isso é contraditório com o código real: o catch externo em [`src/backend/voice/sessionManager.ts:643`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L643) também verifica `if (session.activeTurn === turn)`. Se `activeTurn !== turn`, o catch externo não trata nada. O padrão canônico do arquivo (já usado na linha 556) é simplesmente `return;`. Quanto ao barge-in, `synthesizeSentence` já valida `session.activeTurn !== turn` antes de emitir áudio, logo não há vazamento de áudio se o turno já foi cancelado.
+6. **Afirmação "`engine.ts`, `mlxWorkerEngine.ts` não mudam" (§5)**:
+   A interface e o protocolo NDJSON permanecem logicamente consistentes. No entanto, o plano falha em notar que sem um timeout de rede na chamada ao Gemini em Python, o timeout rígido de 60s em [`src/backend/voice/mlxWorkerEngine.ts:470`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L470) matará o worker com `SIGKILL` em falhas lentas de rede (ver Achado 7). Além disso, a gestão de dependências apontou para um arquivo volátil em vez de `requirements.in` (ver Achado 8).
+7. **`HF_HUB_OFFLINE=1` e conectividade do Gemini**:
+   Confirmado no código: as variáveis `HF_HUB_OFFLINE` e `TRANSFORMERS_OFFLINE` setadas em [`src/backend/voice/mlxWorkerEngine.ts:121-123`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L121-L123) e [`scripts/worker/worker.py:38-39`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L38-L39) são lidas exclusivamente pelas bibliotecas Hugging Face (`huggingface_hub` e `transformers`). Elas não afetam chamadas de rede do SDK `google-genai` (que utiliza `httpx`).
+8. **Herança de `process.env` e `GEMINI_API_KEY`**:
+   Confirmado no código: [`src/backend/voice/mlxWorkerEngine.ts:118-120`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L118-L120) passa `{ ...process.env, ...this.options.env }` no spawn do processo Python, e [`src/backend/config.ts:71`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/config.ts#L71) carrega o arquivo `.env` para `process.env` na inicialização. A chave chegará intacta ao worker sem mudanças de código no spawn.
+9. **Contradições internas no plano**:
+   Diversas contradições identificadas: declaração de reaproveitamento "exato" do laço quando a indentação de `done` quebra a terminação; menção a `voice-requirements.lock.txt` como arquivo-fonte; e justificativa errônea do risco em `to_gemini_contents` (detalhadas nos achados abaixo).
+10. **Escopo local vs. remoto**:
+    Confirmado: `classify()`, `detectTool()`, `detectMutation()` e `detectConfirmation()` não são afetadas e continuam 100% locais no Qwen3. Contudo, a criação de `client = genai.Client()` a cada turno introduz risco de vazamento de recursos no worker daemon local (ver Achado 6).
+11. **Alvo numérico de latência em H8**:
+    É uma lacuna real. O plano promete em §1 "sem regressão de latência perceptível pro usuário", mas deixa H8 em §6 completamente desprovido de qualquer meta numérica (ver Achado 9).
+
+---
+
+### Achados detalhados da auditoria
+
+ACHADO: Incompatibilidade com histórico multissentença do `sessionManager`: `to_gemini_contents()` causa erro HTTP 400 por papéis não alternados na Gemini API
+EVIDÊNCIA: [`docs/phase-10-v1.md:130-133`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L130-L133) (`contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in messages[1:]]`) em contraste com [`src/backend/voice/sessionManager.ts:684`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L684) (`session.history.push({ role: 'assistant', content: text });`)
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O `sessionManager.ts` insere cada frase falada pelo assistente como uma entrada `{ role: 'assistant' }` individual no histórico à medida que o áudio é confirmado pelo cliente via `markPlayed`. Uma resposta com 2 ou mais frases cria entradas consecutivas de `assistant` no histórico. A API do Gemini rejeita estritamente turnos com papéis repetidos consecutivos (*"Please ensure that multiturn requests alternate between user and model"*). Além disso, interrupções por barge-in criam turnos `user` consecutivos. O implementador deve implementar um algoritmo de consolidação (*coalescing*) em `to_gemini_contents()`, agrupando mensagens consecutivas do mesmo papel em um único objeto de conteúdo com múltiplas partes de texto, e garantindo que o histórico comece obrigatoriamente com o papel `user`.
+
+ACHADO: Quebra de protocolo e travamento de 60s com `SIGKILL` quando detector de repetição é acionado em `handle_generate()`
+EVIDÊNCIA: [`docs/phase-10-v1.md:197-202`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L197-L202):
+```python
+if not handle.cancel_event.is_set() and not loop_detected:
+    leftover = buffer.strip()
+    if leftover and not _is_near_duplicate_sentence(leftover, emitted_normalized):
+        emit({"event": "sentence", "reqId": req_id, "turnId": turn_id,
+              "index": sentence_index, "text": leftover})
+    emit({"event": "done", "reqId": req_id, "turnId": turn_id})
+```
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: No código original ([`scripts/worker/worker.py:699-713`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/worker.py#L699-L713)), a linha `emit({"event": "done", ...})` é executada fora do `if not loop_detected:`, pois um loop detectado encerra a resposta naturalmente sem ser considerado falha catastrófica. No pseudocódigo proposto pelo plano, `emit("done")` foi colocado dentro de `if not loop_detected:`. Se um loop for detectado, o worker não emite nem `done` nem `error`. O Node.js fica aguardando indefinidamente até estourar `VOICE_LIMITS.TURN_TIMEOUT_MS` (60 segundos) em [`src/backend/voice/mlxWorkerEngine.ts:468-477`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L468-L477) e assassina o worker com `SIGKILL`. Mover `emit({"event": "done", ...})` para fora de `if not loop_detected:`.
+
+ACHADO: Método inexistente `stream.close()` no SDK `google-genai` disparará `AttributeError` no cancelamento cooperativo
+EVIDÊNCIA: [`docs/phase-10-v1.md:172-173`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L172-L173) (`stream.close() # nunca deixar a chamada de rede continuar depois do cancelamento`) e [`docs/phase-10-v1.md:297-299`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L297-L299) (critério H3)
+GRAVIDADE: ALTA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: O iterador síncrono retornado por `generate_content_stream` no SDK `google-genai` não implementa o método `.close()`. Chamar `stream.close()` levantará um `AttributeError`. Essa exceção será engolida pelo `except Exception as exc:`, que registrará um traceback de erro técnico em stderr e emitirá evento `{"event": "error", ...}` durante uma operação rotineira de cancelamento/barge-in. O implementador deve remover a chamada `stream.close()` (basta o `break` do laço ou fechamento no nível do cliente) e corrigir a descrição do critério H3.
+
+ACHADO: Falha no meio do streaming gera colisão de `sentenceIndex: 0` e fala "Não consegui pensar..." após fala parcial
+EVIDÊNCIA: [`docs/phase-10-v1.md:245-247`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L245-L247) (`turn.expectedSentences.add(0); turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, 0));`) e [`src/frontend/voice.ts:128`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/frontend/voice.ts#L128) (`this.playbackQueue.sort((a, b) => a.sentenceIndex - b.sentenceIndex);`)
+GRAVIDADE: ALTA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: Se a API do Gemini falhar após emitir com sucesso a frase 0 (ou 1), o bloco `catch` em `sessionManager.ts` adiciona cegamente `GENERATION_FAILURE_TEXT` com índice `0`. Isso duplica o índice 0 na lista `expectedSentences` e gera desordem na fila de reprodução do frontend via `sort()`. O usuário que já ouviu a introdução da resposta subitamente ouvirá "Não consegui pensar numa resposta agora." misturada ao áudio. O plano deve condicionar a emissão de `GENERATION_FAILURE_TEXT` ao caso em que nenhuma frase foi sintetizada ainda (`turn.expectedSentences.size === 0`). Se já houver frases sintetizadas, o turno deve ser encerrado de forma graciosa ou usar o próximo índice sequencial disponível.
+
+ACHADO: `to_gemini_contents()` descarta a mensagem do usuário se `messages[0]` não for do papel `system`
+EVIDÊNCIA: [`docs/phase-10-v1.md:129-133`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L129-L133) e comentário em [`docs/phase-10-v1.md:139-140`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L139-L140)
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: A lógica `messages[1:]` presume rigidamente que o índice 0 é sempre uma mensagem com `role: "system"`. Se a função for chamada com `[{"role": "user", "content": "Olá"}]`, `system_instruction` vira `""` e `contents` vira `[]` (porque `messages[1:]` é vazio), descartando completamente a pergunta do usuário e falhando a requisição na API. Além disso, a nota de risco no plano afirma erroneamente que o system prompt vazaria pro `contents`, o que é falso, já que o elemento 0 é descartado do fatiamento. A função deve filtrar mensagens iterando sobre a lista completa e separando os papéis defensivamente, sem assumir posições fixas de índice.
+
+ACHADO: Instanciação redundante de `genai.Client` a cada turno com risco de esgotamento de conexões
+EVIDÊNCIA: [`docs/phase-10-v1.md:156`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L156) (`client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])`) dentro de `handle_generate()`
+GRAVIDADE: MÉDIA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: O worker Python é um daemon persistente. Criar uma nova instância de `genai.Client` a cada chamada de geração abre novos pools de conexões HTTP (httpx) sem fechá-los explicitamente. O plano deve reutilizar uma instância do cliente no objeto `Worker` ou garantir o fechamento com context manager (`with genai.Client(...) as client:`).
+
+ACHADO: Falta de timeout de rede no SDK do Gemini expõe worker a `SIGKILL` desnecessário
+EVIDÊNCIA: [`docs/phase-10-v1.md:83-85`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L83-L85) e [`src/backend/voice/mlxWorkerEngine.ts:474-476`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/mlxWorkerEngine.ts#L474-L476)
+GRAVIDADE: MÉDIA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: Em inferência puramente local, o `SIGKILL` após 60s servia para recuperar travamentos de GPU do MLX. Em requisições de rede, uma conexão instável ou lenta pode ficar presa aguardando chunks. Se o plano não configurar um timeout explícito no cliente HTTP do Gemini (ex.: 15s), uma falha temporária de rede atinge o timeout de 60s do Node e assassina o processo do worker Python com `SIGKILL`, forçando o recarregamento dos modelos locais (Whisper e Qwen3). Definir um timeout de rede no SDK em Python para capturar a exceção e emitir `error` NDJSON sem matar o processo.
+
+ACHADO: Declaração de dependência aponta para arquivo volátil do `.gitignore` em vez de `requirements.in`
+EVIDÊNCIA: [`docs/phase-10-v1.md:115-119`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L115-L119), [`docs/phase-10-v1.md:272`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L272) em contraste com [`scripts/setup-voice.mjs:55-66`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/setup-voice.mjs#L55-L66) e [`.gitignore:9`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/.gitignore#L9)
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: O arquivo `voice-requirements.lock.txt` mora em `.runtime/` (que é git-ignorado) e é regerado dinamicamente via `pip freeze` toda vez que `scripts/setup-voice.mjs` executa `pip install -r scripts/worker/requirements.in`. O arquivo que define a dependência e é versionado no repositório é [`scripts/worker/requirements.in`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/scripts/worker/requirements.in). O plano deve indicar a adição de `google-genai` a `requirements.in` e incluí-lo na lista de arquivos afetados do §5.
+
+ACHADO: Ausência de alvo numérico de latência em H8 contradiz a meta de "sem regressão de latência" declarada no objetivo da fase
+EVIDÊNCIA: [`docs/phase-10-v1.md:42-43`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L42-L43) ("sem regressão de latência perceptível pro usuário") vs. [`docs/phase-10-v1.md:312-315`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L312-L315) (H8: "sem alvo numérico fixado nesta versão")
+GRAVIDADE: BAIXA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: O repositório segue disciplina de medição estrita com metas quantitativas (a Fase 2 estipulou mediana ≤4s / p95 ≤8s, com medições reais de ~1.9s a ~3.2s). Declarar em §1 que o objetivo é "sem regressão de latência", enquanto o critério de aceite H8 afirma "sem alvo numérico fixado", torna H8 uma verificação subjetiva não falseável. O plano deve estabelecer um teto numérico provisório (ex.: mediana ≤ 4.0s de ponta a ponta e Time-to-First-Chunk ≤ 1.5s), documentando desvios observados como débito técnico admitido.
+
+ACHADO: Comentário em `sessionManager.ts` (§4.4) contradiz o comportamento do catch externo
+EVIDÊNCIA: [`docs/phase-10-v1.md:244`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/docs/phase-10-v1.md#L244) (`if (session.activeTurn !== turn) throw err; // turno já superado, deixa o catch externo tratar`) em contraste com [`src/backend/voice/sessionManager.ts:643`](file:///Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai/src/backend/voice/sessionManager.ts#L643) (`if (session.activeTurn === turn)`)
+GRAVIDADE: BAIXA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: O catch externo do `runTurn` não trata o erro quando `session.activeTurn !== turn`; ele simplesmente descarta a execução. Lançar o erro (`throw err`) cria um ciclo inútil de captura. Alinhar o código ao padrão já existente na linha 556 do mesmo arquivo: `if (session.activeTurn !== turn) return;`.
+
+---
+
+VEREDITO: REJEITADO
+JUSTIFICATIVA: O plano contém duas falhas de severidade crítica que quebrarão a aplicação em produção: a incompatibilidade estrutural de `to_gemini_contents()` com o histórico multissentença do `sessionManager` (disparando erro HTTP 400 em praticamente qualquer diálogo real) e o travamento do worker com `SIGKILL` após 60s em caso de loop de repetição. Além disso, chamadas inexistentes como `stream.close()` e falhas na síntese de erro no meio do streaming inviabilizam a aprovação do plano no estado atual, exigindo a emissão de uma revisão v2.
