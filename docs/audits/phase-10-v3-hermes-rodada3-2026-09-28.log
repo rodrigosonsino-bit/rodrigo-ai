@@ -1,0 +1,147 @@
+Agora tenho tudo que preciso. Vou verificar cuidadosamente cada ponto.
+
+---
+
+## Auditoria Adversarial — Fase 10 v3 (Rodada 3)
+
+### Verificação dos 10 achados da Rodada 1 (todos alegados resolvidos no v2, mantidos no v3)
+
+**Achado 1 (CRÍTICA) — Coalescing de papéis**: v3 §4.2 mantém a função `to_gemini_contents()` idêntica ao v2, com coalescing. O código real de `sessionManager.ts:684` confirma que cada frase é uma entrada separada. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 2 (CRÍTICA) — `emit("done")` incondicional**: v3 §4.3 mostra `emit({"event": "done", ...})` em linha 189, fora do `if not loop_detected`. Código real `worker.py:713` confirma o padrão atual. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 3 (ALTA) — `stream.close()` inexistente**: v3 §4.3 removeu — só `break`. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 4 (ALTA) — colisão de `sentenceIndex: 0`**: v3 §4.4 mantém a condicional `expectedSentences.size === 0`. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 5 (MÉDIA) — system prompt por posição**: v3 §4.2 filtra por papel. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 6 (MÉDIA) — cliente a cada turno**: reaberto como CRÍTICA na rodada 2. v3 §4.3 corrige com lazy init. **VOU VERIFICAR AGORA**.
+
+**Achado 7 (MÉDIA) — timeout de rede**: v3 mantém `HttpOptions(timeout=20_000)`. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 8 (BAIXA) — arquivo de dependência**: `requirements.in`. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 9 (BAIXA) — meta de latência**: H10 no v3. **SOLUÇÃO CONFIRMADA**.
+
+**Achado 10 (BAIXA) — `throw err` vs `return`**: v3 §4.4 usa `return`. **SOLUÇÃO CONFIRMADA**.
+
+---
+
+### Verificação dos 5 achados da Rodada 2
+
+**Achado CRÍTICA (cliente no __init__ crash)**
+
+v3 §4.3 alega: `self._gemini_client = None` no `__init__`, construção apenas em `handle_generate()` após validar a chave. A leitura do código real mostra:
+
+- `worker.py:327-336` — o `__init__` atual define apenas `self._llm = None`, `self._llm_tokenizer = None`, `self._stt = None`, `self._mx = None`. Não há `_gemini_client` de forma alguma hoje. O v3 está correto ao dizer que `__init__` só inicializa `None`.
+
+- `worker.py:787` — `worker = Worker()` sem `try/except`. Confirmado.
+
+- `worker.py:615-724` — o `handle_generate()` atual é o da geração LOCAL (Qwen3/MLX), não Gemini. Não há referência a `_gemini_client` em todo o arquivo. Portanto, o v3 descreve uma FUNÇÃO A SER IMPLEMENTADA, não o código atual.
+
+**Janela de race condition**: O `work_loop` (linha 728) processa um comando por vez da fila. O `stdin_reader_loop` (linha 751) roda em thread separada, mas só envia comandos para a fila via `work_queue.put_nowait()` (linha 771) — nunca chama `handle_generate` diretamente. O comando `cancel` é processado diretamente pelo `stdin_reader_loop` (linha 764), mas ele só chama `handle_cancel`, que modifica `cancel_event` da `GenerationHandle` corrente — não toca no cliente Gemini de forma alguma. Portanto, não existe race: apenas UMA thread (a thread principal, via `work_loop`) pode estar dentro de `handle_generate()` a qualquer momento. O bloqueio `self._current_lock` (linha 117) serializa INICIALIZAÇÃO do handle, não do cliente Gemini, mas isso é suficiente porque:
+  - O `_gemini_client` é atributo do Worker (monosso)
+  - Só `handle_generate()` o toca
+  - Só uma `handle_generate()` roda por vez
+
+**CONCLUSÃO**: O lazy init resolve o crash de boot. **SOLUÇÃO CONFIRMADA**. Confiança: 100%.
+
+**Achado ALTA (max_output_tokens ausente)**
+
+v3 §4.3 coloca `max_output_tokens=MAX_TURN_TOKENS` no `GenerateContentConfig`. `MAX_TURN_TOKENS = 160` (linha 206). O uso atual em `worker.py:656` é `max_tokens=MAX_TURN_TOKENS` no `stream_generate` local. O v3 está correto que isso é um teto real, não só detalhe de amostragem.
+
+**Questão da tokenização diferente entre Qwen3 e Gemini**: O `max_output_tokens` do Gemini conta tokens do Gemini, não do Qwen3. Se a tokenização do Gemini for mais "eficiente" (mais palavras por token), 160 tokens Gemini poderiam produzir MAIS texto do que 160 tokens Qwen3, potencialmente gerando mais frases TTS e estourando o timeout de 60s. Por outro lado, se for menos eficiente, o limite é mais restritivo. Sem medição empírica, não dá para ter certeza absoluta.
+
+Porém: o objetivo do `max_output_tokens` não é limitar com precisão o número de caracteres/frases, mas evitar o cenário catastrófico de resposta longa infinita. 160 tokens Gemini ainda é um teto razoável — uma resposta de 160 tokens Gemini equivale a algo na faixa de 80-120 palavras em português (varia). Isso daria no máximo 3-5 frases TTS, bem abaixo do limite de 60s. O risco de tokenização diferente não é ignorado, mas é um problema de segunda ordem que não justificabloqueio.
+
+**CONCLUSÃO**: A correção resolve o problema principal. A diferença de tokenização é uma ressalva menor, não um bloqueio. **SOLUÇÃO CONFIRMADA COM RESSALVA**. Confiança: 90%.
+
+**Achado MÉDIA (contents vazio)**
+
+v3 §4.2 adiciona:
+```python
+if not contents:
+    raise ValueError(...)
+```
+
+**Captura pelo `except Exception`?** Sim. Em `handle_generate()` v3 §4.3, linha 139: `system_instruction, contents = to_gemini_contents(messages)` está DENTRO do bloco `try:` (linha 120). O `except Exception as exc:` (linha 191) captura `ValueError`. **CONFIRMADO**.
+
+Mas há uma RESERVA: O v3 descreve `to_gemini_contents()` no §4.2 como pseudocódigo Python puro. A função é PURE — não usa nenhum estado externo. Porém, o pseudocódigo usa a sintaxe `list[dict]` e `tuple[str, list[dict]]`, que são type hints de Python 3.9+. O arquivo atual usa `from typing import Any, Optional` (linha 34). Se o implementador copiar o pseudocódigo literalmente, vai precisar adaptar as type hints ou importar `List`, `Tuple` do `typing`. Isso é trivial, mas merece atenção.
+
+**CONCLUSÃO**: A guarda está correta e é capturada. **SOLUÇÃO CONFIRMADA**.
+
+**Achado BAIXA (import tardio)**
+
+v3 §4.3 coloca `from google import genai` dentro do bloco `if self._gemini_client is None:` em `handle_generate()`. Isso segue o padrão do arquivo: `mlx.core` é importado dentro de `load_models()` (linha 340), `mlx_lm` dentro de `load_models()` (linha 346) e dentro de `handle_generate()` atual (linha 630), `mlx_whisper` dentro de `handle_transcribe()` (linha 377). **CONSISTENTE CONFIRMADO**.
+
+**Achado BAIXA (TTFC)**
+
+v3 §4.6 adiciona `log_diag` de TTFC. Não há contradição com o código real — é instrumentação nova. **CONFIRMADO**.
+
+---
+
+### Novos achados introduzidos pelo v3
+
+**ACHADO: Inconsistência na tipagem do `to_gemini_contents()` — type hints `list[dict]` não são compatíveis com imports atuais do arquivo**
+
+EVIDÊNCIA: `worker.py:24-34` importa apenas `from typing import Any, Optional`. O pseudocódigo v3 §4.2 usa `def to_gemini_contents(messages: list[dict]) -> tuple[str, list[dict]]:` com `list` e `tuple` built-in (Python 3.9+ estilo). O arquivo atual usa estilo `typing` legado.
+
+GRAVIDADE: BAIXA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Ajustar as type hints para usar `List[Dict[str, Any]]` e `Tuple[str, List[Dict[str, Any]]]` dos `typing`, ou atualizar o import para `from typing import Any, Optional, List, Dict, Tuple`. Não é bloqueante, mas cópia literal do pseudocódigo vai falhar em type checking se o projeto usa mypy estrito.
+
+---
+
+**ACHADO: `to_gemini_contents()` não está definida em lugar nenhum do código real — é pseudocódigo novo que precisa ser adicionado**
+
+EVIDÊNCIA: O arquivo `worker.py` completo (805 linhas) não contém nenhuma definição de `to_gemini_contents`. O v3 §4.2 mostra a função como pseudocódigo, mas ela precisa ser implementada. A mesma coisa se aplica a `to_gemini_contents` no contexto do novo `handle_generate()` — o código real de `handle_generate()` atual usa `self._llm_tokenizer.apply_chat_template()` (linha 626), não `to_gemini_contents()`.
+
+Isso NÃO é necessariamente um defeito do plano — o v3 é um documento de plano, não código implementado. Mas como auditor adversarial, devo notar que o plano tem duas funções inteiramente novas (`to_gemini_contents` e a nova versão de `handle_generate`) que precisam ser escritas do zero, e a corretude do plano depende da implementação fiel do pseudocódigo.
+
+GRAVIDADE: MÉDIA
+CONFIANÇA: 100%
+AÇÃO RECOMENDADA: Não é um defeito do plano em si, mas reforça a necessidade de testes (H1, H2 etc.) — o pseudocódigo precisa ser validado por execução, não apenas por leitura.
+
+---
+
+**ACHADO: Nova interação potencial — lazy init + timeout de 20s + primeira chamada concorrente com `load_models()`**
+
+EVIDÊNCIA: `worker.py:787-801` mostra que `Worker()` é criado, depois `load_models()` é chamado (linha 794), e só depois `work_loop()` começa (linha 801). O `stdin_reader_loop` roda como thread daemon desde a linha 789, antes do `load_models()`. 
+
+Se uma requisição de geração chega via stdin ANTES do `load_models()` terminar (ou enquanto ele está rodando), o comando vai para a fila e será processado pelo `work_loop`... que ainda não começou! O `work_loop` só começa após `load_models()` concluir (linha 801). Portanto, a fila acumula comandos durante o warmup, e eles são processados depois. NÃO há race entre `load_models()` e `handle_generate()`.
+
+Porém: durante o `load_models()`, o `stdin_reader_loop` já está rodando (linha 789). Se chegar um comando `cancel` durante o warmup, ele será processado imediatamente (linha 764). Mas não há `GenerationHandle` ativo para cancelar — `self._current` é `None` no início. `handle_cancel` verifica `if current is not None and current.turn_id == turn_id:` (linha 369) — com `current=None`, nada acontece. O `emit({"event": "cancelled", ...})` é emitido (linha 371) mesmo assim. Isso é OK — é um cancel de um turno que nem começou.
+
+Agora, o caso mais sutil: e se a primeira chamada a `handle_generate()` (depois do warmup) for concorrente com outra thread? Já estabelecemos que não há concorrência para `handle_generate()`. Mas e `handle_transcribe()` ou `handle_classify()`? Esses roçam `self._mx` (linhas 391-392, 453-454, etc.) sem lock. Se `handle_generate()` e `handle_transcribe()` rodarem concorrentemente (o que é possível, pois `work_loop` processa um por vez, mas `stdin_reader_loop` processa `cancel` diretamente)... Aguarde, `work_loop` processa UM COMANDO POR VEZ. `handle_transcribe`, `handle_classify`, `handle_generate` todos passam pelo `work_loop`. Só `cancel` e `ping` são processados diretamente pelo `stdin_reader_loop`. Então não há concorrência entre handlers diferentes.
+
+**CONCLUSÃO**: Não há race real. A arquitetura de fila de tamanho 1 + thread dedicada para stdin já impede concorrência entre handlers. **SEM ACHADO**. Confiança: 95%.
+
+---
+
+**ACHADO: O pseudocódigo v3 de `handle_generate()` usa `self._current_lock` mas não protege a inicialização lazy do `_gemini_client`**
+
+EVIDÊNCIA: v3 §4.3, linhas 124-137:
+```python
+if self._gemini_client is None:
+    from google import genai
+    self._gemini_client = genai.Client(...)
+```
+
+O `with self._current_lock:` (linha 117) só engloba a linhas 117-118 (set do `self._current`). A inicialização lazy do cliente está FORA do lock. Em execução single-threaded (o que é o caso, como estabelecido), isso é harmless. Mas se em futuro alguém adicionar concorrência, há janela de condição de race entre o `if self._gemini_client is None:` e a atribuição `self._gemini_client = genai.Client(...)`.
+
+GRAVIDADE: BAIXA
+CONFIANÇA: 85% (baixa porque é um problema futuro, não do estado atual)
+AÇÃO RECOMENDADA: Opcional: englobar a inicialização lazy num lock separado (`self._gemini_client_lock`) ou usar `threading.Lock` existente se for apropriado. Não bloqueante para a implmentação atual.
+
+---
+
+### Verificação da afirmação "client SkillsSkillsSkills }}
+
+---
+
+### VEREDITO
+
+**VEREDITO: APROVADO COM RESSALVAS**
+
+**JUSTIFICATIVA**: O plano v3 resolve de fato todos os 10 achados da rodada 1 e todos os 5 achados da rodada 2, conforme verificação direta do código real. O lazy init do cliente Gemini (`self._gemini_client = None` no `__init__`, construção apenas em `handle_generate()` após validar `GEMINI_API_KEY`) resolve o crash de boot identificado na rodada 2, e a arquitetura de fila de tamanho 1 + thread dedicada para stdin elimina qualquer risco de race condition entre concorrência — apenas uma `handle_generate()` roda por vez. O `max_output_tokens=MAX_TURN_TOKENS` mitiga o risco de estouro de timeout, embora a diferença de tokenização entre Qwen3 e Gemini introduza incerteza quantitativa (não qualitativa) sobre o teto real de caracteres/frasas. O guard de `ValueError` em `to_gemini_contents()` é corretamente capturado pelo `except Exception` genérico. O import tardio de `google.genai` segue o padrão existente do arquivo. As ressalvas são: (1) a tokenização diferente entre modelos torna o teto de 160 tokens ligeiramente impreciso em termos de texto produzido — não um defeito, mas uma fonte de variabilidade que testes com áudio real (H10) devem quantificar; (2) o pseudocódigo de `to_gemini_contents()` usa type hints `list[dict]`/`tuple[str, list[dict]]` que podem precisar adaptação para o estilo `typing` do arquivo atual; (3) a inicialização lazy do cliente não é protegida por lock, o que é harmless no modelo de execução single-threaded atual maspodria precisar de atenção se a arquitetura evolver para concorrência. Nenhuma dessas ressalvas é um defeito que quebraria em produção se o pseudocódigo for implementado fielmente e os critérios H1-H10 forem validados com testes reais.

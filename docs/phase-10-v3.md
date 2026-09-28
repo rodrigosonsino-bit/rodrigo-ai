@@ -2,8 +2,8 @@
 
 Versão: v3
 Data: 2026-09-28
-Status: Rascunho, correções mecânicas da rodada 2 aplicadas — aguardando decisão do usuário
-sobre nova rodada de auditoria vs. implementação direta.
+Status: **APROVADO COM RESSALVAS na rodada 3 (Hermes, auditoria de código) — pronto para
+implementação.** Nenhuma ressalva é bloqueante; ver §10.
 Base: Corrige os 5 achados da rodada 2 (agy) sobre o v2 (`docs/audits/phase-10-v2-agy-rodada2-2026-09-28.log`,
 veredito REJEITADO — 1 CRÍTICA, 1 ALTA, 1 MÉDIA, 2 BAIXA). Os 10 achados da rodada 1 permanecem
 resolvidos como no v2 — a rodada 2 confirmou explicitamente 9 deles e apenas reabriu o achado 6
@@ -382,3 +382,59 @@ auditorias das rodadas 1 e 2.
 | 11 | `return` em vez de `throw` | BAIXA (rodada 1) | Confirmado resolvido | Inalterado do v2 | §4.4 |
 | 12 | Import de `google.genai` deve ser tardio (dentro de método), nunca no topo do módulo — quebraria testes standalone de funções puras | **BAIXA (novo)** | — | Import dentro do bloco de inicialização lazy em `handle_generate()` | §4.3 |
 | 13 | H9 (latência) sem métrica isolada de Time-to-First-Chunk do Gemini | **BAIXA (novo)** | — | `log_diag` de TTFC, instrumentação sem meta formal nova | §4.6 |
+
+## 10. Rodada 3 (Hermes, auditoria de código) — 2026-09-28
+
+**Troca de auditor conforme a regra do projeto** ("a partir da terceira rodada, troque de
+auditor" — `CLAUDE.md` do usuário): rodadas 1 e 2 foram `agy`; rodada 3 foi `docker exec hermes
+hermes -z`, contra o v3 + código real do repositório.
+
+**Escopo do que o Hermes viu, registrado por exigência da mesma regra de rotação** (o Hermes só
+enxerga `~/hermes-workspace`, fora do host): copiado pra
+`~/hermes-workspace/phase-10-v3-audit-2026-09-28/` **apenas código e documentos de plano/auditoria**
+— `docs/phase-10-v2.md`, `docs/phase-10-v3.md`, os dois logs de auditoria anteriores,
+`scripts/worker/worker.py`, `scripts/worker/requirements.in`,
+`src/backend/voice/{sessionManager.ts,mlxWorkerEngine.ts,engine.ts}`, `src/frontend/voice.ts`,
+`src/shared/voiceProtocol.ts`. **`docs/research/` (perfil teológico pessoal e material de
+Virtologia do usuário) nunca foi copiado** — decisão de privacidade separada, não tomada.
+
+**Resultado**: `docs/audits/phase-10-v3-hermes-rodada3-2026-09-28.log`. Confirmou os 10 achados
+da rodada 1 e os 5 achados da rodada 2 como resolvidos, incluindo o achado CRÍTICA reaberto
+(lazy init do cliente Gemini) — verificou linha por linha que a arquitetura de fila de tamanho 1
++ thread dedicada de stdin (`work_loop`/`stdin_reader_loop`, `worker.py:728,751`) já impede
+qualquer race condition entre `handle_generate()` e outros handlers, então o lazy init resolve o
+crash de boot sem precisar de lock adicional.
+
+Achou 4 pontos novos, todos não-bloqueantes:
+
+1. **Ressalva aceita** — `max_output_tokens=MAX_TURN_TOKENS` usa uma constante calibrada pro
+   tokenizer do Qwen3 local; o tokenizer do Gemini é diferente, então 160 tokens Gemini pode
+   produzir uma quantidade de texto (e portanto de frases TTS) algo diferente de 160 tokens
+   Qwen3. Não é um defeito — o teto continua evitando o cenário catastrófico (resposta infinita)
+   — mas é uma fonte real de variabilidade que H10 (verificação manual com áudio real) deve medir
+   na prática, não só assumir por teoria. Nenhuma mudança de código necessária agora.
+2. **Achado disprovado (falso positivo)** — Hermes apontou que o pseudocódigo de
+   `to_gemini_contents()` (`list[dict]`, `tuple[str, list[dict]]`) usaria "type hints
+   incompatíveis com o estilo `typing` legado do arquivo". **Verifiquei e é falso**: o
+   `worker.py` real já usa generics nativos do Python em toda parte (`dict[str, Any]`,
+   `tuple[str, str | None]`, `list[str]` — ex. `worker.py:172,214,294`), e o `.runtime/.venv` do
+   projeto é Python 3.12, que suporta essa sintaxe nativamente desde a 3.9. `from typing import
+   Any, Optional` no topo do arquivo é usado só porque `Any`/`Optional` não têm forma nativa
+   equivalente — não porque o arquivo evita generics nativos. Mesma disciplina de nunca aceitar
+   achado de auditor sem verificação direta contra o código (precedente: achado de Hermes sobre
+   o radical "grav" na Fase 7, também disprovado por teste empírico). Nenhuma ação necessária.
+3. **Sem achado, mas com raciocínio registrado** — Hermes investigou uma race hipotética entre
+   `load_models()` (que roda antes de `work_loop()` começar) e uma geração que chegasse durante o
+   warmup; concluiu que a fila de tamanho 1 processa comandos só depois do warmup terminar, sem
+   concorrência real. Não é um achado, é verificação negativa registrada pra não precisar
+   re-perguntar isso numa rodada futura.
+4. **BAIXA, especulativo, aceito como não-bloqueante** — a inicialização lazy do `_gemini_client`
+   não está dentro de nenhum lock; harmless hoje porque só uma `handle_generate()` roda por vez
+   (mesma conclusão do ponto 3), mas seria uma pendência real se o worker um dia ganhar
+   concorrência entre handlers. Não implementar agora — anotado como dívida técnica condicional,
+   não uma correção do v3.
+
+**VEREDITO: APROVADO COM RESSALVAS.** Nenhuma das 4 ressalvas acima é bloqueante — uma foi
+disprovada, duas são verificações negativas/apenas instrutivas, e a única aceita como real
+(variabilidade de tokenização) já é coberta pela medição manual prevista em H10. **Plano pronto
+para implementação.**
