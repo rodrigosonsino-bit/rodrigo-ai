@@ -16,7 +16,7 @@ import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { createSystemTools, TOOL_FAILURE_TEXT, HoraAtualTool } from '../tools/index.js';
 import { createMutatingTools } from '../tools/index.js';
 import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
-import { VOICE_LIMITS, MUTATION_FAILURE_TEXT, MUTATION_CANCELLED_TEXT } from '../../shared/voiceProtocol.js';
+import { VOICE_LIMITS, MUTATION_FAILURE_TEXT, MUTATION_CANCELLED_TEXT, GENERATION_FAILURE_TEXT } from '../../shared/voiceProtocol.js';
 
 function buildTestWav(durationSeconds = 0.2, sampleRate = 16000): Buffer {
   const totalSamples = Math.round(durationSeconds * sampleRate);
@@ -1931,6 +1931,148 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       }
     });
   });
+
+  describe('Geração com Gemini e tratamento de erro condicional (Fase 10a — H5)', () => {
+    let h: Harness;
+    let sse: ReturnType<typeof readSse> | null = null;
+
+    beforeEach(async () => {
+      h = await setupHarness();
+    });
+
+    afterEach(async () => {
+      sse?.close();
+      sse = null;
+      await teardownHarness(h);
+    });
+
+    it('H5 (Cenário A): falha do Gemini sem nenhuma frase emitida sintetiza GENERATION_FAILURE_TEXT com índice 0', async () => {
+      // Simula erro da API do Gemini antes de qualquer frase (ex.: timeout de 20s ou erro de cota)
+      h.engine.generate = async () => {
+        throw new Error('Gemini API 503: Service Unavailable');
+      };
+
+      const res = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await res.json()) as { sessionId: string; token: string };
+
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      await sse.waitFor(1);
+
+      const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(0.5)
+      });
+      assert.equal(audioRes.status, 200);
+
+      // Espera o turno concluir (state ouvindo, processando, transcript, routing, falando, sentence_audio_ready, turn_done, ouvindo)
+      await sse.waitFor(8, 5000);
+
+      const readyEvents = sse.events.filter(
+        (e) => (e as { type: string }).type === 'sentence_audio_ready'
+      ) as Array<{ type: string; sentenceIndex: number; text: string }>;
+
+      assert.equal(readyEvents.length, 1, 'deve emitir exatamente 1 evento de áudio (o erro falado)');
+      assert.equal(readyEvents[0].sentenceIndex, 0, 'deve ter índice 0');
+      assert.equal(readyEvents[0].text, GENERATION_FAILURE_TEXT);
+      assert.ok(h.tts.synthesizeCalls.includes(GENERATION_FAILURE_TEXT), 'TTS deve ter sintetizado a frase de erro');
+
+      // Turno deve terminar normalmente (turn_done + ouvindo), sem entrar em state: 'erro'
+      const turnDone = sse.events.find((e) => (e as { type: string }).type === 'turn_done');
+      assert.ok(turnDone, 'deve emitir turn_done');
+
+      const stateEvents = sse.events.filter((e) => (e as { type: string }).type === 'state') as Array<{
+        type: string;
+        state: string;
+      }>;
+      const lastState = stateEvents[stateEvents.length - 1];
+      assert.equal(lastState.state, 'ouvindo', 'estado final deve ser ouvindo');
+      assert.ok(!stateEvents.some((e) => e.state === 'erro'), 'não deve entrar em estado erro');
+    });
+
+    it('H5 (Cenário B): falha do Gemini após pelo menos 1 frase encerra com o que já foi dito sem colisão de índice', async () => {
+      // Simula erro de streaming do Gemini após a frase 0 já ter sido entregue
+      h.engine.generate = async (_turnId, _epoch, _messages, callbacks) => {
+        callbacks.onSentence('Primeira frase gerada pelo modelo com sucesso.', 0);
+        throw new Error('Gemini network stream broken mid-turn');
+      };
+
+      const res = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await res.json()) as { sessionId: string; token: string };
+
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      await sse.waitFor(1);
+
+      const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(0.5)
+      });
+      assert.equal(audioRes.status, 200);
+
+      await sse.waitFor(8, 5000);
+
+      const readyEvents = sse.events.filter(
+        (e) => (e as { type: string }).type === 'sentence_audio_ready'
+      ) as Array<{ type: string; sentenceIndex: number; text: string }>;
+
+      assert.equal(readyEvents.length, 1, 'deve emitir apenas a frase que completou');
+      assert.equal(readyEvents[0].sentenceIndex, 0);
+      assert.equal(readyEvents[0].text, 'Primeira frase gerada pelo modelo com sucesso.');
+
+      // NÃO deve sintetizar GENERATION_FAILURE_TEXT
+      assert.ok(
+        !h.tts.synthesizeCalls.includes(GENERATION_FAILURE_TEXT),
+        'NÃO deve sintetizar GENERATION_FAILURE_TEXT quando já houve frase falada'
+      );
+
+      const turnDone = sse.events.find((e) => (e as { type: string }).type === 'turn_done');
+      assert.ok(turnDone, 'deve emitir turn_done normalmente');
+
+      const stateEvents = sse.events.filter((e) => (e as { type: string }).type === 'state') as Array<{
+        type: string;
+        state: string;
+      }>;
+      assert.equal(stateEvents[stateEvents.length - 1].state, 'ouvindo');
+      assert.ok(!stateEvents.some((e) => e.state === 'erro'));
+    });
+
+    it('H5 (Cenário C): turno cancelado/superado durante a falha do Gemini não sintetiza erro nem afeta o novo turno', async () => {
+      let turnId1 = '';
+      const res = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await res.json()) as { sessionId: string; token: string };
+
+      h.engine.generate = async (turnId) => {
+        turnId1 = turnId;
+        // Simula cancelamento do turno pelo cliente antes da falha ser tratada
+        await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turnId })
+        });
+        throw new Error('Gemini failed after cancel');
+      };
+
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      await sse.waitFor(1);
+
+      await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(0.5)
+      });
+
+      // Aguarda um tempo para garantir que nada foi sintetizado para o turno cancelado
+      await new Promise((r) => setTimeout(r, 100));
+
+      assert.ok(
+        !h.tts.synthesizeCalls.includes(GENERATION_FAILURE_TEXT),
+        'NÃO deve sintetizar GENERATION_FAILURE_TEXT para turno superado'
+      );
+      assert.ok(h.engine.cancelledTurnIds.includes(turnId1));
+    });
+  });
 });
+
 
 

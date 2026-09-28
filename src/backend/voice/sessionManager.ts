@@ -5,6 +5,7 @@ import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
 import type { ConversationMessage, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
 import {
+  GENERATION_FAILURE_TEXT,
   MUTATION_CANCELLED_TEXT,
   MUTATION_FAILURE_TEXT,
   PENDING_MUTATION_TTL_MS,
@@ -619,15 +620,31 @@ export class SessionManager {
         ...session.history
       ];
 
-      await this.engine.generate(turn.turnId, turn.epoch, messagesForEngine, {
-        onSentence: (rawText, index) => {
-          if (session.activeTurn !== turn) return;
-          const text = cleanTextForSpeech(rawText);
-          if (!text) return; // fragmento não-falável (ex.: só emoji/markdown) — descarta silenciosamente
-          turn.expectedSentences.add(index);
-          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, index));
+      try {
+        await this.engine.generate(turn.turnId, turn.epoch, messagesForEngine, {
+          onSentence: (rawText, index) => {
+            if (session.activeTurn !== turn) return;
+            const text = cleanTextForSpeech(rawText);
+            if (!text) return; // fragmento não-falável (ex.: só emoji/markdown) — descarta silenciosamente
+            turn.expectedSentences.add(index);
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, index));
+          }
+        });
+      } catch (err) {
+        if (session.activeTurn !== turn) return;
+
+        if (turn.expectedSentences.size === 0) {
+          const text = GENERATION_FAILURE_TEXT;
+          turn.expectedSentences.add(0);
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, 0));
+        } else {
+          console.error(
+            `[generate] Gemini falhou no meio do streaming (turnId=${turn.turnId}) — encerrando com o que já foi dito.`,
+            err
+          );
         }
-      });
+        // segue pro Promise.allSettled(turn.pendingSynthesis) e turn_done normalmente, nos dois casos.
+      }
 
       // Só finaliza o turno (turn_done) depois que toda síntese de frase já disparada
       // realmente terminou — sem isso, turn_done podia chegar ao cliente antes do

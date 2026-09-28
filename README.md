@@ -2,9 +2,9 @@
 
 Assistente de voz pessoal local, em TypeScript/Node.js (backend/frontend) + Python/MLX (voz).
 A Fase 1 estabeleceu a fundação técnica (comunicação frontend/backend em loopback estrito). A Fase 2
-adiciona conversa por voz em PT-BR **100% local**: captura de microfone, detecção de fala (VAD),
-transcrição (Whisper local), resposta (LLM local) e síntese de voz — sem nenhuma API paga, sem
-chamada de rede durante a conversa, sem chave de API.
+adiciona conversa por voz em PT-BR: captura de microfone, detecção de fala (VAD),
+transcrição (Whisper local), classificação de intenção e síntese de voz locais.
+A partir da Fase 10a, a geração de resposta discursiva usa o Gemini (Google GenAI API via nuvem), mantendo STT, classificação e TTS locais em loopback.
 
 ---
 
@@ -13,7 +13,7 @@ chamada de rede durante a conversa, sem chave de API.
 - **Node.js**: `>= 20.0.0` (validado e testado no Node v26.5.1).
 - **npm**: `>= 10.0.0` (validado e testado no npm 11.17.0).
 - **Sistema Operacional**: **macOS testado e validado**. Ambientes Linux e Windows **não foram validados** nesta fase.
-- **Rede**: Acesso à internet necessário exclusivamente durante a instalação inicial de dependências (`npm ci`) e o download único dos modelos de voz (`npm run setup:voice`). Durante a conversa/execução, o aplicativo opera 100% desconectado de serviços externos.
+- **Rede**: Acesso à internet necessário durante a instalação inicial de dependências (`npm ci`), o download dos modelos de voz (`npm run setup:voice`) e, a partir da Fase 10a, para a geração de respostas discursivas via API do Gemini (`GEMINI_API_KEY`). Captura de áudio, STT, classificação de intenções, ferramentas, memória e TTS continuam operando localmente em loopback.
 - **Voz (Fase 2)**: `uv` instalado (https://docs.astral.sh/uv/) e `ffmpeg` no PATH. Hardware validado: MacBook Air Apple M5, 16 GB de RAM unificada — outras configurações Apple Silicon devem funcionar, mas não foram medidas.
 
 ---
@@ -36,8 +36,7 @@ Cria um venv Python isolado em `.runtime/.venv` (nunca usa o Python de sistema),
 `mlx-community/Qwen3-4B-Instruct-2507-4bit` (LLM) e `mlx-community/whisper-small-mlx` (STT) do
 Hugging Face para `.runtime/hf-cache` (teto de 8 GiB verificado **antes** de baixar qualquer byte —
 aborta sem baixar nada se o tamanho projetado exceder o limite), e grava um manifesto em
-`.runtime/models-manifest.json` com as revisões e tamanhos resolvidos. Depois desse passo único, a
-conversa roda inteiramente offline — `HF_HUB_OFFLINE=1` é forçado em operação normal.
+`.runtime/models-manifest.json` com as revisões e tamanhos resolvidos. Depois desse passo único, STT e classificação rodam inteiramente offline (`HF_HUB_OFFLINE=1` é forçado em operação normal), enquanto a geração de respostas utiliza a API do Gemini via nuvem (Fase 10a).
 
 Se `npm run setup:voice` não tiver rodado (ou `.runtime` for removido), as rotas `/api/voice/*`
 respondem `503` com uma mensagem PT-BR explicando o que falta — o resto da aplicação (Fase 1)
@@ -189,10 +188,10 @@ rodrigo-ai/
 
 ## 6. Transparência de Recursos e Custos
 
-- **Sem cobrança de API ou inferência**: nenhuma API paga, serviço em nuvem ou CDN externo é usado — nem na Fase 1, nem na conversa por voz da Fase 2 (LLM, STT e TTS rodam 100% localmente).
-- **Hardware e Energia**: a aplicação opera localmente, demandando apenas o processamento e energia da máquina hospedeira. Voz validada em MacBook Air Apple M5 (16 GB); benchmark real em `docs/audits/voice-benchmark-latest.json` após `npm run bench:voice`.
-- **Qualidade é limitada pelo hardware local**: um modelo de 4B parâmetros e uma voz sintética (`say` ou Kokoro) não têm a mesma qualidade de um serviço de voz em nuvem — essa é uma escolha deliberada da Fase 2 (protótipo sem custo recorrente), não uma limitação escondida. Naturalidade e precisão devem ser avaliadas pelo usuário; nada aqui declara equivalência a voz em nuvem.
-- **Fases Futuras do Roteiro**:
+- **Custos de API e inferência**: STT (Whisper), classificação de intenção (Qwen3) e TTS rodam 100% localmente sem custo de API. A partir da Fase 10a, a geração de resposta discursiva consome a API do Gemini (Google GenAI), sujeita a cotas e custos por chamada do provedor conforme o uso.
+- **Hardware e Energia**: a aplicação opera localmente para STT, classificação e áudio, demandando processamento e energia da máquina hospedeira. Voz validada em MacBook Air Apple M5 (16 GB); benchmark real em `docs/audits/voice-benchmark-latest.json` após `npm run bench:voice`.
+- **Qualidade de voz e modelos**: o STT e o classificador utilizam modelos locais leves para garantir baixa latência e operação loopback, enquanto a geração textual foi migrada para o Gemini na Fase 10a após decisão explícita e auditoria adversarial (docs/phase-10-v3.md). A síntese de voz (`say` ou Kokoro) roda localmente.
+- **Roteiro e Fases**:
   - **Fase 3**: Orquestrador (roteamento entre especialistas);
   - **Fase 4**: Primeiros especialistas;
-  - **Fase 10**: possível troca de modelo/provedor (inclusive pago) — sempre com plano auditado e autorização explícita antes de qualquer mudança, nunca silenciosa.
+  - **Fase 10a**: Provedor de geração em nuvem (Gemini) — implementado conforme plano auditado.

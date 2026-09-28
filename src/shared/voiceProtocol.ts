@@ -130,6 +130,7 @@ export const DETECT_CONFIRMATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_CONFIRMATION_T
 export const PENDING_MUTATION_TTL_MS = VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
 export const MUTATION_FAILURE_TEXT = 'Não consegui salvar isso agora.';
 export const MUTATION_CANCELLED_TEXT = 'Tudo bem, não fiz nada.';
+export const GENERATION_FAILURE_TEXT = 'Não consegui pensar numa resposta agora.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */
 export const KNOWLEDGE_LIMITS = {

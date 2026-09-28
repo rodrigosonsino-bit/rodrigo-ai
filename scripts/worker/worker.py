@@ -202,8 +202,49 @@ def parse_confirmation_output(raw: str) -> str:
     return "SIM" if normalized == "SIM" else "NAO"
 
 
+def to_gemini_contents(messages: list[dict]) -> tuple[str, list[dict]]:
+    """Separa o system prompt (identificado pelo papel 'system', em qualquer posição — não
+    assume messages[0]) do resto, e consolida mensagens consecutivas do mesmo papel num único
+    `content` com múltiplas `parts` — a API do Gemini exige alternância estrita user/model, e
+    o histórico do Rodrigo grava cada frase falada como uma entrada 'assistant' separada
+    (sessionManager.ts markPlayed()), então respostas de mais de uma frase e barge-ins geram
+    sequências de papel repetido que precisam ser fundidas, não enviadas cruas."""
+    system_parts = [m["content"] for m in messages if m["role"] == "system"]
+    system_instruction = "\n\n".join(system_parts)
+
+    non_system = [m for m in messages if m["role"] != "system"]
+
+    contents: list[dict] = []
+    for m in non_system:
+        role = "model" if m["role"] == "assistant" else "user"
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"].append({"text": m["content"]})
+        else:
+            contents.append({"role": role, "parts": [{"text": m["content"]}]})
+
+    # A API do Gemini exige que o primeiro content seja 'user' — se o histórico (caso raro,
+    # praticamente só em teste) começar com 'model', descarta esse prefixo em vez de mandar uma
+    # requisição malformada.
+    while contents and contents[0]["role"] != "user":
+        contents.pop(0)
+
+    # Achado novo MÉDIA (rodada 2): o pop acima pode esvaziar `contents` por completo (nenhuma
+    # mensagem 'user' em todo o histórico) — na prática só ocorre em teste unitário sintético
+    # (em runtime real o último item de session.history antes de generate() é sempre 'user',
+    # sessionManager.ts:376), mas enviar contents=[] pro Gemini gera HTTP 400 sem nenhuma
+    # indicação da causa real. Falha explícita e cedo, aqui, é mais barato de depurar.
+    if not contents:
+        raise ValueError(
+            "to_gemini_contents: histórico não contém nenhuma mensagem 'user' — nada para "
+            "enviar ao Gemini."
+        )
+
+    return system_instruction, contents
+
+
 STT_MODEL_ID = "mlx-community/whisper-small-mlx"
 MAX_TURN_TOKENS = 160
+
 
 
 def log_diag(message: str) -> None:
@@ -333,6 +374,8 @@ class Worker:
         self._llm_tokenizer = None
         self._stt = None
         self._mx = None
+        self._gemini_client = None  # lazy — ver handle_generate()
+        self._genai = None
 
     # --- Carregamento de modelos (warmup) ---
 
@@ -623,55 +666,63 @@ class Worker:
             self._current = handle
 
         try:
-            prompt = self._llm_tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True, tokenize=False
-            )
+            if not os.environ.get("GEMINI_API_KEY"):
+                raise RuntimeError("GEMINI_API_KEY ausente — configure a variável de ambiente.")
 
-            from mlx_lm.generate import stream_generate
-            from mlx_lm.sample_utils import make_logits_processors, make_sampler
+            if self._gemini_client is None:
+                # Achado CRÍTICA reaberto (rodada 2): import e construção tardios — nunca no
+                # __init__ nem no topo do módulo (o mesmo padrão de lazy import que mlx.core/mlx_lm
+                # já seguem hoje, achado novo BAIXA da rodada 2 também cobre isso). Se a chave
+                # estiver ausente, o RuntimeError acima já interrompeu antes de chegar aqui — o
+                # cliente nunca é construído com api_key vazia.
+                from google import genai
+                self._genai = genai
+                self._gemini_client = genai.Client(
+                    api_key=os.environ["GEMINI_API_KEY"],
+                    http_options=genai.types.HttpOptions(timeout=20_000),  # 20s — bem abaixo do
+                    # timeout de 60s do Node (VOICE_LIMITS.TURN_TIMEOUT_MS), pra que uma falha de
+                    # rede emita "error" NDJSON e libere o turno, em vez de deixar o Node matar o
+                    # worker inteiro com SIGKILL por uma causa que não é travamento de GPU.
+                )
+            else:
+                genai = self._genai
 
-            sampler = make_sampler(temp=0.7)
-            # Achado real de teste (Fase 4, verificação com áudio real): sem penalidade de
-            # repetição, o Qwen3-4B-Instruct-2507-4bit entra em loop, repetindo a mesma
-            # frase dezenas de vezes antes de variar — mais visível em respostas longas e
-            # discursivas (Teologia/Virtologia) do que nas perguntas curtas usadas nos
-            # benchmarks das Fases 2-3, que não expunham o problema. `repetition_context_size`
-            # igual a MAX_TURN_TOKENS (não o padrão de 20) porque uma frase repetida some da
-            # janela de contexto do penalizador antes do fim do turno se a janela for menor
-            # que a resposta inteira — testado com 64: o loop reaparecia depois de ~2
-            # repetições, exatamente quando a 1ª ocorrência saía da janela.
-            logits_processors = make_logits_processors(
-                repetition_penalty=1.3, repetition_context_size=MAX_TURN_TOKENS
-            )
+            system_instruction, contents = to_gemini_contents(messages)
+
             buffer = ""
             sentence_index = 0
-            token_count = 0
-            emitted_normalized: list[str] = []  # histórico de frases deste turno p/ detecção
+            emitted_normalized: list[str] = []
             loop_detected = False
 
-            for response in stream_generate(
-                self._llm,
-                self._llm_tokenizer,
-                prompt,
-                max_tokens=MAX_TURN_TOKENS,
-                sampler=sampler,
-                logits_processors=logits_processors,
-            ):
+            stream = self._gemini_client.models.generate_content_stream(
+                model="gemini-flash-latest",
+                contents=contents,
+                config=genai.types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    max_output_tokens=MAX_TURN_TOKENS,  # Achado ALTA novo (rodada 2) — ver abaixo
+                ),
+            )
+
+            gemini_call_started = time.monotonic()
+            first_chunk_logged = False
+            for chunk in stream:
+                if not first_chunk_logged:
+                    log_diag(f"Gemini TTFC: {time.monotonic() - gemini_call_started:.2f}s (turnId={turn_id})")
+                    first_chunk_logged = True
+
                 if handle.cancel_event.is_set():
-                    log_diag(f"Geração cancelada (turnId={turn_id}) — descartando sem mx.eval().")
-                    break
+                    log_diag(f"Geração cancelada (turnId={turn_id}) — parando de consumir o stream do Gemini.")
+                    break  # achado 3 (rodada 1) — sem stream.close(), método inexistente no SDK
 
-                buffer += response.text
-                token_count += 1
+                buffer += chunk.text or ""
 
+                # EXATAMENTE o mesmo laço de find_sentence_boundary/emit/dedupe já existente e
+                # testado — reaproveitado sem mudança, só a origem de `buffer` mudou:
                 boundary = find_sentence_boundary(buffer)
                 while boundary is not None:
                     sentence = buffer[:boundary].strip()
                     buffer = buffer[boundary:]
                     if sentence:
-                        # Correção do loop de repetição (achado fora do escopo da Fase 4, ver
-                        # docs/implementation-phase-4.md e docs/fix-generation-repetition-loop-v2.md):
-                        # trata uma frase quase-duplicada como fim natural da resposta, não como erro.
                         if _is_near_duplicate_sentence(sentence, emitted_normalized):
                             log_diag(
                                 f"Loop de repetição detectado (turnId={turn_id}, "
@@ -689,17 +740,13 @@ class Worker:
                         emitted_normalized.append(_normalize_for_dedup(sentence))
                         sentence_index += 1
                     boundary = find_sentence_boundary(buffer)
-
                 if loop_detected:
                     break
 
-                if token_count >= MAX_TURN_TOKENS:
-                    break
-
             if not handle.cancel_event.is_set():
-                # O residual também passa pela detecção — sem isso, um corte por
-                # MAX_TURN_TOKENS no meio de uma repetição vazaria a frase duplicada pela
-                # porta dos fundos, contornando a checagem acima.
+                # Achado 2 (CRÍTICA, rodada 1): "done" é emitido INCONDICIONALMENTE aqui — um loop
+                # detectado é fim natural da resposta, mesma semântica do código local hoje
+                # (worker.py:699-713), não uma falha que deveria travar o protocolo NDJSON.
                 if not loop_detected:
                     leftover = buffer.strip()
                     if leftover and not _is_near_duplicate_sentence(leftover, emitted_normalized):
@@ -711,17 +758,21 @@ class Worker:
                             "text": leftover,
                         })
                 emit({"event": "done", "reqId": req_id, "turnId": turn_id})
-        except Exception as exc:  # noqa: BLE001
-            log_diag(f"Erro na geração: {exc}\n{traceback.format_exc()}")
-            emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao gerar resposta."})
+
+        except Exception as exc:  # noqa: BLE001 — chave ausente, timeout de rede (20s, acima),
+                                    # erro de cota/API do Gemini, ValueError de to_gemini_contents —
+                                    # todos tratados igual: erro honesto
+            log_diag(f"Erro na geração via Gemini: {exc}\n{traceback.format_exc()}")
+            emit({
+                "event": "error",
+                "reqId": req_id,
+                "turnId": turn_id,
+                "message": "Falha ao gerar resposta via Gemini.",
+            })
         finally:
             with self._current_lock:
                 if self._current is handle:
                     self._current = None
-            # Ponto crítico (Refinamento 2 do adendo): limpar cache sem forçar mx.eval()
-            # nos tensores pendentes do turno cancelado.
-            if self._mx is not None:
-                self._mx.clear_cache()
 
     # --- Loop de trabalho (thread principal) ---
 
