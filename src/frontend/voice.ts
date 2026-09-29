@@ -50,6 +50,16 @@ export class VoiceController {
   private playbackQueue: QueuedChunk[] = [];
   private playbackActive = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  /**
+   * Incrementado SINCRONAMENTE em triggerBargeIn(), antes de source.stop(). O evento
+   * onended do Web Audio dispara de forma assíncrona — currentTurnId sozinho não muda
+   * nesse momento (só muda quando um turno NOVO começa), então checar só turnId deixa
+   * passar uma frase interrompida como se tivesse tocado inteira (achado de consulta ao
+   * Codex CLI, 2026-09-29, confirmado por leitura de código). playbackGeneration fecha
+   * essa janela porque muda no mesmo instante síncrono do stop(), antes de qualquer
+   * continuação assíncrona rodar.
+   */
+  private playbackGeneration = 0;
 
   constructor(
     private readonly onStateChange: (state: VoiceState) => void,
@@ -268,6 +278,7 @@ export class VoiceController {
 
   private triggerBargeIn(): void {
     this.bargeInCandidateMs = 0;
+    this.playbackGeneration++;
     this.stopPlaybackImmediately();
 
     if (this.currentTurnId) {
@@ -315,6 +326,7 @@ export class VoiceController {
   }
 
   private async playChunk(chunk: QueuedChunk): Promise<void> {
+    const generation = this.playbackGeneration;
     const url = `/api/voice/session/audio/${chunk.audioId}?sessionId=${encodeURIComponent(this.sessionId!)}&token=${encodeURIComponent(this.token!)}`;
     const res = await fetch(url);
     if (!res.ok) return;
@@ -323,7 +335,10 @@ export class VoiceController {
     if (!this.audioContext) return;
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-    if (chunk.turnId !== this.currentTurnId) return; // cancelado enquanto decodificava
+    // chunk.turnId !== currentTurnId cobre um turno NOVO já ter começado; generation
+    // cobre um barge-in que ainda não começou um turno novo (ver comentário no campo
+    // playbackGeneration acima) — as duas checagens são necessárias, nenhuma sozinha basta.
+    if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // cancelado enquanto decodificava
 
     await new Promise<void>((resolve) => {
       const source = this.audioContext!.createBufferSource();
@@ -339,7 +354,7 @@ export class VoiceController {
       source.start();
     });
 
-    if (chunk.turnId !== this.currentTurnId) return; // barge-in ocorreu durante a reprodução
+    if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // barge-in ocorreu durante a reprodução
 
     this.onAssistantText(chunk.text);
     void fetch('/api/voice/session/played', {
@@ -362,6 +377,7 @@ export class VoiceController {
   }
 
   private teardown(): void {
+    this.playbackGeneration++;
     this.stopPlaybackImmediately();
     this.eventSource?.close();
     this.eventSource = null;

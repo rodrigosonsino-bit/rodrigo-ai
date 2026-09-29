@@ -183,6 +183,16 @@ interface Session {
    * texto obsoleto no histórico do LLM.
    */
   lastTurnId: string | null;
+  /**
+   * turnIds explicitamente cancelados por barge-in (cancelTurn()), mesmo depois que
+   * activeTurn já tenha voltado a null (geração terminou, só a reprodução no cliente
+   * seguia em andamento). markPlayed() rejeita qualquer confirmação para um turnId aqui,
+   * independente de já ser ou não o lastTurnId — sem isso, um barge-in que interrompe a
+   * REPRODUÇÃO (não a geração) do turno mais recente não é pego pela checagem de
+   * lastTurnId sozinha, porque nenhum turno novo começou ainda (achado de consulta ao
+   * Codex CLI, 2026-09-29, confirmado por leitura de código).
+   */
+  cancelledTurnIds: Set<string>;
   armedMutation: ArmedMutation | null;
   pendingMutation: PendingMutation | null;
 }
@@ -286,6 +296,7 @@ export class SessionManager {
         history: [],
         activeTurn: null,
         lastTurnId: null,
+        cancelledTurnIds: new Set(),
         armedMutation: null,
         pendingMutation: null
       };
@@ -354,6 +365,9 @@ export class SessionManager {
     };
     session.activeTurn = activeTurn;
     session.lastTurnId = turnId;
+    // Turno novo torna qualquer cancelamento anterior irrelevante pra frente — evita
+    // crescimento sem limite do Set ao longo de uma sessão longa com muitos barge-ins.
+    session.cancelledTurnIds.clear();
 
     this.emit(session, { type: 'state', state: 'processando' });
 
@@ -698,6 +712,12 @@ export class SessionManager {
     // uma reprodução de um turno já superado por barge-in injete texto obsoleto no histórico.
     if (turnId !== session.lastTurnId) return false;
 
+    // Rejeita também o turno MAIS RECENTE se ele foi explicitamente cancelado por
+    // barge-in — cobre o caso em que a interrupção acontece durante a REPRODUÇÃO (não a
+    // geração) do turno, quando nenhum turno novo começou ainda e a checagem de
+    // lastTurnId sozinha não pegaria isso (achado de consulta ao Codex CLI, 2026-09-29).
+    if (session.cancelledTurnIds.has(turnId)) return false;
+
     session.history.push({ role: 'assistant', content: text });
     this.trimHistory(session);
 
@@ -721,6 +741,14 @@ export class SessionManager {
     const session = this.getAuthorized(sessionId, token);
     if (!session) return false;
     this.touch(session);
+
+    // Marcado incondicionalmente, ANTES de checar activeTurn — o caso mais comum de
+    // barge-in na prática é o usuário interromper enquanto o áudio já gerado ainda está
+    // sendo reproduzido, quando activeTurn já voltou a null (geração terminou antes da
+    // reprodução). Sem isso fora do if abaixo, markPlayed() não rejeitaria uma
+    // confirmação de reprodução tardia desse turno interrompido (achado de consulta ao
+    // Codex CLI, 2026-09-29, confirmado por leitura de código).
+    session.cancelledTurnIds.add(turnId);
 
     if (session.activeTurn && session.activeTurn.turnId === turnId) {
       this.engine.cancel(turnId);

@@ -339,6 +339,49 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
     await teardownHarness(h);
   });
 
+  it('regressão (achado de consulta Codex CLI, 2026-09-29): barge-in DURANTE A REPRODUÇÃO (geração já terminou) rejeita markPlayed() do turno interrompido', async () => {
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId } = (await audioRes.json()) as { turnId: string };
+
+    // Deixa a geração terminar de verdade (turn_done) ANTES de cancelar — simula o caso
+    // real mais comum: o usuário interrompe enquanto o áudio já gerado ainda está sendo
+    // reproduzido no cliente, quando activeTurn já voltou a null no servidor. Antes do
+    // fix, cancelTurn() não fazia nada nesse caso (o `if (session.activeTurn && ...)`
+    // nunca era verdadeiro), e markPlayed() aceitava a confirmação de qualquer forma
+    // porque turnId ainda era igual a lastTurnId.
+    await sse.waitFor(9, 5000);
+    assert.ok((sse.events as Array<{ type: string }>).some((e) => e.type === 'turn_done'));
+
+    const cancelRes = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId })
+    });
+    assert.equal(cancelRes.status, 200);
+
+    const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId, text: 'frase interrompida pelo barge-in' })
+    });
+    const playedBody = (await playedRes.json()) as { ok?: boolean; error?: string };
+    assert.equal(playedBody.ok, undefined, 'markPlayed() deve rejeitar o turno cancelado, mesmo sendo o lastTurnId');
+    assert.ok(playedBody.error, 'confirmação de reprodução de turno interrompido deve ser rejeitada');
+
+    sse.close();
+    await teardownHarness(h);
+  });
+
   it('rejeita áudio maior que o limite e WAV malformado', async () => {
     const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
     const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
