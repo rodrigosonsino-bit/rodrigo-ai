@@ -310,8 +310,14 @@ export class VoiceController {
   private async drainPlaybackQueue(): Promise<void> {
     if (this.playbackActive) return;
     this.playbackActive = true;
+    const generation = this.playbackGeneration;
 
     while (this.playbackQueue.length > 0) {
+      // Barge-in/teardown durante este drain: este loop ficou obsoleto. Sai sem tocar em
+      // playbackActive (stopPlaybackImmediately() já o zerou, e um drain mais novo pode
+      // ter assumido) nem na fila (que pode já conter frases de um turno novo). A fila
+      // ser esvaziada em triggerBargeIn() deixou de ser a única proteção aqui.
+      if (generation !== this.playbackGeneration) return;
       const chunk = this.playbackQueue.shift()!;
       if (chunk.turnId !== this.currentTurnId) continue; // frase de um turno superado
 

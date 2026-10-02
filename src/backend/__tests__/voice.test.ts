@@ -165,6 +165,16 @@ function readSse(url: string): { events: unknown[]; close: () => void; waitFor: 
   };
 }
 
+/** Espera um evento SSE pelo tipo, sem depender da posição/contagem dos eventos no fluxo. */
+async function waitForEventType(sse: { events: unknown[] }, type: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((sse.events as Array<{ type: string }>).some((e) => e.type === type)) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`Timeout esperando evento SSE do tipo "${type}" (recebidos: ${(sse.events as Array<{ type: string }>).map((e) => e.type).join(',')})`);
+}
+
 describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
   let h: Harness;
 
@@ -359,8 +369,7 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
     // fix, cancelTurn() não fazia nada nesse caso (o `if (session.activeTurn && ...)`
     // nunca era verdadeiro), e markPlayed() aceitava a confirmação de qualquer forma
     // porque turnId ainda era igual a lastTurnId.
-    await sse.waitFor(9, 5000);
-    assert.ok((sse.events as Array<{ type: string }>).some((e) => e.type === 'turn_done'));
+    await waitForEventType(sse, 'turn_done');
 
     const cancelRes = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
       method: 'POST',
