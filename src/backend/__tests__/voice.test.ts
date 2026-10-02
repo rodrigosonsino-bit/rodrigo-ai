@@ -384,8 +384,53 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
       body: JSON.stringify({ turnId, text: 'frase interrompida pelo barge-in' })
     });
     const playedBody = (await playedRes.json()) as { ok?: boolean; error?: string };
-    assert.equal(playedBody.ok, undefined, 'markPlayed() deve rejeitar o turno cancelado, mesmo sendo o lastTurnId');
+    assert.equal(playedRes.status, 401, 'markPlayed() deve rejeitar o turno cancelado, mesmo sendo o lastTurnId');
+    assert.equal(playedBody.ok, undefined);
     assert.ok(playedBody.error, 'confirmação de reprodução de turno interrompido deve ser rejeitada');
+
+    sse.close();
+    await teardownHarness(h);
+  });
+
+  it('contrato (auditoria Kimi/Hermes, 2026-10-02): /played de frase ouvida inteira que chega ANTES do /cancel é aceito', async () => {
+    // O cliente só envia /played depois que a frase terminou de tocar sem barge-in (único
+    // ponto de envio: playChunk(), após a última checagem). Chegar antes do /cancel significa
+    // que a frase foi ouvida inteira — manter no histórico é correto, e a rejeição do turno
+    // só vale a partir do cancelamento. Fixa que o fix não rejeita demais.
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId } = (await audioRes.json()) as { turnId: string };
+    await waitForEventType(sse, 'turn_done');
+
+    const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId, text: 'frase ouvida inteira antes do barge-in' })
+    });
+    assert.equal(playedRes.status, 200, '/played antes do /cancel deve ser aceito');
+
+    const cancelRes = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId })
+    });
+    assert.equal(cancelRes.status, 200);
+
+    const latePlayedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId, text: 'outra frase, já depois do cancelamento' })
+    });
+    assert.equal(latePlayedRes.status, 401, 'depois do /cancel, o mesmo turno volta a ser rejeitado');
 
     sse.close();
     await teardownHarness(h);

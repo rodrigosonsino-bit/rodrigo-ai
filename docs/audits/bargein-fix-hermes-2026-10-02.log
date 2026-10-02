@@ -1,0 +1,32 @@
+ACHADO 1: Race condition entre /played e /cancel por inversão de ordem de rede ou requisição em voo
+EVIDÊNCIA: voice.ts:360-363 (`void fetch('/api/voice/session/played', ...)` fire-and-forget sem sincronização com /cancel); sessionManager.ts:712-724 (cancelledTurnIds.add() em /cancel acontece só no servidor, sem atomicidade com /played)
+GRAVIDADE: CRÍTICA
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: Serializar no cliente: não enviar /played se houver barge-in pendente, ou incluir no payload de /played um generation/sequence number que o servidor compara contra o último cancel conhecido.
+
+ACHADO 2: Regressão não cobre inversão de ordem de rede nem múltiplos chunks com /played em voo
+EVIDÊNCIA: Trecho do teste (linhas 342-390): envia /cancel e só depois /played, sequencialmente; não testa cenário onde /played chega antes de /cancel, nem chunks anteriores cujo /played ainda está em voo quando o barge-in ocorre.
+GRAVIDADE: ALTA
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: Adicionar teste que envia /played antes de /cancel (ou simula atraso de rede) e verifica rejeição; testar turno multi-chunk onde chunk anterior tem /played em voo durante barge-in.
+
+ACHADO 3: drainPlaybackQueue tem defesa fraca (só turnId) e depende de limpeza de fila em triggerBargeIn()
+EVIDÊNCIA: voice.ts:310-313 (`if (chunk.turnId !== this.currentTurnId) continue;` sem checagem de geração); voice.ts:281 (`this.playbackQueue = []` esconde a fragilidade)
+GRAVIDADE: MÉDIA
+CONFIANÇA: 80%
+AÇÃO RECOMENDADA: Adicionar checagem de geração também no drainPlaybackQueue como defesa em profundidade, ou documentar que a limpeza de fila é a garantia primária.
+
+ACHADO 4: currentTurnId não é limpo em triggerBargeIn(), podendo mascarar estado de "sem turno ativo"
+EVIDÊNCIA: voice.ts:279-286 (triggerBargeIn() não altera currentTurnId, apenas incrementa playbackGeneration e para reprodução)
+GRAVIDADE: BAIXA
+CONFIANÇA: 70%
+AÇÃO RECOMENDADA: Avaliar se currentTurnId deve ser limpo/nuloado em triggerBargeIn(); qualquer lógica que verifique `if (this.currentTurnId)` para decisões de controle vaiolerá até o próximo beginRecording.
+
+ACHADO 5: Asserção do teste depende de formato exato da resposta de erro do servidor
+EVIDÊNCIA: Trecho do teste linha 376: `assert.equal(playedBody.ok, undefined, ...)` assume que o campo `ok` está ausente na rejeição, não apenas `false`.
+GRAVIDADE: BAIXA
+CONFIANÇA: 75%
+AÇÃO RECOMENDADA: Robustificar asserção para `assert.isFalse(playedBody.ok)` ou verificar apenas a presença de `error`, evitando fratura se o endpoint padronizar `{ok: false, error: ...}`.
+
+VEREDITO: APROVADO COM RESSALVAS
+JUSTIFICATIVA: O fix do servidor fecha corretamente o cenário principal de barge-in pós-geração usando cancelledTurnIds, e o contador playbackGeneration no cliente elimina a janela assíncrona do onended. Porém, há uma falha crítica de ordenamento: requisições /played e /cancel independentes podem chegar invertidas na rede, ou um /played de chunk anterior pode estar em voo quando o barge-in ocorre, permitindo que texto interrompido entre no histórico. O teste é útil para regressão do cenário sequencial, mas não prova resistência a reordenação de rede nem cobre comportamento multi-chunk. Defesas em profundidade no cliente (drainPlaybackQueue e currentTurnId) estão incompletas.
