@@ -1,0 +1,48 @@
+[0m
+> build · moonshotai/kimi-k3
+[0m
+ACHADO: /played pode chegar ANTES do /cancel e ser aceito — janela de inversão de ordem HTTP não fechada
+EVIDÊNCIA: sessionManager.ts markPlayed() (linhas 706-717) — `if (turnId !== session.lastTurnId) return false; ... history.push(...)`; cancelTurn() só age quando chega; voice.ts triggerBargeIn() (linhas 279-296) — o `fetch('/cancel')` é disparado com `void fetch` (fire-and-forget), e playChunk() só checa geração/turnId DEPOIS de onended, quando emite seu próprio `/played`. Como /played (cliente, ao fim do áudio) e /cancel (cliente, no barge-in) são requests HTTP independentes, a ordem de chegada no servidor não é garantida. Se /played(turnId) chegar primeiro (ex.: barge-in no último instante, áudio termina "naturalmente" do ponto de vista do onended antes do cancel atravessar a rede — ou o onended resolve antes do incremento de generation ser observado... ver próximo achado), markPlayed aceita: turnId==lastTurnId e cancelledTurnIds ainda vazio.
+GRAVIDADE: MÉDIA
+CONFIANÇA: 85% (a janela é estreita mas real; o cliente mitiga parcialmente via generation, mas o servidor — que a própria descrição chama de "autoritativo" — continua aceitando /played de um turno que o usuário interrompeu, se a ordem inverter)
+AÇÃO RECOMENDADA: aceitar a janela explicitamente como residual e documentá-la, ou exigir que o cliente só envie /played quando tiver certeza local (já tem via generation) E tratar o servidor como acumulador best-effort. Alternativa mais forte: um endpoint atômico `finishTurn` que combine cancel-or-confirm não resolve — é o cliente que decide os dois. Realisticamente: documentar que a garantia é "o cliente nunca envia /played de turno interrompido; o servidor rejeita os atrasados", não "inversão de ordem de rede é impossível de corromper o histórico".
+
+ACHADO: clear() de cancelledTurnIds ao iniciar turno novo é seguro quanto a turnIds, mas o teste de regressão não cobre a sequência dois-barge-ins-seguidos-sem-turno-novo
+EVIDÊNCIA: sessionManager.ts linhas 368-370 — `session.cancelledTurnIds.clear()` ao criar turno novo; dif: teste cobre apenas turno único. Análise: clear() é correto para turnIds antigos porque markPlayed já rejeita qualquer turnId != lastTurnId, então um /played atrasado de turno N-1 não precisa do Set. Mas considere: turno A cancelado → turno B começa (clear) → turno B cancelado (adicional ao Set) → /played(B) atrasado é rejeitado. OK. Dois barge-ins seguidos no MESMO turno sem turno novo: o segundo triggerBargeIn() reenvia /cancel(A) (idempotente, Set.add de novo — inócuo) e incrementa generation de novo (inócuo). OK. Não encontrei ordem que fure pelo clear — a combinação lastTurnId + Set cobre os casos declarados.
+GRAVIDADE: BAIXA
+CONFIANÇA: 75%
+AÇÃO RECOMENDADA: nenhuma mudança de código; adicionar um teste barato de "dois cancels seguidos no mesmo turno + /played rejeitado" para travar o comportamento contra regressão futura da condição de guarda.
+
+ACHADO: barge-in por VAD com currentTurnId null (fala detectada fora de reprodução, ruído ambiente sustentado) — nenhum /cancel enviado, e nada precisa ser enviado; mas o Set cresce confiando no cliente
+EVIDÊNCIA: voice.ts triggerBargeIn() — `if (this.currentTurnId) { void fetch('/api/voice/session/cancel'...) }`. Se não há turno ativo, não há nada a cancelar: OK funcionalmente. Porém, note a assimetria: a garantia do servidor depende de o CLIENTE enviar o /cancel. Um cliente bugado/malicioso/desatualizado que interrompa localmente sem chamar /cancel e depois POSTe /played(turnId) tem a confirmação aceita, porque markPlayed não sabe que houve interrupção. A "camada autoritativa" é autoritativa só sobre o que o cliente lhe conta.
+GRAVIDADE: BAIXA (modelo de ameaça é de assistente pessoal local single-user, loopback-only; não há atacante — só bug de cliente, e a garantia sempre dependeu do cliente ser honesto sobre o que o usuário ouviu)
+CONFIANÇA: 90%
+AÇÃO RECOMENDADA: documentar no comentário de markPlayed() que a garantia pressupõe cliente cooperante — já é implícito na arquitetura (o próprio texto /played vem do cliente), mas o commit message diz "Servidor (autoritativo)", que é um pouco mais forte que a realidade.
+
+ACHADO: drainPlaybackQueue checa só turnId, não generation — chunk de MESMO turno pós-barge-in pode entrar em playChunk e gastar fetch+decode antes de ser abortado
+EVIDÊNCIA: voice.ts drainPlaybackQueue (linhas 312-326) — `if (chunk.turnId !== this.currentTurnId) continue;` sem checagem de generation. Cenário: reproduzindo chunk 1 do turno T, fila tem chunk 2 do turno T. triggerBargeIn() limpa `this.playbackQueue = []` — então na prática chunks restantes são removidos sincronamente. MAS: se um chunk de T chegar à fila ENTRE o barge-in e... não pode — a fila é esvaziada no mesmo caminho síncrono e novos chunks de T param de chegar (servidor cancelou). Porém há um caso: triggerBargeIn roda DURANTE playChunk (await de onended pendente); stopPlaybackImmediately() chama source.stop(), onended resolve, a segunda checagem de generation em playChunk pega — correto. A volta do while em drainPlaybackQueue então encontra fila vazia. A checagem só-por-turnId na fila é portanto segura hoje NÃO por design explícito mas porque triggerBargeIn esvazia a fila — dependência implícita e frágil: se alguém futuramente remover o `this.playbackQueue = []` (ex.: num refactor de "barge-in suave" que preserva a fila), o drain retomaria chunks do turno cancelado, e a checagem de generation em playChunk é a única rede de segurança — que existe, então o /played ainda não sairia, mas o fetch+decode desperdiçado sim, e o onAssistantText não é emitido porque playChunk retorna antes.
+GRAVIDADE: BAIXA
+CONFIANÇA: 70%
+AÇÃO RECOMENDADA: uma linha em drainPlaybackQueue checando `generation !== this.playbackGeneration` na mescla do `continue` tornaria a proteção explícita em vez de emergente. Custo mínimo.
+
+ACHADO: resposta à pergunta 1 — sim, o fix do servidor fecha exatamente o cenário testado (turno completa → /cancel → /played): cancelledTurnIds.add(turnId) incondicional em cancelTurn cobre activeTurn==null, e markPlayed rejeita mesmo com turnId==lastTurnId. A janela original (a) está fechada no servidor; a (b) está fechada no cliente pelo incremento síncrono antes de stop() — qualquer continuação assíncrona (decodeAudioData, onended) observa o contador já incrementado, pois JS é single-threaded e os awaits reentram só depois do giro síncrono atual.
+EVIDÊNCIA: análise dos diffs acima.
+GRAVIDADE: — (verificação positiva)
+CONFIANÇA: 95%
+AÇÃO RECOMENDADA: —
+
+ACHADO: teste de regressão é sólido contra o bug nominal, mas tem duas fragilidades menores
+EVIDÊNCIA: teste linhas 342-390. (1) `await sse.waitFor(9, 5000)` + assert de `turn_done` — depende de o índice 9 do SSE ser estável; se um evento novo for adicionado ao fluxo no futuro (ex.: um estado extra), o waitFor(9) pode estourar o timeout de 5s sem relação com o comportamento testado — falha espúria. O assert de turn_done é o que importa; o índice é acoplamento frágil. (2) O teste prova a rejeição pelo Set apenas indiretamente: ele passaria também se markPlayed rejeitasse por qualquer outro motivo (ex.: se um refactor futuro fizesse cancelTurn limpar lastTurnId). O assert `playedBody.ok === undefined` + `playedBody.error` travam o contrato externo, que é o certo — mas a mutação "remover só o cancelledTurnIds.has()" é de fato pega pelo teste (verificado pelo próprio autor revertendo o fix), então a prova por mutação existe e foi executada. Timing do fake: turn_done é aguardado ativamente com timeout, não assumido — robusto.
+GRAVIDADE: BAIXA
+CONFIANÇA: 80%
+AÇÃO RECOMENDADA: trocar `waitFor(9, 5000)` por um waitFor-evento (`waitUntil(e => e.type === 'turn_done')`) se o harness permitir; não bloqueante.
+
+ACHADO: playbackGeneration não é resetado entre sessões — inofensivo hoje, mas cresce sem limite e mistura semântica de sessões
+EVIDÊNCIA: voice.ts — `private playbackGeneration = 0;` incrementado em triggerBargeIn() e teardown(), nunca zerado. Como ÚNICA comparação são duas leituras dentro do mesmo turno de playChunk ("mudou desde que comecei?"), o valor absoluto não importa; e teardown() incrementa junto com teardown da sessão, então chunks órfãos de sessão anterior (se existirem) também são pegos. Correto — apenas note que é intencionalmente monotônico, e qualquer uso futuro diferente ("é a sessão N?") seria errado.
+GRAVIDADE: BAIXA (observação)
+CONFIANÇA: 85%
+AÇÃO RECOMENDADA: nenhuma; comentário já deixa claro o propósito.
+
+VEREDITO: APROVADO COM RESSALVAS
+
+JUSTIFICATIVA: O fix fecha corretamente a janela nominal tanto no servidor (Set incondicional, independente de activeTurn) quanto no cliente (incremento síncrono anterior a qualquer continuação assíncrona), e o teste foi validado por mutação real, não só por "passa no código corrigido". A ressalva principal é arquitetural, não de implementação: a garantia "autoritativa" do servidor depende de o cliente cooperar (enviar /cancel e não enviar /played espúrio), e uma inversão de ordem de rede entre /played e /cancel do mesmo turno ainda deixa uma frase interrompida entrar no histórico — janela estreita, masreal, e não documentada como residual. Ressalvas menores: waitFor(9) frágil no teste, e a proteção da fila em drainPlaybackQueue é emergente (depende de `playbackQueue = []` em triggerBargeIn) em vez de explícita.
