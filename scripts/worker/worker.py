@@ -90,6 +90,12 @@ DETECT_TOOL_SYSTEM_PROMPT = (
     "Quanto tempo dura uma consulta médica? -> NENHUMA\n"
     "A que horas abre a padaria? -> NENHUMA\n"
     "Fale sobre o significado da graça na vida cristã. -> NENHUMA\n"
+    "Já deu meio-dia ou não? -> HORA\n"
+    "Tá tarde já, né? -> HORA\n"
+    "Hoje é dia quantos, perdi a conta -> DATA\n"
+    "Chegou a hora da verdade, meu amigo -> NENHUMA\n"
+    "Hoje é dia de feira lá no bairro -> NENHUMA\n"
+    "A data não importa, importa o sentimento -> NENHUMA\n"
 )
 
 
@@ -153,6 +159,18 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR|seu nome é Rodrigo\n"
     "Na verdade, corrige isso que eu falei: meu nome é Rodrigo Sonsino -> MEMORIA_EDITAR|seu nome é Rodrigo Sonsino\n"
     "Vamos trocar de assunto agora -> NENHUMA\n"
+    "Me avisa amanhã cedo que eu preciso levar o carro na oficina -> LEMBRETE_CRIAR|Levar o carro na oficina\n"
+    "Muda só a frase do lembrete pra devolver o livro na biblioteca -> LEMBRETE_EDITAR|Devolver o livro na biblioteca\n"
+    "O texto tá errado, bota academia às seis no lugar -> LEMBRETE_EDITAR|Academia às seis\n"
+    "Some com esse lembrete aí que eu criei -> LEMBRETE_APAGAR\n"
+    "Anota aí que eu preciso comprar ração pro cachorro essa semana -> NOTA_CRIAR|Comprar ração pro cachorro essa semana\n"
+    "Esquece o que eu te falei agora -> MEMORIA_ESQUECER\n"
+    "Apaga essa última coisa que eu te contei -> MEMORIA_ESQUECER\n"
+    "Tá errado isso aí, eu faço medicina, não engenharia -> MEMORIA_EDITAR|Faz medicina, não engenharia\n"
+    "Corrige aí: eu moro em Campinas agora, não em São Paulo -> MEMORIA_EDITAR|Mora em Campinas, não em São Paulo\n"
+    "O juiz pediu pra anotar o depoimento inteiro -> NENHUMA\n"
+    "Eu gosto de quem anota as ideias no papel -> NENHUMA\n"
+    "Na real eu tenho trinta e dois anos, não trinta e cinco -> NENHUMA\n"
 )
 
 DETECT_CONFIRMATION_SYSTEM_PROMPT = (

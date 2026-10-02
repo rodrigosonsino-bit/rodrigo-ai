@@ -130,6 +130,10 @@ export const DETECT_CONFIRMATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_CONFIRMATION_T
 export const PENDING_MUTATION_TTL_MS = VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
 export const MUTATION_FAILURE_TEXT = 'Não consegui salvar isso agora.';
 export const MUTATION_CANCELLED_TEXT = 'Tudo bem, não fiz nada.';
+/** Idade máxima TOTAL de um pedido de mutação, contada do pedido original (o reprompt não renova). */
+export const MUTATION_MAX_AGE_MS = 120_000;
+export const NO_ACTION_CLAIM_TEXT = 'Eu não fiz isso. Para eu anotar ou criar um lembrete, peça direto, por exemplo: anota que.';
+export const MUTATION_REPROMPT_TEXT = 'Não entendi. Posso confirmar? Diga só sim ou não.';
 export const GENERATION_FAILURE_TEXT = 'Não consegui pensar numa resposta agora.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */

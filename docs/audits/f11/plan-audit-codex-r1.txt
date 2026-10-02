@@ -1,0 +1,53 @@
+Reproduzi os contraexemplos do classificador e as transições de sessão em memória, com dependências simuladas, sem escrever arquivos nem acessar os caminhos proibidos.
+
+1. **ACHADO:** Uma ordem explícita de parada vira autorização: **“pára, por favor” → SIM**. A exceção de `para` neutraliza a negação; `por favor` fornece a afirmação forte.  
+   **EVIDÊNCIA:** `src/backend/voice/confirmationClassifier.ts:58-65,108,128`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta, reproduzido.  
+   **AÇÃO:** Reconhecer comandos completos de parada antes das exceções de preposição; retirar `por favor` das afirmações fortes.
+
+2. **ACHADO:** Vocabulário fechado não implica consentimento fechado. **“pode ser que sim”**, **“só para confirmar”**, **“agora”** e **“certeza”** retornam SIM. Além disso, “apaga” pode confirmar uma criação pendente: o classificador desconhece a ação autorizada.  
+   **EVIDÊNCIA:** `src/backend/voice/confirmationClassifier.ts:69-88,125-133`; `src/backend/voice/sessionManager.ts:410,450`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta; exemplos reproduzidos.  
+   **AÇÃO:** Aceitar construções afirmativas completas, vetar condicionais/metalinguagem e exigir compatibilidade entre verbo e ação pendente.
+
+3. **ACHADO:** A normalização apaga sinais de dúvida/contradição. **“pode apagar？” → SIM**, enquanto a mesma frase com `?` ASCII é AMBIGUO; **“sim 👎” → SIM**. Portanto, nem todo conteúdo desconhecido custa um reprompt, contrariando a alegação de segurança.  
+   **EVIDÊNCIA:** `src/backend/voice/confirmationClassifier.ts:13-15,30-37,113`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta, reproduzido.  
+   **AÇÃO:** Examinar pontuação Unicode e símbolos antes da remoção; conteúdo desconhecido relevante deve produzir AMBIGUO.
+
+4. **ACHADO:** `/played` não está vinculado à pergunta efetivamente emitida. Basta o último `turnId`: texto arbitrário entra no histórico e promove a mutação. Duplicatas também repetem histórico. Isso não prova “pergunta completa ouvida”.  
+   **EVIDÊNCIA:** `src/backend/voice/sessionManager.ts:724-754`; `src/shared/voiceProtocol.ts:47-52`; `docs/phase-11-v1.md:39`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta; promoção com texto arbitrário reproduzida.  
+   **AÇÃO:** Vincular o reconhecimento ao áudio/frase emitidos, usar texto armazenado no servidor e consumir cada reconhecimento uma única vez.
+
+5. **ACHADO:** Cancelamento não revoga autorização já promovida. Sequência reproduzida: reconhecimento do reprompt → `cancelTurn(reprompt)` → “sim” → execução. A proteção contra reconhecimento tardio cobre apenas a ordem inversa.  
+   **EVIDÊNCIA:** `src/backend/voice/sessionManager.ts:440-450,745-753,759-778`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta, reproduzido.  
+   **AÇÃO:** Revogar `armedMutation` e `pendingMutation` vinculadas ao turno cancelado; testar ambas as ordens entre reconhecimento e cancelamento.
+
+6. **ACHADO:** O TTL não limita a idade total do pedido. O reprompt descarta o horário original e seu reconhecimento concede novos 60 segundos; `armedMutation` não tem prazo próprio. Um reconhecimento atrasado pode recuperar uma intenção antiga.  
+   **EVIDÊNCIA:** `src/backend/voice/sessionManager.ts:26-39,401-402,425-430,750`; `src/shared/voiceProtocol.ts:121`.  
+   **GRAVIDADE:** Média. **CONFIANÇA:** Alta; renovação reproduzida.  
+   **AÇÃO:** Definir explicitamente prazo absoluto do pedido, preservá-lo no reprompt e verificá-lo também na promoção por `markPlayed()`.
+
+7. **ACHADO:** H11.2b/H11.3 admitem aprovação vácua: nunca executar satisfaz suas condições negativas. H11.2a testa o classificador e não impede esse defeito no fluxo. “100 cenários” não exige cobertura do contador, preempção ou permutações de eventos; H11.2c não define limiar de aprovação.  
+   **EVIDÊNCIA:** `docs/phase-11-v1.md:47-50,56,80`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta.  
+   **AÇÃO:** Exigir controles positivos ponta a ponta com exatamente uma execução; primeira ambiguidade repete, segunda cancela; respostas antes da reprodução e eventos de sessão antiga nunca autorizam. Fixar também critérios de aprovação para voz real.
+
+8. **ACHADO:** H11.4 não garante resultado verdadeiro. Procurar “salvei/apaguei/agendei” pode ignorar “Atualizado”, “Guardado” e promessas de aviso. Há ainda efeito parcial: criar lembrete grava antes de agendar; se o agendamento lançar, o usuário recebe “Não consegui salvar” apesar da gravação. O caminho de geração livre fica fora da auditoria de `execute()`.  
+   **EVIDÊNCIA:** `docs/phase-11-v1.md:36,51`; `src/backend/tools/mutatingTools.ts:153-155,358,379`; `src/backend/voice/sessionManager.ts:450-453,656-662`; `src/shared/voiceProtocol.ts:131`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta.  
+   **AÇÃO:** Comparar estado persistido/agendamento com toda afirmação produzida; incluir falhas após efeitos parciais e geração sem ferramenta executada.
+
+9. **ACHADO:** H11.1 pode medir o componente errado. O harness descrito chama os detectores, mas o produto os condiciona aos filtros; recall alto do worker pode coexistir com recall baixo real. Acertar o nome da ação também não prova conteúdo, alvo ou horário corretos.  
+   **EVIDÊNCIA:** `docs/phase-11-v1.md:33,45-46`; `src/backend/voice/sessionManager.ts:484-487,494-504,537-540`; `src/backend/tools/mutatingTools.ts:397-406`.  
+   **GRAVIDADE:** Alta. **CONFIANÇA:** Alta quanto à lacuna contratual.  
+   **AÇÃO:** Medir filtro → detector → argumentos → preview, por ação, contabilizando rejeições do filtro como falsos negativos quando aplicável.
+
+10. **ACHADO:** Hash e famílias diferentes não tornam a reservada independente. Não há isolamento de acesso, deduplicação semântica ou tratamento de rótulos errados em que ambos os modelos concordam. “Uma vez por candidato final” permite reutilização adaptativa, e a medição de confirmação precede novos ajustes.  
+    **EVIDÊNCIA:** `docs/phase-11-v1.md:33,53,63-64,74-77`.  
+    **GRAVIDADE:** Alta. **CONFIANÇA:** Alta quanto ao desenho; não afirmo que vazamento já ocorreu.  
+    **AÇÃO:** Separar famílias de paráfrases, ocultar a reservada de quem ajusta, auditar também concordâncias e congelar código antes da avaliação única. Após exposição, usar nova reservada. Incluir amostra humana independente da geração por LLM.
+
+**VEREDITO:** **Reprovado na forma atual.** Há falsos SIM reproduzidos para parada e ambiguidade, falhas na revogação da autorização e critérios que permitem aprovação sem demonstrar o objetivo.

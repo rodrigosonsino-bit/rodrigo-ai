@@ -9,7 +9,10 @@ import type { AppConfig } from '../../shared/types.js';
 import { AudioStore } from '../voice/audioStore.js';
 import { FakeVoiceEngine } from '../voice/fakeEngine.js';
 import { KnowledgeRetriever, chunkMarkdown, KNOWLEDGE_PREAMBLE } from '../knowledge/index.js';
-import { SessionManager, hasAffirmativeMarker } from '../voice/sessionManager.js';
+import { SessionManager } from '../voice/sessionManager.js';
+import { classifyConfirmation } from '../voice/confirmationClassifier.js';
+
+const hasAffirmativeMarker = (t: string): boolean => classifyConfirmation(t).verdict === 'SIM';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
@@ -116,6 +119,14 @@ async function teardownHarness(h: Harness): Promise<void> {
   h.server.closeIdleConnections();
   await closePromise;
   await fs.promises.rm(h.tmpDir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Texto da última frase que o SERVIDOR emitiu (sentence_audio_ready) — /played só aceita esse texto. */
+function emittedText(sse: { events: unknown[] } | null): string {
+  const ev = (sse?.events ?? []).filter((e) => (e as { type: string }).type === 'sentence_audio_ready').pop() as
+    | { text: string }
+    | undefined;
+  return ev?.text ?? '';
 }
 
 function readSse(url: string): { events: unknown[]; close: () => void; waitFor: (n: number, timeoutMs?: number) => Promise<void> } {
@@ -414,7 +425,7 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
     const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
       method: 'POST',
       headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ turnId, text: 'frase ouvida inteira antes do barge-in' })
+      body: JSON.stringify({ turnId, text: emittedText(sse) })
     });
     assert.equal(playedRes.status, 200, '/played antes do /cancel deve ser aceito');
 
@@ -1067,7 +1078,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId, text: 'Posso criar o lembrete: comprar café?' })
+          body: JSON.stringify({ turnId, text: emittedText(sse) })
         });
         assert.equal(playedRes.status, 200);
 
@@ -1128,7 +1139,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         const playedRes = await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar café?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
         // Deve recusar (401) porque turnId1 != lastTurnId (markPlayed retorna false e routes.ts envia 401)
         assert.equal(playedRes.status, 401);
@@ -1175,7 +1186,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar pão?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
 
         // Turno 2: usuário responde "Sim"
@@ -1242,7 +1253,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar leite?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
 
         // Turno 2: "Não"
@@ -1272,7 +1283,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       }
     });
 
-    it('Fase 5c: resposta ambígua consulta detectConfirmation e executa se confirmar', async (t) => {
+    it('F11: SIM por vocabulário fechado executa a mutação sem consultar o LLM', async (t) => {
       const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
@@ -1304,12 +1315,12 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: lavar o carro?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
 
-        // Frase fora da whitelist exata -> cai para Camada 1
-        h.engine.fixedTranscript = 'Acho uma boa ideia sim';
-        h.engine.confirmationToReturn = 'SIM';
+        // F11: fala inteira em vocabulário afirmativo fechado -> SIM, sem LLM
+        h.engine.fixedTranscript = 'Pode ser, obrigado';
+        h.engine.confirmationToReturn = 'NAO'; // prova que o LLM não participa mais da decisão
 
         await fetch(`${h.baseUrl}/api/voice/session/audio`, {
           method: 'POST',
@@ -1318,7 +1329,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         });
         await sse.waitFor(15, 5000);
 
-        assert.equal(h.engine.detectConfirmationCalls.length, 1, 'detectConfirmation deve ter sido acionado');
+        assert.equal(h.engine.detectConfirmationCalls.length, 0, 'F11: o LLM não decide mais confirmação');
         const audioEvent = sse.events
           .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
           .pop() as { type: 'sentence_audio_ready'; text: string };
@@ -1361,7 +1372,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: pagar a conta?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
 
         // "com certeza" bate na whitelist exata da Camada 0 (CONFIRM_YES_EXACT) — o gate v9
@@ -1392,7 +1403,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       }
     });
 
-    it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): gate rebaixa SIM da Camada 1 sem marcador afirmativo — regressão do caso #18 real', async (t) => {
+    it('F11: resíduo de STT sem afirmação (caso #18 real) nunca executa — repete a pergunta', async (t) => {
       const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);
       currentH = h;
@@ -1424,7 +1435,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: lavar o carro?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
 
         // Texto residual real do caso #18 (docs/audits/phase-5c-v6-h-confirmacao-sample-2026-09-23.md):
@@ -1441,14 +1452,14 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         });
         await sse.waitFor(15, 5000);
 
-        assert.equal(h.engine.detectConfirmationCalls.length, 1, 'detectConfirmation deve ter sido acionado');
+        assert.equal(h.engine.detectConfirmationCalls.length, 0, 'F11: o LLM não decide mais confirmação');
         const audioEvent = sse.events
           .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
           .pop() as { type: 'sentence_audio_ready'; text: string };
         assert.equal(
           audioEvent.text,
-          'Tudo bem, não fiz nada.',
-          'o gate deve ter rebaixado o SIM do LLM para NAO — nenhuma mutação deve ter sido executada'
+          'Não entendi. Posso confirmar? Diga só sim ou não.',
+          'fala sem afirmação reconhecível deve repetir a pergunta, nunca executar'
         );
       } finally {
         sse?.close();
@@ -1488,7 +1499,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
           method: 'POST',
           headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnId: turnId1, text: 'Posso criar o lembrete: comprar água?' })
+          body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
         });
 
         const session = (h.sessionManager as any).current;
@@ -1939,7 +1950,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       // Com variações coloquiais e pontuação
       assert.equal(hasAffirmativeMarker('Pode trocar, por favor.'), true);
       assert.equal(hasAffirmativeMarker('sim, pode editar'), true);
-      assert.equal(hasAffirmativeMarker('Pode corrigir agora!'), true);
+      assert.equal(hasAffirmativeMarker('Pode corrigir!'), true);
       assert.equal(hasAffirmativeMarker('pode ser, obrigado'), true);
       assert.equal(hasAffirmativeMarker('pode mudar isso'), true);
 

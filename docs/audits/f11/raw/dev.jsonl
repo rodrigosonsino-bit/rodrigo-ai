@@ -1,0 +1,806 @@
+{"text":"não não o texto tá errado troca pra comprar pão e leite","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige aí o que eu falei do lembrete","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"opa pera muda a mensagem do lembrete pra ligar pra minha mãe","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esqueci é no texto ali troca farmácia por mercado","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vlan não é isso que eu quis dizer no lembrete corrige","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"faz o seguinte troca o texto pra buscar a encomenda lá no correio","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm acho que falei errado né bota pagar a conta de luz no lugar","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige esse lembrete aí pra mim o texto tá errado","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"troca o nome do lembrete na real é reunião com o André","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ahhh não o conteúdo ficou errado muda pra tomar o remédio das oito","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sei la escreve dinovo ali o lembrete é pra regar as plantas","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige rapidinho o lembrete pra churrasco domingo ao invés daquilo","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não poe isso não troca o texto por aniversário da Julia","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"perai que eu falei besteira muda o lembrete pra levar o carro na revisão","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o texto tá errado colega bota academia às seis","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"muda só a frase do lembrete pra devolver o livro na biblioteca","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah corrige lá na real o que eu quis dizer foi ligar pro dentista","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado o recado troca pra comprar ingresso do show","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige esse texto aí na moral é pra buscar as crianças na escola","label":"LEMBRETE_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga aquele lembrete que eu acabei de criar","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode cancelar o último lembrete aí","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ô, desfaz aquele lembrete, não precisa mais","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tira esse lembrete aí que eu botei agora pouco","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cancela o lembrete que eu fiz, por favor","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esquece, apaga o lembrete","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero mais aquele lembrete, pode deletar","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"remove o último lembrete que eu pedi","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ei, cancela aquilo que eu te falei pra lembrar","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deleta o lembrete mais recente aí","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anula o lembrete que eu acabei de fazer","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ó, manda ver, apaga o último lembrete","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode jogar fora aquele lembrete","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desmarca o lembrete pra mim","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm, melhor cancelar o último lembrete mesmo","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"some com esse lembrete aí que eu criei","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corta o lembrete que eu pus agora","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa pra lá, tira o lembrete","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga aí o lembrete mais novo que eu fiz","label":"LEMBRETE_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me lembra de pagar a conta de luz amanhã de manhã","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"õ não deixa eu esquecer de ligar pro dentista hoje","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bota um aviso aí pra reunião de sexta às duas","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me avisa quando der seis horas que eu tenho que sair","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah lembra eu de comprar leite no caminho de volta","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me lembra daquela consulta do médico que é semana que vem","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não me deixa esquecer de mandar o relatório pro chefe tá","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"coloca um lembrete pra eu regar as plantas domingo","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me avisa amanhã cedo que eu preciso levar o carro na oficina","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ê faz o seguinte me lembra de renovar o seguro esse mês","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bota aí nos lembretes pra eu pegar minha mãe no aeroporto às oito","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me lembra depois de responder o email da faculdade","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"poxa quase esqueci me avisa sábado que o Rodrigo faz aniversário","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí pra eu não esquecer de pagar o aluguel dia cinco","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me lembra daqui a pouco de tirar o frango do congelador","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não deixa eu esquecer que amanhã tem aniversário da minha tia","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"joga um lembrete aí pras sete da noite tá","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me avisa que eu tenho que buscar as crianças na escola às cinco","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"lembra eu de levar os documentos pro banco amanhã por favor","label":"LEMBRETE_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí que eu preciso comprar ração pro cachorro essa semana","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"guarda essa ideia: fazer um podcast sobre história da igreja","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"opa anota rápido que a reunião do condomínio mudou pra quinta","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me anota uma coisa... a senha do wi-fi novo é a do quadro da cozinha","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"salva pra mim que a mãe pediu pra ligar pro tio Zé no fim de semana","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota essa, o Marcelo falou que o pneu do meu carro tá careca","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"guarda como nota que ideia de presente pra Ana é aquele livro de culinária","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tive uma ideia agora, anota aí: cobrar menos nos primeiros três meses do projeto","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota que o gás acabou de novo e eu tenho que trocar antes de sábado","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"po, registra isso pra mim, a receita da vó leva leite de coco e não leite normal","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí rapidinho que eu tô sem caneta: o voo chega às 14h20","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"guarda essa observação, o time tá jogando melhor com o esquema novo","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota que eu quero começar a correr segunda que vem, tipo, cedo antes do trampo","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, me salva isso: a farmácia da esquina entrega de graça acima de cinquenta reais","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí como lembrete mental que o exame de sangue é em jejum de doze horas","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"registra uma ideia que surgiu agora, montar uma prateleira na parede do escritório","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"guarda como nota que o professor passou a prova pro dia 15","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota essa frase que eu gostei: quem semeia ventos colhe tempestade, quero usar depois","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"po anota aí que o conserto da geladeira ficou em trezentos reais e o cara volta terça","label":"NOTA_CRIAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga essa última nota aí","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode apagar a nota mais recente","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deleta aquela notinha que eu acabei de fazer","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tira a última nota que eu gravei","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga aí a nota de agora pouco","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ó, remove a última nota pra mim","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quero que você apague a nota mais nova, tá","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deleta a última nota que eu te falei","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga essa nota que eu fiz agorinha","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode jogar fora a última nota, não presta","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tira essa nota da ó, deixa sem essa aí","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga pra mim a nota mais recente por favor","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cara, deleta essa última nota aí rapidinho","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"remove a nota que eu gravei agora, valeu","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero mais essa última nota não, apaga","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"some com a nota mais nova aí","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga aquela última anotação que eu fiz","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, deleta só a nota mais recente mesmo","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode apagar a última nota que eu mandei","label":"NOTA_APAGAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"muda essa nota ai mano, escreve outra coisa","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não não, troca o texto dessa nota que eu acabei de fazer","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige a nota pra mim, era pra ser outra coisa na real","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"opa, apaga isso e bota assim ó: comprar pão amanhã","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esqueci de falar, troca lá na nota o nome dela","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"edita essa última nota vai, coloca que é segunda e não terça","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado isso, refaz o texto da nota por favor","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm na verdade muda a nota, é consulta às três","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige só o horário ali na nota, é sete da noite","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eca não era isso que eu queria dizer, troca o texto todo","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"reescreve a nota aí, ficou esquisita","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode trocar onde fala aniversário pra casamento, na mesma nota","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah cara, conserta essa nota, faltou o endereço","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"troca o final da nota, bota que eu confirmo depois","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"muda esse trecho da nota, o nome é com dois eles","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não gostei do jeito que ficou, reescreve mais curto","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"altera a nota rapidinho, é sexta feira e não sábado","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corta essa parte e escreve que eu ligo pra ela hoje","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aff errei, corrige a nota: é no mercado da esquina mesmo","label":"NOTA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí que eu quero ser chamado de Rafa tá","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode lembrar que meu nome é Marcelo com C","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"guarda aí que eu sou alérgico a camarão por favor","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ó meu aniversário é dia catorze de novembro anota isso","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"lembra que eu odeio cebola tipo qualquer coisa com cebola eu não como","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"grava aí que eu prefiro café sem açúcar","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota que eu trabalho de noite então de manhã eu tô dormindo","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode guardar que eu sou vegetariano faz uns três anos já","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah lembra que eu moro em Curitiba tá","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí que meu time é o São Paulo viu","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"guarda que eu tenho um gato chamado Thor","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"lembra que eu não bebo leite por causa da lactose","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode anotar que eu curto mais música sertaneja do que qualquer outra coisa","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"grava aí que meu prato favorito é strogonoff","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota que eu sou canhoto tá bom","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ó guarda que eu tô tentando parar de comer doce","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"lembra que minha cor preferida é o verde","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí que eu não gosto de acordar cedo tipo antes das oito nem pensar","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode guardar que meu segundo nome é Eduardo","label":"MEMORIA_GUARDAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não não eu moro em campinas agora não mais em são paulo","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"na real eu tenho trinta e dois anos não trinta e cinco","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"para com isso eu não trabalho mais de noite não mudei de turno faz tempo","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você guardou errado eu sou casado não solteiro","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah e essa história de que eu gosto de futebol tá errada viu","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anota aí que meu nome é rodrigo com R não com D","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não foi isso que eu falei eu disse que parei de tomar café não que bebo mais agora","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"olha só eu não tenho mais dois cachorros um faleceu né","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige aí que eu mudei de profissão não vendo mais carro não","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado isso aí eu faço medicina não engenharia","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"por favor eu nunca disse que torço pro corinthians eu sou palmeirense","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eita você gravou errado ontem eu disse que viajo em dezembro não em janeiro","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"só corrigindo aqui minha mãe mora comigo não meu pai","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah acho que ficou errado aí no seu registro eu sou vegetariano sim mas tem exceção pra peixe","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo assim eu não falo inglês fluente não só me viro mesmo","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode alterar lá que eu já tenho dois filhos nasceu mais um mês passado","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"rapaz eu não moro sozinho não divido apartamento com um amigo meu","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corrige pra mim que meu aniversário é em abril e não em março","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah e não acredita nessa não eu só dei uma pausa na faculdade não larguei não","label":"MEMORIA_EDITAR","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece o que eu te falei agora","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga essa última coisa que eu te contei","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode esquecer o último fato que você guardou, tá","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"olha, esquece o que eu acabei de dizer","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, deleta isso que eu falei por último aí","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece aquilo que eu te disse antes, o mais recente","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tira esse último registro da memória, sério","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece o último negócio que eu guardei contigo","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"era, tipo, apaga a última informação minha que ficou aí","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero mais que você lembre do que eu falei por último, apaga","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode apagar o último fato sobre mim aí, por favor","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece, era mentira aquilo de agora há pouco, tira da memória","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deleta o último dado que você salvou sobre mim","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cara, esquece o que eu pedi pra lembrar da última vez","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga aí o fato mais recente que eu te passei","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"poxa, eu me arrependi, esquece essa última coisa","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"retira da memória o último registro meu, valeu","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece o que você acabou de anotar sobre mim","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sabe aquela coisa que eu te falei por último? esquece ela","label":"MEMORIA_ESQUECER","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são agora","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala as horas aí","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"são que horas será","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"já deu meio-dia ou não","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá tarde já né","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me diz as horas por favor","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são aí no seu relógio","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ê me diz que horas são cara","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"já é hora de almoço né que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quantas horas agora hein","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esqueci óculos que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"são quantas da tarde","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá cedo ainda ou já passou das três","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são tipo agora","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala a hora certinha aí","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"já virou o dia que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm que horas devem ser agora","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que já são cinco da tarde","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são tô sem celular aqui","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me diz aí as horas rapidinho","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá perto das oito","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são agora de verdade","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ai meu deus que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"já passou das dez","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me informa a hora atual por gentileza","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quantas horas temos agora","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas tá marcando aí","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ê assistente que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá muito tarde ou ainda tá de boa","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"já é hora que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me sussurra as horas aí vai","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"opa que horas são esqueci de ver","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ainda é cedo pra ligar pra ela que horas são","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são mais ou menos","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me confirma a hora que eu tô na dúvida","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"são quantas horas exatamente agora","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que horas são que eu tô atrasado","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fala pra mim as horas vai","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá na hora da novela","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bora ver que horas são agora","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ué que horas são que o sol já tá assim","label":"HORA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que dia é hoje mesmo","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é que dia da semana","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dia de hoje é qual","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é quantos","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que data é hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala a data de hoje aí","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é dia quantos do mês","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ei que dia é hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual é a data hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é segunda ou terça","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me diz aí que dia que é","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é dia de quê","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que dia a gente tá hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm hoje é dia quantos mesmo","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"data de hoje rapidinho","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é que data","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual o dia de hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é sexta já ou não","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a gente tá em que dia","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que dia do mês é hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo hoje é dia o que","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala que dia é hoje por favor","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é quando tipo que dia","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah é que dia hoje eu esqueci","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje que dia da semana é","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que data que é hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é dia quantos hein","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fala aí a data de hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a gente tá em que dia da semana","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é que dia me ajuda","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual a data de hoje rapidão","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo hoje é dia dez ou onze","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje ainda é quarta ou já virou","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me confirma o dia de hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é dia quantos eu perdi a conta","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que dia é hj","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"em que dia estamos hoje né","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é dia de quê mesmo ah esqueci","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cara que data é hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dá pra me dizer que dia é hoje","label":"DATA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"e aí cara me conta uma coisa que eu tava pensando aqui","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"por que o céu fica meio alaranjado no fim da tarde","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo assim você sabe explicar como funciona a taxa selic","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm me explica de novo como é que faz aquele macarrão","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sabe aquela história de davizinho lá como que era mesmo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"mano o que você acha que acontece depois que a gente morre","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fiquei bolado com meu chefe hoje sabe","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"caramba como é que o povo construía pirâmide sem máquina nenhuma","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hein você conhece aquela diferença entre calvinismo e arminianismo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô sem dormir direito esses dias viu","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala aí o que é gratidão no sentido mais profundo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como é que era o nome daquele filósofo grego que falava de virtude","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"uai será que é verdade que a terra tá girando mais rápido","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo me explica como se eu tivesse cinco anos o que é inteligência artificial","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esqueci o que eu ia perguntar peraí","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desabafa comigo um minuto que dia difícil","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"por que a gente sente sono depois do almoço","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me explica essa parada de predestinação direito","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você acha que fé e dúvida podem andar juntas","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual foi aquele profeta que fugiu de jope mesmo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sei lá hoje acordei meio pra baixo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"explica aí a diferença entre virtude e vício","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como é que os antigos mediam o tempo sem relógio","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tem alguma coisa na bíblia sobre ansiedade","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é normal ficar pensando bobagem de noite","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me conta alguma curiosidade sobre o egito antigo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que você acha de gente que reclama de tudo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo como é que funciona ação e reação na vida prática","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fico pensando se preciso mudar de emprego","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual é a origem da palavra oba","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me explica o sentido daquela passagem do bom pastor","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que a inveja vem de onde mesmo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje deu vontade de ligar pra minha mãe sabe","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como é que o café foi parar no brasil","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"faz tempo que não penso nisso mas me explica aí","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vixi tô com preguiça de cozinhar","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que significa ser uma pessoa temperante","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dos sete pecados capitais qual você acha o pior","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala sobre aquela coisa de estoicismo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"por que será que eu procrastino tanto","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo assim quando penso na vida fico confuso","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você já ouviu falar naquela história da torre de babel","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como era a igreja primitiva mesmo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me explica o que é pecado de omissão","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a paciência é uma virtude que dá pra treinar","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tava conversando com meu amigo sobre propósito de vida","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual é a diferença entre conhecimento e sabedoria","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sabe o que me irrita é gente que fala mal dos outros","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm será que a gente é livre de verdade","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me ajuda a entender essa história de graça","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como é que surgiram as línguas diferentes","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tava pensando em aprender um instrumento qual você sugere","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que a bíblia fala sobre perdoar os outros","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me conta uma coisa interessante sobre o mar","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vida de adulto é complicada demais viu","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que é aquilo de juízo final","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"explica pra mim como funciona um vulcão","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah sei lá tô meio cansado de tudo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual a diferença entre esperança e otimismo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala sobre aquele povo da grécia antiga","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que existe vida em outro planeta","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo o que você acha de quem desiste fácil","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como era a vida de josé do egito mesmo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô tentando ser mais grato pelas coisas","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"por que a gente tem essa sensação de vazio às vezes","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me explica a parábola do filho pródigo de novo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que você acha que motiva uma pessoa de verdade","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo assim como a gente sabe o que é certo na vida","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fico pensando se devia viajar mais","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual foi o começo do universo segundo os cientistas","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"mano explica aí como que funciona a tal da meditação","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me conta um fato aleatório aí pra eu rir","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que a tecnologia tá deixando a gente mais burro","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como é que os astronautas dormem no espaço","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tava afim de conversar sobre qualquer coisa mesmo","label":"NENHUMA_COMUM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eu lembro que você falou isso semana passada","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo, eu nem lembro direito o que eu ia perguntar","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah eu lembro sim, foi na terça que a gente conversou sobre isso","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você lembra daquele filme que eu te falei?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cara, eu não lembro se fechei a janela","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"lembro como se fosse hoje o dia que aprendi a andar de bicicleta","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que um dia você vai lembrar das nossas conversas?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me explica o que é um lembrete na psicologia mesmo?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual a diferença entre memória e lembrança, assim, de verdade?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eu sempre me lembro do aniversário da minha mãe, engraçado","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ó, o duro é lembrar das coisas quando a gente tá com sono","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eu lembro que o profeta Isaías fala disso, mas onde mesmo?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo assim, se eu esquecer de novo a culpa é minha né","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anotaram tudo errado lá na ata da reunião","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o juiz pediu pra anotar o depoimento inteiro","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eu gosto de quem anota as ideias no papel, antigo mas funciona","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"minha avó anotava receita de bolo num caderninho","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que vale a pena anotar sonho quando acorda?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que você acha de gente que anota tudo no celular?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nossa, o professor falou pra anotar e ninguém anotou nada","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga a luz da sala e cria uma energia massa pra meditar","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que acontece com arquivo apagado, vai pra onde?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo, apagar fogo com gasolina é o que esse governo faz","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é verdade que não dá pra apagar nada da internet?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"meu chefe vive apagando o que eu escrevo no quadro","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dizem que a memória nunca apaga de verdade, só esconde","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apagar incêndio é profissão pra corajoso hein","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quantas horas dura a hora do culto hoje em dia?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"chegou a hora da verdade, meu amigo","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a hora do rush em São Paulo é um caos","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala do que se trata aquela expressão hora de ouro","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a hora do planeta é tipo um apagão simbólico, né?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"no futebol, a hora que o juiz apita ninguém entende","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tem hora que dá vontade de largar tudo, sabia?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quando a gente fala hora mundial, é o quê exatamente?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fiz de última hora e ficou até bom","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o médico falou que a qualquer hora pode nascer o bebê","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dia de juízo final é um negócio que me assusta","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hoje é dia de feira lá no bairro, não de nada técnico","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a gente vive cada dia como se fosse o último, né, dizem","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dia desses eu te conto essa história direitinho","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o dia em que a terra parou é um filme antigo legal","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fiquei o dia inteiro pensando nisso","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bom dia é só um jeito de cumprimentar ou tem sentido filosófico?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"de dia trabalha, de noite estuda, essa é a vida","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esse dia tá com uma cara de chuva danada","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tem gente que nasceu de dia e eu nasci de tardinha","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o dia D e a hora H, de onde veio isso na guerra?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a data devalidade desse iogurte venceu faz tempo","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que significa uma data comemorativa, vem de onde?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo, data do apocalipse ninguém acerta nunca","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ficaram marcando data e nunca marcam nada","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a data não importa, importa o sentimento, né poético","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"Tirei nota dez na prova de ética, acredita?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"essa música tocou a nota certa no meu coração, hahaha","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que é nota de repúdio, o povo vive publicando?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aquela notícia deu uma nota errada no noticiário","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o crítico deu nota baixíssima pro restaurante","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nota fiscal serve pra quê mesmo, posso jogar fora?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"derivar nota de riso é coisa de quem não leva a sério","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a nota de cem tá acabando do caixa eletrônico","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ele tocou uma nota tão alta que o cachorro chorou","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tomara que eu lembre da resposta na hora da prova, brincadeira","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é, sem lembrar daquele constrangimento o dia passa melhor","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você sabe se anotaram meu nome errado na certidão?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"uma coisa tipo anotar mentalmente, isso funciona mesmo?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apagaram o mural do colégio de novo, a gente volta segunda","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"na hora de apagar a vela do bolo eu peço desejo sempre","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que vem depois da meia-noite, a hora das bruxas?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a data entrou no calendário da escola por engano","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"um dia sem hora pra nada é o melhor dia, né?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que tem data marcada pra quando vai ficar bom?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o poeta escrevia nota de rodapé pra tudo quanto é coisa","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dá pra viver sem marcar data, dia e hora, nem lembrete de nada?","label":"NENHUMA_DIFICIL","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode ser","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"manda ver","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso aí","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"claro que sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fechou","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode mandar bala","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bora","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"beleza pode fazer","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aham pode sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá valendo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vamos nessa","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode ir fundo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sim sim faz isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bora lá","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode crer que sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá certo pode continuar","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"maravilha vai lá","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ok faz isso mesmo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"combinado então","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode seguir","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é isso mesmo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"top vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"só vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"faz sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"claro pode","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah tá bom sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"perfeito vai em frente","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"exato é isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode dar o ok então","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sussa manda aí","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"de boa faz isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"certinho pode proceder","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"massa bora","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"demorou pode fazer","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"show pode sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá bom pode","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vai fundo nisso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode executar aí","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"liberado vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é isso mesmo obrigado","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sim por favor","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"claro claro","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"manda bala nisso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode seguir com isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fechou então faz","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vamos sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode registrar aí é isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá certinho vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ok tudo bem faz","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bora bora","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é nóis faz isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode sim tranquilo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"beleza então manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vai lá que eu deixo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode_pt-br confirmando sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vish sim faz logo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá de boa manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"roda isso aí","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode fazer sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aprova aí sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá liberado","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é isso pode","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"manda brasa","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cara sim vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah faz sim se faz","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"continua desse jeito","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode continuar sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"segue assim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso mesmo faz favor","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"uai pode sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"oxi claro que pode","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"bora que sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é bom sim manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vai que tá certo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa fluir manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso tá certo vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tem meu sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"sim com certeza","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aprovado segue","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ok então bora","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode confirmar aí","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode marcar sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"registra isso mesmo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"falou valeu faz","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô de acordo vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"faz aí que é isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode sim sem problema","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tranquilo manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vai nessa linha mesmo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode guardar é isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aham é exatamente isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá ótimo assim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"beleza total vai","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode encerrar assim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah sim ah sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"por mim tá certo","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"certo então fecha","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vai em frente sim","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso mesmo segue","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ok ok manda","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"logo bora","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ótimo é isso","label":"CONF_SIM","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não pode deixar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cancela isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cancela aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode cancelar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode esquecer","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa quieto","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa pra lá","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nada disso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não faz isso não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não precisa não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem pensar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"de jeito nenhum","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá maluco, não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ih, não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"anula isso aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desfaz isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"para com isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"para, não quero mais","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não manda não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não agenda não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tira isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"remove isso aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode apagar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desiste disso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero mais não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"mudei de ideia, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, deixa quieto isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não é isso não, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"opa, não, segura aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"espera, não faz nada não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não confirma não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não, pera, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode parar aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"chega, não quero","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô fora disso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"passa, não quero","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nega isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não autoriza não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não salva não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não cria não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não marca não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não liga pra ninguém não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não envia isso não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desmarca aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode desmarcar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cancela esse lembrete","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"apaga esse lembrete","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não era isso não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nada a ver, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece o que eu falei","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ignora o que eu disse","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desconsidera isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"faz de conta que eu não falei nada","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não leva a sério não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não registra isso não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode riscar da lista","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tira da agenda","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero saber disso não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"larga isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"larga mão","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corta isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corta essa","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aborta aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode abortar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"interrompe aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"suspende isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"congela isso aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"adianta não, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"desiste, vai","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem tenta","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem precisa","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"dispensa isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode dispensar","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não vale a pena não, esquece","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nope, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"negativo","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"negativo isso aí","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não era pra fazer não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não pedi isso não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quem mandou fazer isso? cancela","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"volta atrás","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode voltar atrás","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"reverte isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ann, deixa","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah não, para","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"oxe, não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vixe, cancela isso","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual é, não quero não","label":"CONF_NAO_CLARA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor deixar pra depois isso aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa quieto, esquece","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"agora não, tô ocupado","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, refaz aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, deixa pra lá","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem, depois eu faço","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa isso quieto por enquanto","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ahh não sei não, melhor parar","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"cancela isso aí, vai","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode deixar pra outra hora","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece, esquece, deixa assim","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor a gente ver isso depois","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm acho que deixa quieto","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"para de fazer isso aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa, eu resolvo depois","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, desiste disso aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não quero mais não, valeu","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá ruim assim, faz de outro jeito","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa pra amanhã isso","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"corta essa, vai","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado isso, volta atrás","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa, perdi a vontade","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor parar por aqui","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa assim mesmo, depois eu vejo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem me fala, deixa pra lá","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pára pára, espera aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso aí tá errado, refaz","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"agora é hora não","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa eu pensar melhor antes","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece esse negócio aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, apaga e faz de novo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor deixar isso quietinho","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depois, depois eu te falo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, cancelei a ideia","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa quieto essa parte","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"prefiro deixar pra outro dia","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado o caminho, volta","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa do jeito que tá","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece, não precisa mais","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor nem mexer nisso agora","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, desisti, deixa","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pára com isso aí, sério","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, tenta de novo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa pra semana que vem","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"agora não rola não","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"mudei de ideia total, cancela tudo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa eu ver isso outra hora","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, faz diferente","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece esse pedido aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor guardar isso pra depois","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, deixa quietinho aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"agora não dá, tô correndo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, refaz do zero","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa, amanhã eu decido","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem começa isso agora","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"para que tá errado","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa pra lá, sério","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, vou deixar pra outro momento","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, desfaz aí","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor a gente repensar isso","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa assim, tá bom por enquanto","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece, vou fazer diferente","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"agora não é o momento","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, começa de novo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa quieto, eu mudo depois","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah, cancelei, relaxa","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"melhor parar enquanto é tempo","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa pra depois do almoço","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá errado, arruma isso","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nem pensa nisso agora","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa eu resolver depois","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"esquece, esquece, outro dia eu peço","label":"CONF_NAO_INDIRETA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hum sei não","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pera aí deixa eu pensar","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende do que você tá pensando","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como assim repete essa parte","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual era a opção mesmo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah isso eu vou ter que ver direito","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não sei cara me pega de novo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eita agora me pegou","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"repete que eu não entendi","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pode ser ou não sei lá","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm deixa eu ver aqui","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não tenho certeza não","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como é que era a pergunta","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pera pera um minuto","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende muito do dia sabe","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah isso é difícil de decidir","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que eu quero mesmo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me fala de novo a segunda opção","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô em dúvida entre as duas","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hum deixa eu pensar melhor nisso","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não sei te dizer agora não","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que você acha melhor aí","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"repete só o final que eu tava distraído","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como assim tá falando sério","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso depende de um monte de coisa","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual era mesmo o nome daquilo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah não sei deixa quieto por enquanto","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"peraí que eu me perdi aqui","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm posso responder depois","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não faço a menor ideia","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"é como eu te explico isso","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende se eu tiver tempo né","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me lembra de novo o que que era","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aí você me pega viu","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah que dúvida danada","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"repete a pergunta inteira por favor","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será que vale a pena mesmo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô meio perdido agora","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hum deixa eu respirar e pensar","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não decidi ainda não","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como assim mudou o assunto","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual é a diferença entre os dois mesmo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende também de quanto tempo leva","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não sei se entendi direito o que você quis dizer","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa eu ver com calma então","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"e se eu falar que não sei","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm complicado isso aí","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me pergunta de novo mais tarde vai","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"o que era mesmo a primeira coisa que você falou","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende de como tiver lá","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah não tô conseguindo decidir isso agora","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"repete devagar que eu anoto","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não sei nem por onde começar","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm jura que é assim mesmo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pera que eu tava pensando em outra coisa","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual opção você disse por último","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"isso depende de muita coisa pra eu responder agora","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah vai ter que ser depois porque não sei","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"como assim de novo essa pergunta","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm deixa eu confirmar com alguém primeiro","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não sei cara me enrola aí um pouco","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende você tá falando de qual exato","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esqueci completamente o que eu ia pedir","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"repete que o som cortou aqui","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"será mesmo que é pra mim isso","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tô na dúvida de verdade agora","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hum quer saber não faço ideia","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"me explica de outro jeito que não entendi","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"qual era mesmo o assunto","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"depende se amanhã eu tiver acordado cedo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa na geladeira esse assunto aí","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"não consegui escutar fala de novo","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm acho que sei mas não tenho certeza","label":"CONF_AMBIGUA","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa quieto isso aí","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá chovendo aí onde você tá","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"alô alô tá me ouvindo","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nossa esqueci o que eu ia falar","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"peraí que tem alguém me chamando","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"opa mudando de assunto você viu o jogo ontem","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmm sei lá viu","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aí depois a gente conversa sobre isso","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que calor danado hoje né","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá bom tá bom já entendi","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah é verdade me lembra uma coisa","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"oi desculpa eu tava falando com outra pessoa aqui","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vish nem me fale né","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"olha só que interessante","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm deixa eu pensar aqui","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá ouvindo a música no fundo é o vizinho","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"caramba olha a hora já","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah não acredito nisso","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo assim sabe como é né","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"êita bagunça danada","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"fala aí o que que tá pegando","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa pra lá isso não importa","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ué travou ou é impressão minha","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nossa que fome que eu tô agora","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"perai rapidinho vou fechar a porta","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"aham tá certo pode crer","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"rapaz hoje o dia tá corrido demais","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você não vai acreditar o que aconteceu aqui em casa","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm tá bom mas depois me fala mais","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"eita que o cachorro começou a latir de novo","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"alô mãe já já eu te ligo viu","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"putz esqueci completamente","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá maluco isso aí é mentira sua","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah tá tá tá continua","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"vem cá rapidinho o que você falou mesmo","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hmmm não sei se concordo não","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"a vizinha tá fazendo obra aqui do lado desculpa o barulho","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah agora que eu lembrei preciso pagar aquela conta","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"quanto tempo heim fulano não te vejo faz tempo","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"oxe como assim explica direito","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"deixa eu ver aqui calma aí","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nossa senhora a internet caiu de novo","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah esquece não era importante não","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"já já eu volto preciso atender a campainha","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tipo eu nem sei por onde começar sabe","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah mas aí é complicado demais né","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"olha o barulho desse caminhão na rua","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"você acha que vai chover hoje à tarde","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"haha muito bom adorei essa","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm entendi ou pelo menos acho que entendi","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah sei lá pode ser qualquer coisa mesmo","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"nossa a bateria do celular tá acabando aqui","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"credo que friozinho que fez de madrugada","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah tá bom belezinha depois a gente se fala","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"pera que minha filha tá me mostrando uma coisa aqui","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"iih rapaz deixa eu ver se entendi","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"que cheiro bom é esse tá cozinhando aí","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah não não não péra que eu me enrolei","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"tá mas enfim voltando aquilo que você tava falando","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"olha sinceramente nem tô com cabeça pra isso agora","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"hm hum entendi entendi","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"caramba você viu aquela notícia que saiu hoje","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}
+{"text":"ah deixa eu só pegar um copo d'água rapidinho","label":"CONF_RUIDO","split":"dev","gen":"nvidia/moonshotai/kimi-k3"}

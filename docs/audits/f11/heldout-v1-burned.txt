@@ -1,0 +1,2 @@
+heldout v1 (sha256 4f944b51e72fc040887e64df4da635909b42b8158c6e8f302397530bbaa53670) medido uma vez em agregado (73,7% / 5 falsos SIM) e então QUEIMADO: renomeado dev2.jsonl para permitir inspeção. Nova reservada será gerada.
+Reservada de INTENÇÃO (linhas não-CONF do heldout v1) nunca medida nem inspecionada: congelada com o hash acima. Reservada de CONFIRMAÇÃO v1 queimada (ver heldout-v1-burned.txt); v2 gerada abaixo.

@@ -7,6 +7,9 @@ import type { ConversationMessage, MutationName, OrchestratorLabel, VoiceServerE
 import {
   GENERATION_FAILURE_TEXT,
   MUTATION_CANCELLED_TEXT,
+  MUTATION_REPROMPT_TEXT,
+  MUTATION_MAX_AGE_MS,
+  NO_ACTION_CLAIM_TEXT,
   MUTATION_FAILURE_TEXT,
   PENDING_MUTATION_TTL_MS,
   VOICE_LIMITS
@@ -15,6 +18,7 @@ import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
 import { AudioStore } from './audioStore.js';
+import { classifyConfirmation } from './confirmationClassifier.js';
 import type { VoiceEngine } from './engine.js';
 import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
 import type { RetrievedChunk } from '../knowledge/index.js';
@@ -25,6 +29,12 @@ export interface ArmedMutation {
   kind: MutationName;
   content: string | null;
   turnId: string;
+  /** F11: quantas vezes a pergunta já foi repetida por resposta ambígua (0 na original). */
+  reprompts?: number;
+  /** F11: texto EXATO da pergunta emitida; /played só promove se o cliente confirmar este texto. */
+  question: string;
+  /** F11: instante do pedido original (performance.now()); o reprompt não o renova. */
+  requestedAt: number;
 }
 
 export interface PendingMutation {
@@ -32,93 +42,8 @@ export interface PendingMutation {
   content: string | null;
   askedAtTurnId: string;
   askedAt: number; // performance.now()
-}
-
-const CONFIRM_YES_EXACT = new Set([
-  'sim',
-  'claro',
-  'confirmo',
-  'certo',
-  'exato',
-  'exatamente',
-  'positivo',
-  'isso mesmo',
-  'pode confirmar',
-  'pode trocar',
-  'pode editar',
-  'pode corrigir',
-  'com certeza'
-]);
-
-const CONFIRM_NO_EXACT = new Set([
-  'nao',
-  'cancela',
-  'jamais',
-  'nunca',
-  'negativo',
-  'deixa pra la',
-  'esquece isso',
-  'nao quero'
-]);
-
-export function normalizeConfirmation(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[.!?]+$/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Camada 0 de confirmação (Fase 5c, docs/phase-5c-v3.md §4.3).
- * Whitelist exata do enunciado inteiro normalizado — nunca por substring.
- * Retorna 'SIM', 'NAO' ou null (quando ambíguo/não reconhecido, delegando para LLM).
- */
-export function keywordConfirmation(transcript: string): 'SIM' | 'NAO' | null {
-  const n = normalizeConfirmation(transcript);
-  if (CONFIRM_YES_EXACT.has(n)) return 'SIM';
-  if (CONFIRM_NO_EXACT.has(n)) return 'NAO';
-  return null;
-}
-
-/**
- * Fase 5c v9 — camada 2, só sobre veredito SIM vindo do LLM (Camada 1). Um SIM sem marcador
- * afirmativo reconhecível, OU com um marcador de negação explícito na mesma fala, é rebaixado
- * para NAO (fail-closed). Substring com fronteira de palavra (\b) sobre texto já normalizado
- * (normalizeConfirmation: minúsculas, NFD sem acento, sem pontuação final, espaços internos
- * colapsados — achado 5).
- *
- * Limite estrutural conhecido, não corrigível por esta camada (achado 3 da auditoria de código,
- * Hermes, 2026-09-23): o gate só enxerga o TEXTO da transcrição. Se o Whisper engolir a palavra
- * de negação e o texto residual, por coincidência, contiver um marcador afirmativo (ex. "não,
- * pode fazer" -> STT "pode fazer"), o gate não tem como saber que houve negação — a informação
- * nunca chegou ao texto. O gate protege o caso onde o resíduo pós-STT fica sem nenhum marcador
- * (o padrão real do caso #18, docs/phase-5c-v7.md §1), não o caso geral de perda de negação.
- */
-const AFFIRMATIVE_MARKERS = [
-  'sim', 'claro', 'confirmo', 'confirma', 'certo', 'certeza', 'exato', 'exatamente', 'positivo',
-  'isso mesmo', 'bora', 'beleza', 'fechou', 'fechado', 'manda',
-  'pode sim', 'pode criar', 'pode marcar', 'pode fazer',
-  'pode apagar', 'pode guardar', 'pode salvar', 'pode anotar',
-  'pode trocar', 'pode editar', 'pode corrigir', 'pode ser', 'pode mudar',
-  'ta valendo', 'esta valendo',
-  'perfeito', 'combinado', 'ta bom', 'esta bom',
-  'blz', 'ok'
-];
-
-const NEGATION_MARKERS = [
-  'nao', 'nem', 'nunca', 'jamais', 'cancela', 'cancelar', 'esquece', 'esquecer', 'tira', 'tirar',
-  'nada'
-];
-
-const AFFIRMATIVE_REGEX = new RegExp(`\\b(?:${AFFIRMATIVE_MARKERS.join('|')})\\b`);
-const NEGATION_REGEX = new RegExp(`\\b(?:${NEGATION_MARKERS.join('|')})\\b`);
-
-export function hasAffirmativeMarker(transcript: string): boolean {
-  const n = normalizeConfirmation(transcript);
-  return AFFIRMATIVE_REGEX.test(n) && !NEGATION_REGEX.test(n);
+  reprompts: number;
+  requestedAt: number;
 }
 
 /**
@@ -145,6 +70,18 @@ const VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS =
   'emergência local), independente de qual agente está respondendo.';
 
 /** Remove markdown e emoji do texto antes de mandar pro TTS — defesa complementar ao prompt acima. */
+const ACTION_CLAIM_VERBS =
+  /\b(anotei|salvei|guardei|registrei|gravei|agendei|apaguei|removi|excluí|exclui|deletei|atualizei|alterei|troquei|corrigi|marquei|programei|criei|lembrei|adicionei|incluí|inclui)\b/i;
+const ACTION_CLAIM_OBJECTS =
+  /\b(lembrete|lembretes|nota|notas|anotaç[aã]o|memória|memoria|alarme|aviso|compromisso|tarefa|agenda|evento)\b/i;
+const ACTION_CLAIM_STANDALONE = /\b(anotei|salvei|guardei|agendei|apaguei|registrei)\b/i;
+
+/** F11: afirmação em 1ª pessoa de ação concluída sobre lembrete/nota/memória (sem ferramenta executada). */
+export function claimsUnexecutedAction(text: string): boolean {
+  if (ACTION_CLAIM_STANDALONE.test(text)) return true;
+  return ACTION_CLAIM_VERBS.test(text) && ACTION_CLAIM_OBJECTS.test(text);
+}
+
 function cleanTextForSpeech(text: string): string {
   let cleaned = text
     .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -194,6 +131,7 @@ interface Session {
    */
   cancelledTurnIds: Set<string>;
   armedMutation: ArmedMutation | null;
+  emittedSentences?: { turnId: string; items: { text: string; consumed: boolean }[] };
   pendingMutation: PendingMutation | null;
 }
 
@@ -393,30 +331,47 @@ export class SessionManager {
 
       // Fase 5c: consumo de pendingMutation se houver
       if (session.pendingMutation) {
+        const nowMs = performance.now();
         const expired =
-          performance.now() - session.pendingMutation.askedAt >= VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
+          nowMs - session.pendingMutation.askedAt >= VOICE_LIMITS.PENDING_MUTATION_TTL_MS ||
+          nowMs - session.pendingMutation.requestedAt >= MUTATION_MAX_AGE_MS;
         if (expired) {
           session.pendingMutation = null;
           // segue para o caminho normal abaixo, como se não houvesse pending
         } else {
-          let confirmed = keywordConfirmation(transcript); // camada 0, whitelist exata (§4.3)
-          if (confirmed === null) {
-            try {
-              confirmed = await this.engine.detectConfirmation(turn.turnId, turn.epoch, transcript);
-            } catch (err) {
-              confirmed = 'NAO'; // fail closed
-              console.error('[mutation] detecção de confirmação falhou, assumindo NÃO:', err);
+          // F11: classificador determinístico de mundo fechado (confirmationClassifier.ts).
+          // SIM só com a fala inteira em vocabulário afirmativo; NAO com qualquer negação;
+          // AMBIGUO (inclui tudo o que não é reconhecido) repete a pergunta uma vez, sem executar.
+          const verdict = classifyConfirmation(transcript, session.pendingMutation.kind);
+          console.log(`[mutation][confirm] turno=${turn.turnId} veredito=${verdict.verdict} (${verdict.reason})`);
+          if (verdict.verdict === 'AMBIGUO' && session.pendingMutation.reprompts < 1) {
+            const pend = session.pendingMutation;
+            session.pendingMutation = null;
+            const question = MUTATION_REPROMPT_TEXT;
+            this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+            this.emit(session, { type: 'state', state: 'falando' });
+            const cleanQ = cleanTextForSpeech(question);
+            turn.expectedSentences.add(0);
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanQ, 0));
+            await Promise.allSettled(turn.pendingSynthesis);
+            if (session.activeTurn === turn) {
+              // Re-arma, nunca promove direto: só markPlayed() (pergunta realmente ouvida) volta a
+              // aceitar confirmação — mesma invariante da pergunta original.
+              session.armedMutation = {
+                kind: pend.kind,
+                content: pend.content,
+                turnId: turn.turnId,
+                reprompts: pend.reprompts + 1,
+                question: cleanQ,
+                requestedAt: pend.requestedAt
+              };
+              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+              this.emit(session, { type: 'state', state: 'ouvindo' });
+              session.activeTurn = null;
             }
-
-            // Fase 5c v8 — camada 2: só sobre o resultado da Camada 1 (LLM), nunca da Camada 0.
-            if (confirmed === 'SIM' && !hasAffirmativeMarker(transcript)) {
-              confirmed = 'NAO';
-              // achado 7: console.warn, não console.error — decisão de negócio esperada, não falha técnica.
-              console.warn(
-                '[mutation][gate] SIM da Camada 1 sem marcador afirmativo (ou com veto de negação) no texto original, rebaixado para NAO (fail-closed).'
-              );
-            }
+            return;
           }
+          const confirmed: 'SIM' | 'NAO' = verdict.verdict === 'SIM' ? 'SIM' : 'NAO';
           if (session.activeTurn !== turn) return;
 
           const mutation = session.pendingMutation;
@@ -504,7 +459,13 @@ export class SessionManager {
               if (!previewFailed) {
                 // Achado 1 (ALTA, rodada 3) — grava armedMutation, NUNCA pendingMutation
                 // diretamente; a promoção só acontece em markPlayed() (v4 §6.3, inalterado).
-                session.armedMutation = { kind: action as MutationName, content, turnId: turn.turnId };
+                session.armedMutation = {
+                  kind: action as MutationName,
+                  content,
+                  turnId: turn.turnId,
+                  question: clean,
+                  requestedAt: performance.now()
+                };
               }
               this.emit(session, { type: 'turn_done', turnId: turn.turnId });
               this.emit(session, { type: 'state', state: 'ouvindo' });
@@ -634,12 +595,21 @@ export class SessionManager {
         ...session.history
       ];
 
+      let claimGuarded = false;
       try {
         await this.engine.generate(turn.turnId, turn.epoch, messagesForEngine, {
           onSentence: (rawText, index) => {
             if (session.activeTurn !== turn) return;
-            const text = cleanTextForSpeech(rawText);
+            let text = cleanTextForSpeech(rawText);
             if (!text) return; // fragmento não-falável (ex.: só emoji/markdown) — descarta silenciosamente
+            // F11 H11.4: neste caminho nenhuma ferramenta executou nada. Se o modelo afirma ter
+            // feito uma ação, a frase é trocada por uma negativa honesta (uma vez por turno).
+            if (claimsUnexecutedAction(text)) {
+              console.warn(`[claim-guard] turno=${turn.turnId}: afirmação de ação sem execução, substituída.`);
+              if (claimGuarded) return;
+              claimGuarded = true;
+              text = NO_ACTION_CLAIM_TEXT;
+            }
             turn.expectedSentences.add(index);
             turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, index));
           }
@@ -693,6 +663,11 @@ export class SessionManager {
 
     if (session.activeTurn !== turn) return; // turno superado enquanto sintetizava
 
+    if (!session.emittedSentences || session.emittedSentences.turnId !== turn.turnId) {
+      session.emittedSentences = { turnId: turn.turnId, items: [] };
+    }
+    session.emittedSentences.items.push({ text, consumed: false });
+
     this.emit(session, {
       type: 'sentence_audio_ready',
       turnId: turn.turnId,
@@ -718,18 +693,34 @@ export class SessionManager {
     // lastTurnId sozinha não pegaria isso (achado de consulta ao Codex CLI, 2026-09-29).
     if (session.cancelledTurnIds.has(turnId)) return false;
 
+    // F11 (auditoria de plano, Codex 2026-10-02, achado 4): só vale a reprodução de uma frase que
+    // o SERVIDOR realmente emitiu neste turno, uma única vez. Texto arbitrário ou repetido do
+    // cliente nunca entra no histórico nem promove mutação.
+    const emitted = session.emittedSentences;
+    if (!emitted || emitted.turnId !== turnId) return false;
+    const entry = emitted.items.find((e) => !e.consumed && e.text === text);
+    if (!entry) return false;
+    entry.consumed = true;
+
     session.history.push({ role: 'assistant', content: text });
     this.trimHistory(session);
 
     // Achado 1 (ALTA) da rodada 3 — só agora, com reprodução confirmada pelo cliente, uma
     // pergunta de mutação vira mutação pendente de resposta. Nada antes deste ponto podia
     // ter certeza de que o usuário ouviu a pergunta.
-    if (session.armedMutation && session.armedMutation.turnId === turnId) {
+    if (
+      session.armedMutation &&
+      session.armedMutation.turnId === turnId &&
+      session.armedMutation.question === text &&
+      performance.now() - session.armedMutation.requestedAt < MUTATION_MAX_AGE_MS
+    ) {
       session.pendingMutation = {
         kind: session.armedMutation.kind,
         content: session.armedMutation.content,
         askedAtTurnId: turnId,
-        askedAt: performance.now() // achado 6 — monotônico, marcado na reprodução, não na emissão
+        askedAt: performance.now(), // achado 6 — monotônico, marcado na reprodução, não na emissão
+        reprompts: session.armedMutation.reprompts ?? 0,
+        requestedAt: session.armedMutation.requestedAt
       };
       session.armedMutation = null;
     }
