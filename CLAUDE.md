@@ -12,6 +12,8 @@ Phase 5c (`LembreteTool`/`NotaTool` — voice-driven reminders/notes, the projec
 
 Hard constraint update (Phase 10a, 2026-09-28 — explicit user decision and audited plan in `docs/phase-10-v3.md`): while audio capture, STT (`mlx-whisper`), intent classification (Qwen3 MLX), system tools, memory, and TTS remain 100% local on loopback with zero external network dependencies, response text generation now uses Google's Gemini API (`gemini-flash-latest` via `google-genai` streaming), requiring `GEMINI_API_KEY` and internet connectivity during turn generation. Any change to external dependencies continues to require an explicit plan, user sign-off, and adversarial audit.
 
+Hard constraint update (Phase 11 addendum, 2026-10-03 — explicit user decision, audited plan in `docs/phase-11-addendum-cloud-intent.md`): intent classification of utterances that trigger the local mutation/time tools now also goes to Gemini (`gemini-flash-lite-latest`, text of the current utterance only, closed-enum JSON, 4 s wait, local-Qwen fallback, `RODRIGO_CLOUD_INTENT=0` to disable). Gemini only *proposes*: every mutation still needs the spoken question, `markPlayed()` and the deterministic confirmation classifier. Audio, history, stored notes/memories and `docs/research/` never go out.
+
 ## Commands
 
 ```bash

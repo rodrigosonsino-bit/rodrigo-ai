@@ -1,4 +1,4 @@
-import type { ConversationMessage, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, VoiceEngine } from './engine.js';
 
 interface ClassifyGate {
@@ -138,6 +138,15 @@ export class FakeVoiceEngine implements VoiceEngine {
 
   isDetectToolPending(turnId: string): boolean {
     return this.detectToolGates.has(turnId);
+  }
+
+  /** F11 adendo: null (padrão) = nuvem indisponível => o sessionManager usa os detectores locais. */
+  public intentToReturn: IntentDetection | null = null;
+  public detectIntentCalls: Array<{ turnId: string; text: string }> = [];
+
+  async detectIntent(turnId: string, _epoch: number, text: string): Promise<IntentDetection | null> {
+    this.detectIntentCalls.push({ turnId, text });
+    return this.intentToReturn;
   }
 
   async detectMutation(

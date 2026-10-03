@@ -3,9 +3,10 @@ import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
-import type { ConversationMessage, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
 import {
   GENERATION_FAILURE_TEXT,
+  isMutationName,
   MUTATION_CANCELLED_TEXT,
   MUTATION_REPROMPT_TEXT,
   MUTATION_MAX_AGE_MS,
@@ -417,11 +418,34 @@ export class SessionManager {
         }
       }
 
+      // F11 adendo (decisão do usuário, 2026-10-03): UMA classificação de intenção em nuvem (Gemini) para
+      // falas que passam por qualquer filtro; só o TEXTO da fala atual. null => nuvem indisponível =>
+      // detectores locais abaixo, exatamente como antes. A nuvem só PROPÕE: toda mutação segue pela
+      // pergunta falada e pelo "sim" determinístico.
+      let cloudIntent: IntentDetection | null = null;
+      if (
+        (this.mutatingTools.length > 0 && mightBeMutation(transcript)) ||
+        (this.tools.length > 0 && mightBeTemporal(transcript))
+      ) {
+        try {
+          cloudIntent = await this.engine.detectIntent(turn.turnId, turn.epoch, transcript);
+        } catch (err) {
+          cloudIntent = null;
+          console.error('[intent] classificação em nuvem falhou, usando detectores locais:', err);
+        }
+        if (session.activeTurn !== turn) return;
+      }
+
       // Fase 5c: filtro de mutação (só chega aqui sem pending, ou com pending expirado)
-      if (this.mutatingTools.length > 0 && mightBeMutation(transcript)) {
+      if (
+        this.mutatingTools.length > 0 &&
+        (cloudIntent ? isMutationName(cloudIntent.intent) && cloudIntent.intent !== 'NENHUMA' : mightBeMutation(transcript))
+      ) {
         let detected: [string, string | null] = ['NENHUMA', null];
         try {
-          detected = await this.engine.detectMutation(turn.turnId, turn.epoch, transcript);
+          detected = cloudIntent
+            ? [cloudIntent.intent, cloudIntent.content]
+            : await this.engine.detectMutation(turn.turnId, turn.epoch, transcript);
         } catch (err) {
           detected = ['NENHUMA', null];
           console.error('[mutation] detecção falhou, seguindo pelo caminho normal:', err);
@@ -477,10 +501,13 @@ export class SessionManager {
       }
 
       // Fase 5b: três camadas — filtro permissivo, modelo decide, código responde.
-      if (this.tools.length > 0 && mightBeTemporal(transcript)) {
+      if (
+        this.tools.length > 0 &&
+        (cloudIntent ? cloudIntent.intent === 'HORA' || cloudIntent.intent === 'DATA' : mightBeTemporal(transcript))
+      ) {
         let detected = 'NENHUMA';
         try {
-          detected = await this.engine.detectTool(turn.turnId, turn.epoch, transcript);
+          detected = cloudIntent ? cloudIntent.intent : await this.engine.detectTool(turn.turnId, turn.epoch, transcript);
         } catch (err) {
           // §4.4: a intenção nunca foi estabelecida — cair no caminho normal é o correto.
           detected = 'NENHUMA';

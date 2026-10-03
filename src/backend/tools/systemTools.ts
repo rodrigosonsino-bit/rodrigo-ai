@@ -61,7 +61,7 @@ export function selectToolByName(name: string, tools: readonly ITool[]): ITool |
 
 /** Filtro permissivo (§4.1) — ver ali para a lista completa, com "seculo" adicionado. */
 const TIME_GATE =
-  /\b(hora|horas|horario|hrs|dia|dias|data|hoje|agora|semana|mes|meses|ano|anos|manha|tarde|noite|amanha|ontem|minuto|minutos|relogio|calendario|quando|seculo|seculos)\b/;
+  /\b(hora|horas|horario|hrs|dia|dias|data|hoje|agora|semana|mes|meses|ano|anos|manha|tarde|noite|amanha|ontem|minuto|minutos|relogio|calendario|quando|seculo|seculos|passou|passa|cedo|tardinha|madrugada|meio)\b/;
 
 export function mightBeTemporal(transcript: string): boolean {
   const n = transcript

@@ -401,7 +401,7 @@ export class MemoriaTool implements IMutatingTool {
 
 /** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2 e atualizado na Fase 7 §4.1 e Fase 8 §4.4. */
 const MUTATION_GATE =
-  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar|avis|delet|alter|some)\w*\b|\b(edita|editar|edite|editou|editando|troca|trocar|troque|trocou|trocando|corrige|corrigir|corrija|corrigiu|corrigindo)\b/;
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar|avis|delet|alter|some|toque|acord|bota|zera|reescrev|desfaz|limp|errad|confund)\w*\b|\b(edita|editar|edite|editou|editando|troca|trocar|troque|trocou|trocando|corrige|corrigir|corrija|corrigiu|corrigindo)\b/;
 
 export function mightBeMutation(transcript: string): boolean {
   const n = transcript

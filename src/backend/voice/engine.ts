@@ -1,4 +1,4 @@
-import type { ConversationMessage, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 
 export interface GenerateCallbacks {
   onSentence: (text: string, index: number) => void;
@@ -37,6 +37,12 @@ export interface VoiceEngine {
     epoch: number,
     text: string
   ): Promise<[MutationName, string | null]>;
+  /**
+   * F11 adendo: classificação de intenção (mutação/hora/data/nenhuma) em NUVEM (Gemini), só com o texto
+   * da fala. Devolve null quando indisponível (desligada, sem chave, erro, timeout, saída inválida) —
+   * o chamador então usa os detectores locais. Nunca lança por indisponibilidade.
+   */
+  detectIntent(turnId: string, epoch: number, text: string): Promise<IntentDetection | null>;
   /**
    * Fase 5c: decide se a fala confirma (SIM) ou nega/cancela (NAO) a pergunta de confirmação.
    */

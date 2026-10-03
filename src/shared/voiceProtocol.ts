@@ -117,6 +117,8 @@ export const VOICE_LIMITS = {
   CLASSIFY_TIMEOUT_MS: 10_000,
   DETECT_TOOL_TIMEOUT_MS: 10_000,
   DETECT_MUTATION_TIMEOUT_MS: 10_000,
+  /** F11 adendo: classificação de intenção em nuvem; passou disso => cai no detector local. */
+  DETECT_INTENT_TIMEOUT_MS: 6_000,
   DETECT_CONFIRMATION_TIMEOUT_MS: 10_000,
   PENDING_MUTATION_TTL_MS: 60_000,
   WARMUP_TIMEOUT_MS: 120_000,
@@ -125,6 +127,15 @@ export const VOICE_LIMITS = {
 } as const;
 
 export const MAX_MUTATION_CONTENT_CHARS = 200;
+/** F11 adendo: resultado da classificação de intenção em nuvem (Gemini). */
+export type IntentName = MutationName | ToolName;
+export interface IntentDetection {
+  intent: IntentName;
+  content: string | null;
+  /** Modelo efetivo que respondeu (registro da medição; alias -latest muda de comportamento). */
+  model?: string;
+}
+
 export const DETECT_MUTATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_MUTATION_TIMEOUT_MS;
 export const DETECT_CONFIRMATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_CONFIRMATION_TIMEOUT_MS;
 export const PENDING_MUTATION_TTL_MS = VOICE_LIMITS.PENDING_MUTATION_TTL_MS;

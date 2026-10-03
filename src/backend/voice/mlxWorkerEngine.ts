@@ -1,7 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import type { ConversationMessage, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, IntentName, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import { isMutationName, isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, VoiceEngine } from './engine.js';
 import { VoiceEngineError } from './engine.js';
@@ -58,6 +58,15 @@ interface PendingDetectMutation {
   spawnGeneration: number;
 }
 
+interface PendingDetectIntent {
+  kind: 'detect_intent';
+  turnId: string;
+  resolve: (res: IntentDetection | null) => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
 interface PendingDetectConfirmation {
   kind: 'detect_confirmation';
   turnId: string;
@@ -73,6 +82,7 @@ type Pending =
   | PendingClassify
   | PendingDetectTool
   | PendingDetectMutation
+  | PendingDetectIntent
   | PendingDetectConfirmation;
 
 let reqCounter = 0;
@@ -166,11 +176,13 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'classify' ||
         pending.kind === 'detect_tool' ||
         pending.kind === 'detect_mutation' ||
+        pending.kind === 'detect_intent' ||
         pending.kind === 'detect_confirmation'
       ) {
         clearTimeout(pending.timeout);
       }
-      pending.reject(err);
+      if (pending.kind === 'detect_intent') pending.resolve(null);
+      else pending.reject(err);
     }
     this.pending.clear();
   }
@@ -253,6 +265,26 @@ export class MlxWorkerEngine implements VoiceEngine {
       return;
     }
 
+    if (event === 'intent_detection' && pending.kind === 'detect_intent') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      if (msg.available !== true) {
+        pending.resolve(null);
+        return;
+      }
+      const intent = msg.intent;
+      if (!(isMutationName(intent) || isToolName(intent))) {
+        pending.resolve(null);
+        return;
+      }
+      pending.resolve({
+        intent: intent as IntentName,
+        content: typeof msg.content === 'string' ? msg.content : null,
+        model: typeof msg.model === 'string' ? msg.model : undefined
+      });
+      return;
+    }
+
     if (event === 'confirmation_detection' && pending.kind === 'detect_confirmation') {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
@@ -268,9 +300,14 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'classify' ||
         pending.kind === 'detect_tool' ||
         pending.kind === 'detect_mutation' ||
+        pending.kind === 'detect_intent' ||
         pending.kind === 'detect_confirmation'
       ) {
         clearTimeout(pending.timeout);
+      }
+      if (pending.kind === 'detect_intent') {
+        pending.resolve(null);
+        return;
       }
       pending.reject(new VoiceEngineError((msg.message as string) || 'Erro desconhecido no worker de voz.'));
       return;
@@ -378,6 +415,28 @@ export class MlxWorkerEngine implements VoiceEngine {
         clearTimeout(timeout);
         this.pending.delete(reqId);
         reject(err as Error);
+      }
+    });
+  }
+
+  async detectIntent(turnId: string, epoch: number, text: string): Promise<IntentDetection | null> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(reqId);
+        // Indisponibilidade, não erro: o chamador cai nos detectores locais. NÃO mata o worker.
+        resolve(null);
+      }, VOICE_LIMITS.DETECT_INTENT_TIMEOUT_MS);
+
+      this.pending.set(reqId, { kind: 'detect_intent', turnId, resolve, reject, timeout, spawnGeneration });
+
+      try {
+        this.writeCommand({ cmd: 'detect_intent', reqId, turnId, epoch, text });
+      } catch {
+        clearTimeout(timeout);
+        this.pending.delete(reqId);
+        resolve(null);
       }
     });
   }
@@ -500,7 +559,9 @@ export class MlxWorkerEngine implements VoiceEngine {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
 
-      if (
+      if (pending.kind === 'detect_intent') {
+        pending.resolve(null);
+      } else if (
         pending.kind === 'classify' ||
         pending.kind === 'detect_tool' ||
         pending.kind === 'detect_mutation' ||
