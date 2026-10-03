@@ -1,0 +1,245 @@
+{"text": "apaga o último lembrete que eu pedi", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cancela aquele lembrete aí, por favor", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tira o lembrete mais recente que fiz", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "esquece aquele lembrete que acabei de criar", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anula o último lembrete, valeu", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "remove esse lembrete que acabou de gravar", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deleta o lembrete novo, não quero mais", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cancela o lembrete anterior, mudou de ideia", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga aí o último que salvei", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tira fora aquele lembrete que fiz agora pouco", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anula o lembrete recente, por gentileza", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cancela o último lembrete que configurei", "label": "LEMBRETE_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "épera aí, muda o texto daquele lembrete que eu acabei de fazer", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não era isso não, queria que tivesse escrito liga pro João", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "corrige aí: trocar mercado por farmácia no lembrete", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah, esqueci de falar: o texto tem que ser compra remédio pra dor de cabeça", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "pera, apaga aquilo e bota leva documento no cartório", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não, não é isso — muda pra reunião com cliente às três", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "espera, o texto tá errado, corrige pra chama o técnico do ar", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah não, fiz errado: troca por pega as crianças na escola", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "corre lá: não é mercado, é passa na padaria antes de ir", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ei, muda o texto daquele lembrete pra liga pra mãe no domingo", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não era compra pão, era compra leite e queijo", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "peraí, apaga e escreve marca dentista pra semana que vem", "label": "LEMBRETE_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me lembra de ligar pro dentista amanhã cedo", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não deixa eu esquecer de pagar a conta de luz até sexta", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "bota um aviso pra buscar o remédio na farmácia às três da tarde", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me avisa quando der meia hora pro encontro com o cliente", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota aí pra eu não esquecer: revisar o contrato antes de assinar", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "coloca um lembrete pra chamar a mãe no domingo, tá", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não me deixa esquecer de confirmar a reserva do restaurante pra hoje à noite", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me dá um toque pra levar o notebook pro conserto amanhã de manhã", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "programa um aviso pra eu sair cedo sexta, que tem aquele treino", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "salva aí: comprar pilha pro controle antes do jogo começar", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me lembra depois de mandar o relatório pro chefe, senão eu vou deixando pra lá", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "bota pra me acordar mais cedo quarta, que tem prova cedo", "label": "LEMBRETE_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota aí essa ideia que tive agora", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "guarda isso pra mim, por favor", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "faz uma nota rápida: não esquece de comprar pão", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "salva esse pensamento aqui, antes que eu esqueça", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "eh... anota: ligar pro dentista amanhã cedo", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "bota no bloco de notas: ideia pro projeto novo", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "registra aí: preciso responder aquele email", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota: reunião às três, não perde o horário", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "guarda esse lembrete: pagar a conta de luz", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "faz um memo mental: comprar presente pro pai", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "salva isso aqui: thought aleatória sobre o livro", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota rapidinho antes que suma da cabeça", "label": "NOTA_CRIAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "corrige a última nota aí", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "troca o texto da nota mais recente por favor", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "altera aquela anotação que acabei de fazer", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "muda o que tá escrito na última nota", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "arruma o texto da nota anterior", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "substitui o conteúdo da nota mais nova", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "edita a última nota que fiz", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "refaz o texto daquela nota aí", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "corrige aqui ó a nota mais recente", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga e escreve de novo a última anotação", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ajusta o texto da nota que acabei de criar", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "troca tudo na nota mais recente por isso aqui", "label": "NOTA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "guarda aí que eu sou alérgico a camarão", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota que meu nome é Rodrigo com R maiúsculo", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "salva que eu não como carne vermelha de jeito nenhum", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembra que eu prefiro café gelado mesmo no inverno", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "guarda que sou vegetariano há uns três anos já", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota aí que eu odeio coentro, sério mesmo", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "salva que meu aniversário é vinte e três de julho", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "guarda que eu tenho insônia então evito cafeína depois das seis", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anota que sou canhoto, pra não esquecer", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembra que eu não gosto de comida muito apimentada", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "salva que eu moro sozinho então porções pequenas funcionam melhor", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "guarda que eu sou programador, trabalho com TypeScript", "label": "MEMORIA_GUARDAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga a última nota que eu fiz", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deleta essa anotação aí por favor", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "remove a nota mais recente que tem aqui", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga aquela última que eu mandei", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "exclui a nota que acabei de criar", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tira essa última anotação daqui", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga a nota que fiz agora pouco", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deleta a mais nova que tem salva", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "remove a última nota que gravei", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga essa nota que acabou de entrar", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "exclui a anotação mais recente por favor", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tira daqui a última que eu anotei", "label": "NOTA_APAGAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "é isso não, meu nome é Rodrigo com R mesmo", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "pera aí, eu nasci em noventa e oito não em noventa e nove", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cê tá confundido, eu moro em Belo Horizonte não no Rio", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não foi isso que eu disse, meu celular é Android não iPhone", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "espera, minha mãe se chama Maria não Marina", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah não, eu trabalho com design não com programação", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tá errado isso aí, eu tenho dois gatos não três", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não é bem assim, eu estudei na UFMG não na PUC", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cê guardou errado, meu aniversário é dia doze não vinte", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não não, eu sou vegetariano não vegano", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ei, minha cor favorita é azul não verde", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "opa, eu falo inglês fluente não espanhol", "label": "MEMORIA_EDITAR", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas são agora", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me diz que horas são", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tá que horas", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "já é meio-dia ou ainda não", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas que são", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me fala a hora", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tá tarde já", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "sabe me dizer que horas são", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas são mesmo", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "já passou do meio-dia", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me diz as horas aí", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tá cedo ainda ou já tá tarde", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas são por aí", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me informa a hora", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "já é hora do almoço", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas que são agora", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tá na hora de quê", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me passa as horas", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "já deu meio-dia", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas são hein", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "sabe que horas são", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tá quase meio-dia", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me diz que horas são por favor", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "já é tarde", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que horas são aí", "label": "HORA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia é hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hoje é que dia mesmo", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que data a gente tá", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "qual o dia da semana hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me diz que dia é hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia cai hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hoje cai em que", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "dia de hoje qual é", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "sabe me dizer que dia é", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia q a gente tá", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hoje é dia de que", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "qual data de hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia da semana a gente tá", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me fala que dia é hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hoje é que dia da semana", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia q é hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "sabe que dia é", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hoje a gente tá em que dia", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia a gente tem hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "qual o dia de hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me informa que dia é", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hoje cai em que dia", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "que dia q é", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "a gente tá em que dia", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "diz aí que dia é hoje", "label": "DATA", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga isso que você acabou de guardar sobre mim", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "esquece aquela última informação que eu te passei", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deleta o último fato que você anotou aí", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não quero mais que você saiba aquilo que eu falei antes", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tira da memória essa última coisa que eu contei", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga o registro mais recente sobre mim, por favor", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "esquece o que eu acabei de te falar, tá", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "remove aquela última anotação que você fez de mim", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não guarda mais esse último detalhe que eu passei", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "zera essa última info que você tem minha", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cancela o último fato que você salvou sobre mim", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaga daí essa última coisa que eu te disse agora", "label": "MEMORIA_ESQUECER", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "eu lembro que você falou isso semana passada", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o dia do juízo final ninguém sabe quando é", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "quanto dura a hora do culto no domingo?", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o que é um lembrete na psicologia mesmo?", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nota dez na prova de matemática ontem", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "a hora da verdade chegou para todo mundo", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembrar de comprar pão não é meu forte", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anotar tudo no caderno dá muito trabalho", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apagar a luz do quarto antes de dormir", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o dia que eu casei foi inesquecível", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "qual a data do aniversário da sua mãe?", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nota fiscal perdi a do mercado", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hora de almoço acabou faz tempo", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembrei que tinha combinado com ele", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anotei o telefone mas rasurei sem querer", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apaguei a mensagem sem ler direito", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o dia amanheceu nublado hoje cedo", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "data de validade do iogurte venceu", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nota de rodapé no livro tá ilegível", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hora extra no trabalho não compensa", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembro vagamente do nome dele", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anotar receita da vó é tradição", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apagar incêndio na cozinha foi tenso", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o dia dos pais cai em agosto", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "data comemorativa eu sempre esqueço", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nota musical desafinada no karaokê", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hora certa ninguém acerta de primeira", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembrar senha do banco é sufoco", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anotar endereço no guardanapo é clássico", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apagar foto feia do grupo é obrigatório", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o dia rendeu mais do que eu esperava", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "data de nascimento do gato sei lá", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nota de corte do vestibular subiu", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hora do rush no metrô é caótico", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembrei de um causo engraçado agora", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anotar compromisso na mão falha sempre", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apagar histórico do navegador de vez em quando", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "o dia que a gente se conheceu", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "data do show foi adiada de novo", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nota de débito no extrato suspeita", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "hora de dormir passou faz tempo", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "lembrar de tomar remédio é luta", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "anotar ideia no meio da madrugada", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "apagar vela de aniversário com desejo", "label": "NENHUMA_DIFICIL", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "e aí como que faz pra configurar isso", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cara explica pra mim como funciona essa parada", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não to entendendo nada do que você falou", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "peraí deixa eu pensar um pouco", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tipo assim ó o que que significa isso aí", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "mano será que dá certo mesmo", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nossa que louco nunca tinha pensado nisso", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "e se eu fizer diferente dá na mesma", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah tá entendi agora faz sentido", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ué mas por que que é assim", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "olha só que interessante não sabia", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deixa eu ver se peguei a ideia", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não sei não acho que tem jeito melhor", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "é sério isso ou tô viajando", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "me explica de novo que eu perdi", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "caramba faz tempo que não penso nisso", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "será que tem algum segredo aí", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "aham continua que to ouvindo", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "é isso mesmo ou tem pegadinha", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nossa que viagem doida essa", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "pera lá isso faz sentido mesmo", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tipo sei lá acho que entendi", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "e se der errado o que acontece", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "mano isso é muito louco", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não consigo acreditar que é assim", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deixa eu falar uma coisa", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah legal então funciona assim", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "é complicado né não tem jeito fácil", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "será que eu tô falando besteira", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "olha eu não faço ideia", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah sim agora foi", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "cara você tem razão", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não tinha pensado por esse lado", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "e aí qual é a sua opinião", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "sei lá cada um com seu cada um", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "nossa que história mais maluca", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "peraí isso é verdade mesmo", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "ah tá bom então", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "tipo assim não sei se concordo", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "mano que sacada boa", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "é isso aí fechou", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "não faço a mínima ideia", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}
+{"text": "deu pra entender ou falo de novo", "label": "NENHUMA_COMUM", "split": "heldout", "gen": "opencode/nemotron-3-ultra-free"}

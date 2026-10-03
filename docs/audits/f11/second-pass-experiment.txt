@@ -1,0 +1,1 @@
+Experimento 2ª passada binária (F11): INVIÁVEL — cada detect_mutation já leva ~3–7 s (concorrência de GPU com outro app local); 3 passadas estouram o timeout de 10 s. Revertido. Latência dos detectores é risco aberto para a F13.

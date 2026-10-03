@@ -1,0 +1,55 @@
+[0m
+> build · moonshotai/kimi-k3
+[0m
+Auditoria adversarial — apenas sobre o código do prompt, deduzindo comportamento real de execução.
+
+---
+
+**ACHADO 1 — `'que'` e `'eu'` ausentes do `RELAX_DENY`: sarcasmo/condicional com âncora inicial vira SIM**
+EVIDÊNCIA: `RELAX_DENY` contém `'porque'`, `'pq'`, `'se'`, `'queira'`, mas **não** o token solto `'que'` nem `'eu'`. A âncora `RELAX_ANCHOR_RE` casa `'claro'` no início, e `unknowns.length <= RELAX_MAX_UNKNOWN (6)`.
+Execução deduzida: entrada `"claro que podia"` (sarcasmo/condicional) → masked `claro que podia` → anchor `'claro'` casa; tokens=3, unknowns=`['que','podia']`; nenhum em `RELAX_DENY` → **SIM**. Idem `"claro que eu confio"` → unknowns `['que','eu','confio']` → **SIM**.
+GRAVIDADE: ALTA (executa mutação diante de fala que qualquer humano lê como ironia/condicional).
+CONFIANÇA: ALTA (caminho determinístico, traçado token a token).
+AÇÃO: adicionar `'que'`, `'eu'` (e plausivelmente `'podia'`, `'devia'`, `'gostaria'` já coberto) ao `RELAX_DENY`; idealmente exigir que unknowns sejam só nomes/objetos, não partículas de subordinação.
+
+**ACHADO 2 — Mudança de assunto curta após âncora passa: `"claro que sim, cadê o jogo"` → SIM**
+EVIDÊNCIA: STRONG_PHRASE `'claro que sim'` é removida, restando unknowns `['cade','jogo']` (ambos fora de `RELAX_DENY`); anchor casa em `masked`; tokens=6 ≤ 10. O `?` depende do STT pontuar — `mls-whisper`/`whisper-small` frequentemente omite pontuação em fala coloquial; sem `?`, `QUESTION_RE` não protege.
+GRAVIDADE: ALTA (pedido novo executa a mutação anterior).
+CONFIANÇA: MÉDIA-ALTA (depende do STT não emitir `?`).
+AÇÃO: adicionar `'cade'`, `'onde'` (existe), e tratar unknown nominal desconhecido como AMBIGUO quando houver ≥2 unknowns consecutivos de conteúdo (ou lista de verbos de pedido: `'manda ver o que...'` passa pelo mesmo buraco — `RELAX_ANCHOR_RE` inclui `'manda ver'`).
+
+**ACHADO 3 — `'esta valendo'`/`'ta valendo'` em STRONG e em SOFT: a checagem STRONG roda ANTES e neutraliza a guarda de interjeição do caminho soft**
+EVIDÊNCIA: `STRONG_PHRASES` inclui `'esta valendo'`; `SOFT_PHRASES` inclui `'ta valendo', 'esta valendo'`. O loop STRONG executa primeiro e marca `strong=true`. O comentário sobre SOFT_TOKENS diz: "Só valem quando a fala INTEIRA é curta e sem interjeição" — guarda que só existe no ramo `soft`. Execução: `"ah, tá valendo"` → `'ta valendo'`: `'ta'` FILLER, frase STRONG só casa `'esta valendo'` — ok, cai no soft com interjeição `ah` → AMBIGUO. Mas `"vish, está valendo"` → STRONG phrase `'esta valendo'` casa → **SIM** apesar da interjeição de hesitação `'vish'`, rota que a guarda soft foi projetada pra bloquear.
+GRAVIDADE: MÉDIA.
+CONFIANÇA: ALTA.
+AÇÃO: remover `'esta valendo'` de `STRONG_PHRASES` (manter só no SOFT) ou aplicar a guarda de interjeição também ao ramo strong.
+
+**ACHADO 4 — markPlayed: `armed.question === text` compara a pergunta INTEIRA com UMA frase sintetizada**
+EVIDÊNCIA: no caminho original de arm: `armedMutation = { ..., question: clean, ... }` onde `clean` é o texto completo da pergunta. Mas `emittedSentences.items` é populado **por frase** em `synthesizeSentence`, e o cliente chama `/played` por frase. Se a pergunta (`clean`) contém mais de uma sentença (ex. "Você quer criar o lembrete X. Posso confirmar?"), nenhum `text` individual iguala `clean` → promoção nunca ocorre → mutação jamais executa (fail-fechado, mas quebra funcional silenciosa e sem log). No caminho de reprompt isso não acontece porque `synthesizeSentence(..., cleanQ, 0)` é chamado uma única vez — os dois caminhos ficam com comportamento divergente para o mesmo invariante.
+GRAVIDADE: MÉDIA (não executa nada indevido; mas o fluxo quebra sem diagnóstico e só em frases multi-sentença).
+CONFIANÇA: MÉDIA (o trecho do arm original está no diff, mas não vejo se a pergunta é sempre mono-sentença por construção).
+AÇÃO: ou armar `question` **por sentença emissível**, ou fazer o arm guardar o array de sentenças e promover quando a ÚLTIMA for tocada; mais um `console.warn` quando `armed.question` não bater com nenhum item emitido.
+
+**ACHADO 5 — Janela de corrida no reprompt: pending é anulado ANTES do re-arm; resposta do usuário nesse intervalo é processada como turno novo comum**
+EVIDÊNCIA: `session.pendingMutation = null` → `await Promise.allSettled(turn.pendingSynthesis)` → re-arm condicionado a `session.activeTurn === turn`. Se o usuário falar durante a síntese/reprodução da reprompt, o novo turno encontra `pendingMutation === null`: o "sim"/"não" dele vira mensagem normal pro LLM (com risk de o claim-guard ter que mentir de novo), e quando o `/played` atrasado chega, o pending é promovido — e o **próximo** enunciado não relacionado é classificado como resposta à pergunta. Ex.: usuário diz "ah, deixa pra lá" antes do áudio tocar → processado como conversa; reprompt promove depois; usuário então pergunta "que horas são?" → classified como AMBIGUO/NAO sobre a mutação — melhor caso; no pior, um "pode" aleatório executa.
+GRAVIDADE: MÉDIA.
+CONFIANÇA: MÉDIA (mesma classe de janela já existia no fluxo original, mas o reprompt a duplica — duas janelas por mutação).
+AÇÃO: cancelar/descartar a promoção de reprompts cujo turno foi superado (verificar `performance.now()` e `turn` vigente dentro de `markPlayed` — já há a checagem `turnId`, mas manter também um sinal "pergunta substituída por fala do usuário").
+
+**ACHADO 6 — `"aham"`/`"uhum"` isolados executam mutação**
+EVIDÊNCIA: `SOFT_TOKENS` inclui `'aham','uhum','ahan'`; ramo soft aceita `tokens.length <= 2` sem interjeição. Execução: usuário resmungando enquanto pensa ("aham... deixa eu ver") — se o STT cortar o resto, sobra `aham` → **SIM** executando create/delete. O próprio comentário exclui `'hum'/'hm'` por hesitação, mas `'aham'` é foneticamente o mesmo comportamento.
+GRAVIDADE: MÉDIA-ALTA (é exatamente a classe do falso-SIM da Fase 5c que motivou a Fase 11).
+CONFIANÇA: MÉDIA (depende de comportamento do STT, já observado comer palavras).
+AÇÃO: remover `'aham','uhum','ahan'` do conjunto que aceita SIM isolado (exigir token afirmativo forte ao lado, ou demovê-los pra filler).
+
+**ACHADO 7 — Falso NAO seguro, mas cobertura contraditória com o objetivo da Fase 11**
+EVIDÊNCIA: `'para'` em posição 0 → NAO sempre. `"para mim, sim amanhã"` → NAO (ok, seguro). Mas o gasto contrário: `'erro'`, `'tira'`, `'remove'`, `'volta'` em qualquer posição → NAO; `"pode sim, e volta a me lembrar toda semana"` → NAO — mutação LEGITIMAMENTE confirmada é rejeitada (cobertura). ESTRUTURAL: "vence tudo" em qualquer posição faz afirmações condicionais com verbo cancelar-like virarem NAO. MENOR.
+CONFIANÇA: ALTA quanto ao comportamento; BAIXA quanto à relevância (fail-closed é projeto).
+AÇÃO: registrar como tradeoff aceito, não corrigir.
+
+**ACHADO 8 — `fora`/`'atras'` como NEGATION_TOKENS em qualquer posição colidem com fala afirmativa**
+EVIDÊNCIA: `'fora'` e `'volta'/'voltar'` são NAO sempre. `"manda bala, joga fora o medo"` → NAO. `"pode voltar a me lembrar disso, sim"` → NAO. Seguro, mas gera reprompts inexplicáveis pro usuário ("o sistema não me entende"). MENOR. CONFIANÇA: ALTA. AÇÃO: considerar restringir `'fora'` ao padrão `sai/fora fora` ou posição inicial.
+
+---
+
+**VEREDITO: NÃO APROVAR para produção como está.** A arquitetura de mundo fechado é estruturalmente sólida (o que a lista não cobre vira pergunta, nunca execução) e o invariante markPlayed/`question === text`/consumed-once está correto na direção fail-closed. MAS o caminho `classifyRelaxed` reabre a porta que o mundo fechado fechou: basta a fala **começar** com uma âncora e os tokens desconhecidos não estarem na lista de veto — e a lista omite `'que'`/`'eu'`, as duas palavras que mais introduzem subordinação, ironia e pedido em português (Achados 1 e 2). Corrigir `RELAX_DENY` (ou abolir o relax) é requisito; Achado 6 é requisito dado o histórico da Fase 5c; Achados 3–4 são correções baratas; 5–8 podem virar dívida documentada.

@@ -93,6 +93,13 @@ DETECT_TOOL_SYSTEM_PROMPT = (
     "Já deu meio-dia ou não? -> HORA\n"
     "Tá tarde já, né? -> HORA\n"
     "Hoje é dia quantos, perdi a conta -> DATA\n"
+    "Hoje é dia de quê? -> DATA\n"
+    "Já passou das dez? -> HORA\n"
+    "Tá cedo ainda ou já passou das três? -> HORA\n"
+    "Tem gente que nasceu de dia e eu nasci de tardinha -> NENHUMA\n"
+    "Hora de dormir passou faz tempo -> NENHUMA\n"
+    "Hora certa ninguém acerta de primeira -> NENHUMA\n"
+    "A nota de cem tá acabando do caixa eletrônico -> NENHUMA\n"
     "Chegou a hora da verdade, meu amigo -> NENHUMA\n"
     "Hoje é dia de feira lá no bairro -> NENHUMA\n"
     "A data não importa, importa o sentimento -> NENHUMA\n"
@@ -171,6 +178,24 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "O juiz pediu pra anotar o depoimento inteiro -> NENHUMA\n"
     "Eu gosto de quem anota as ideias no papel -> NENHUMA\n"
     "Na real eu tenho trinta e dois anos, não trinta e cinco -> NENHUMA\n"
+    "Anota aí que eu quero ser chamado de Rafa -> MEMORIA_GUARDAR|quer ser chamado de Rafa\n"
+    "Anota aí que meu time é o São Paulo -> MEMORIA_GUARDAR|seu time é o São Paulo\n"
+    "Anota aí que eu não gosto de acordar cedo -> MEMORIA_GUARDAR|não gosta de acordar cedo\n"
+    "Anota rápido que a reunião do condomínio mudou pra quinta -> NOTA_CRIAR|Reunião do condomínio mudou pra quinta\n"
+    "Reescreve a nota aí, ficou esquisita -> NOTA_EDITAR|Reescrever a nota\n"
+    "Não gostei do jeito que ficou, reescreve a nota mais curto -> NOTA_EDITAR|Reescrever a nota mais curto\n"
+    "Acho que falei errado, bota pagar a conta de luz no lugar -> LEMBRETE_EDITAR|Pagar a conta de luz\n"
+    "Essa história de que eu gosto de futebol tá errada, apaga isso -> MEMORIA_ESQUECER\n"
+    "Não era isso não, queria que tivesse escrito liga pro João -> LEMBRETE_EDITAR|Liga pro João\n"
+    "Não, não é isso, muda pra reunião com cliente às três -> LEMBRETE_EDITAR|Reunião com cliente às três\n"
+    "Não era compra pão, era compra leite e queijo -> LEMBRETE_EDITAR|Comprar leite e queijo\n"
+    "Espera, minha mãe se chama Maria, não Marina -> MEMORIA_EDITAR|Sua mãe se chama Maria, não Marina\n"
+    "Tá errado isso aí, eu tenho dois gatos, não três -> MEMORIA_EDITAR|Tem dois gatos, não três\n"
+    "Cê tá confundido, eu moro em Belo Horizonte, não no Rio -> MEMORIA_EDITAR|Mora em Belo Horizonte, não no Rio\n"
+    "Eu prefiro café, não chá, mas hoje vou de suco -> NENHUMA\n"
+    "Nota dez na prova de matemática ontem -> NENHUMA\n"
+    "Apagar a luz do quarto antes de dormir -> NENHUMA\n"
+    "Lembrar de tomar remédio é uma luta -> NENHUMA\n"
 )
 
 DETECT_CONFIRMATION_SYSTEM_PROMPT = (
@@ -577,32 +602,38 @@ class Worker:
             self._current = handle
 
         try:
-            messages = [
-                {"role": "system", "content": DETECT_MUTATION_SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ]
-            prompt = self._llm_tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True, tokenize=False
-            )
-
             from mlx_lm.generate import stream_generate
             from mlx_lm.sample_utils import make_sampler
 
-            sampler = make_sampler(temp=0.0)
-            raw = ""
-            token_count = 0
-            max_tokens = 96
-            for response in stream_generate(
-                self._llm, self._llm_tokenizer, prompt, max_tokens=max_tokens, sampler=sampler
-            ):
-                if handle.cancel_event.is_set():
-                    log_diag(f"Detecção de mutação cancelada pelo worker (turnId={turn_id}).")
-                    return
-                raw += response.text
-                token_count += 1
+            def run(system: str, user: str, max_tokens: int):
+                """Uma geração greedy; devolve (texto, truncado) ou None se cancelada."""
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ]
+                prompt = self._llm_tokenizer.apply_chat_template(
+                    messages, add_generation_prompt=True, tokenize=False
+                )
+                sampler = make_sampler(temp=0.0)
+                out = ""
+                count = 0
+                for response in stream_generate(
+                    self._llm, self._llm_tokenizer, prompt, max_tokens=max_tokens, sampler=sampler
+                ):
+                    if handle.cancel_event.is_set():
+                        log_diag(f"Detecção de mutação cancelada pelo worker (turnId={turn_id}).")
+                        return None
+                    out += response.text
+                    count += 1
+                return out, count >= max_tokens
 
-            truncated = token_count >= max_tokens
+            first = run(DETECT_MUTATION_SYSTEM_PROMPT, text, 96)
+            if first is None:
+                return
+            raw, truncated = first
             action, content = parse_mutation_output(raw, truncated=truncated)
+
+
             emit({
                 "event": "mutation_detection",
                 "reqId": req_id,

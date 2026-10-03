@@ -40,13 +40,18 @@ const CATS = {
   CONF_RUIDO: [40, 'fala fora de contexto ou ruído transcrito: mudança de assunto, outro pedido, fragmentos de fala alheia, preenchedores ("que horas são", "ah", "tá chovendo aí?", "alô")']
 };
 
+const CONTEXT_FRAME = "Contexto obrigatório: o assistente acabou de perguntar 'Posso fazer isso? Diga sim ou não.' e a frase gerada é a RESPOSTA CURTA DO USUÁRIO a essa pergunta (o usuário NÃO é quem executa a tarefa; não use 'já resolvo', 'já faço'). Frases de 1 a 8 palavras, naturais, como falaria um adulto comum. ";
+
 function run(cat, n, desc, attempt = 1) {
   const N = Math.round(n * mult);
+  const answerFrame = cat.startsWith('CONF_') && cat !== 'CONF_RUIDO' ? CONTEXT_FRAME : '';
   const prompt = `Gere exatamente ${N} frases DISTINTAS em ${STYLE}\nCategoria: ${desc}.\n` +
-    `Responda SOMENTE com um array JSON de strings, sem texto antes ou depois, sem cercas de código.`;
+    `${answerFrame}Responda SOMENTE com um array JSON de strings, sem texto antes ou depois, sem cercas de código.`;
   return new Promise((resolve) => {
     // stdin 'ignore': opencode run fica pendurado esperando EOF se stdin for um pipe aberto.
-    const child = spawn('opencode', ['run', prompt, '-m', model], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = model === 'hermes'
+      ? spawn('docker', ['exec', 'hermes', 'hermes', '-z', prompt], { stdio: ['ignore', 'pipe', 'ignore'] })
+      : spawn('opencode', ['run', prompt, '-m', model], { stdio: ['ignore', 'pipe', 'ignore'] });
     let stdout = '';
     child.stdout.on('data', (d) => { stdout += d; });
     const timer = setTimeout(() => child.kill('SIGKILL'), 300000);
@@ -62,7 +67,7 @@ function run(cat, n, desc, attempt = 1) {
   });
 }
 
-const entries = Object.entries(CATS).filter(([c]) => c.startsWith(onlyPrefix));
+const entries = Object.entries(CATS).filter(([c]) => (onlyPrefix.startsWith('!') ? !c.startsWith(onlyPrefix.slice(1)) : c.startsWith(onlyPrefix)));
 const rows = [];
 const queue = [...entries];
 await Promise.all([0, 1, 2].map(async () => {

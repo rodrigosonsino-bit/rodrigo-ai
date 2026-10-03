@@ -234,7 +234,7 @@ async function sendCancel(baseUrl: string, sessionId: string, token: string, tur
 describe('Grupo A: Controle positivo (respostas afirmativas executam e gravam exatamente 1 item)', () => {
   const AFFIRMATIVE_CASES = [
     'sim',
-    'pode ser',
+    'pode sim',
     'claro que sim',
     'fechou',
     'manda ver',
@@ -548,7 +548,7 @@ describe('Grupo B: Zero execução (negações, ruídos, reprompt com ambiguidad
   });
 
   // Reprompt seguido de 'sim' executa exatamente 1 vez
-  ['sim', 'pode ser', 'com certeza'].forEach((aff, idx) => {
+  ['sim', 'pode sim', 'com certeza'].forEach((aff, idx) => {
     it(`B.reprompt_pos.${idx + 1}: ambíguo -> reprompt -> afirmação "${aff}" executa exatamente 1 vez`, async (t) => {
       const tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'f11-grpB-reppos-'));
       const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
@@ -2210,11 +2210,19 @@ describe('Grupo D: Resultado verdadeiro (H11.4 — falhas reais e guarda de aluc
     await sse.waitFor(1);
 
     await sendAudio(h.baseUrl, sessionId, token);
-    await sse.waitFor(9);
+    // Espera as DUAS frases (a síntese é concorrente: a ordem de chegada não é garantida; o cliente
+    // ordena por sentenceIndex) em vez de contar eventos genéricos, o que era uma corrida.
+    const deadline = Date.now() + 5000;
+    while (
+      sse.events.filter((e: any) => e.type === 'sentence_audio_ready').length < 2 &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
 
-    const readyEvents = sse.events.filter(
+    const readyEvents = (sse.events.filter(
       (e: any) => e.type === 'sentence_audio_ready'
-    ) as Array<{ text: string }>;
+    ) as Array<{ text: string; sentenceIndex: number }>).sort((a, b) => a.sentenceIndex - b.sentenceIndex);
     assert.equal(readyEvents.length, 2);
     assert.equal(readyEvents[0].text, 'Entendi sua pergunta com clareza.');
     assert.equal(readyEvents[1].text, NO_ACTION_CLAIM_TEXT);

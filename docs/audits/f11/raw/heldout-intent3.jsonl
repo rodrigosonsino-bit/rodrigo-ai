@@ -1,0 +1,244 @@
+{"text":"apaga o último lembrete que eu fiz","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cancela aquele lembrete agora","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tira esse lembrete aí","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"esquece o lembrete anterior","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga o último que eu pedi","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não quero mais aquele lembrete","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cancela o lembrete mais recente","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"remove aquele lembrete que criei","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga o último, por favor","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anula o lembrete que acabou de fazer","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não precisa daquele lembrete mais","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"deleta o último lembrete aí","label":"LEMBRETE_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"pera aí, o texto tá errado","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não era isso que eu falei, muda o texto","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"espera, deixa eu corrigir o que eu disse","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"o lembrete tá com a frase errada, arruma aí","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não, não era \"comprar pão\", era \"comprar leite\"","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"é, tô falando do texto mesmo, não da hora","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"corrige lá: \"ligar pro João\" não, \"ligar pra Maria\"","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ops, falei errado, o texto certo é \"reunião às três\"","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não é pra mudar o horário, é o texto do lembrete","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"refaz o texto, por favor, ficou esquisito","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ah, esqueci de falar: o texto tem que ser \"enviar relatório\"","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"troca o texto aí, o anterior não serviu","label":"LEMBRETE_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me lembra de ligar pro dentista amanhã cedo","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não deixa eu esquecer de pagar o boleto até sexta","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"bota um aviso pra reunião com o cliente às três","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me avisa quando der dez pras duas que tenho consulta","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me lembra de buscar o remédio na farmácia depois do almoço","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não deixa passar batido o aniversario da mãe domingo","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"coloca um lembrete pra chamar o pedro sobre o contrato","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me avisa se eu não tiver ligado pro seguro até cinco","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"bota aí pra não esquecer de levar os documentos na terça","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me lembra de cancelar a assinatura antes de renovar","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não deixa eu esquecer de confirmar a reserva do restaurante","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me avisa quando for hora de sair pro aeroporto","label":"LEMBRETE_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota aí essa ideia que tive agora","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"guarda isso pra mim por favor, aquele lance do projeto","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"salva essa observação rapidinho antes que eu esqueça","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"bota nas notas aquele pensamento que passou pela cabeça","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota esse ponto importante que lembrei do nada","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"registra aí a sacada que tive no banho","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"coloca na lista de ideias aquele negócio que a gente falou","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"guarda esse insight que acabou de vir na mente","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota isso aqui ó, pra não perder o fio da meada","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"salva esse lembrete mental que tive agora pouco","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"bota no caderno de ideias aquele troço que passou","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota rapidão essa observação antes que suma","label":"NOTA_CRIAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga a última nota que eu fiz","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"deleta essa anotação aí por favor","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"remove a nota mais recente","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cancela a última coisa que anotei","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga isso aí que acabei de falar","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tira a última nota da lista","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"exclui a anotação que fiz agora pouco","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga a nota anterior por favor","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"deleta o último lembrete que criei","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"remove essa nota que acabei de ditar","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga a última que eu mandei salvar","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cancela a nota mais nova que tá lá","label":"NOTA_APAGAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ah, espera... a última nota que fiz, pode trocar o texto?","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ô, a nota anterior... muda o que tá escrito lá","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"e aí, dá pra corrigir a nota mais recente? escrevi errado","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"peraí... a nota que acabei de fazer, troca o conteúdo","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a última anotação... pode arrumar o texto pra mim?","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cara, a nota de agora pouco... apaga e bota outro texto","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"olha só, a nota mais nova que fiz... tem como editar?","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"é, a última... pode substituir o que tá escrito?","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a nota recém-feita... queria mudar o texto todo","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"opa, a nota que fiz há pouco... corrige aí o conteúdo","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a última nota mesmo... troca o texto por favor","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a anotação anterior... pode refazer o texto?","label":"NOTA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"guarda aí que meu nome é Rodrigo","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota que eu não como glúten tá","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"salva que eu gosto de café forte sem açúcar","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembra que eu sou alérgico a camarão","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"registra que meu time é o Flamengo","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"guarda essa: eu prefiro mensagem de voz a texto","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota que eu acordo cedo todo dia","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"salva que eu não bebo álcool","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembra que eu moro em São Paulo zona sul","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"guarda que eu sou vegetariano faz uns dois anos","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anota aí que eu odeio notificação sonora","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"salva que eu trabalho com design gráfico","label":"MEMORIA_GUARDAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ei, isso que você anotou tá errado","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não, meu nome não é esse não","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"espera aí, a data do meu aniversário é outra","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cara, você confundiu, eu não moro mais lá","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"opa, meu telefone mudou, apaga o antigo","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não é bem assim, meu trabalho é outro agora","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"pera, minha alergia não é essa, é a camarão","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ei, você salvou meu email errado, falta um ponto","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não, meu time não é esse, torço pro outro","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"calma lá, eu não gosto de café, prefiro chá","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"opa, minha cor favorita é azul, não vermelho","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"espera, eu não tenho gato, tenho cachorro","label":"MEMORIA_EDITAR","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga isso que acabei de falar, por favor","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"esquece aquela última informação que eu dei","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"deleta o último lance que eu contei pra você","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não guarda isso não, apaga da memória","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cê pode esquecer o que eu falei agora pouco?","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga esse fato aí, foi sem querer","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"esquece isso daí, não era pra ter falado","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"remove a última coisa que eu disse, tá?","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não quero que guarde isso, apaga pra mim","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"zera essa informação que acabei de passar","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"esquece lá, aquele negócio que eu falei por último","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga daí, não precisa lembrar disso não","label":"MEMORIA_ESQUECER","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia é hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual a data de hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia da semana a gente tá","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje é que dia mesmo","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me diz que dia é","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia cai hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual dia da semana é","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje é quantos do mês","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia é amanhã... ops hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me fala a data de hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia que é hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje é segunda terça... que dia é","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual a data","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia da semana","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje é dia de que","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me informa que dia é","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que data que a gente tá","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje cai em que dia","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia é esse aí","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual dia","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje é dia quanto","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me diz a data","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia da semana a gente tá mesmo","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hoje é que data","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual o dia de hoje","label":"DATA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas são mesmo","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"já é meio-dia","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá tarde já","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me diz as horas por favor","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas tão agora","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"já passou do meio-dia","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá ficando tarde né","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"pode me falar as horas","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas são aí","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"já é hora do almoço","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá quase na hora","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me fala que horas são","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas marcam","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"já deu meio-dia","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá tarde pra caramba","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"sabe me dizer as horas","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas são agora mesmo","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"já passou da hora","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá na hora já","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me diz que horas são","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas tão marcando","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"já é meio-dia passado","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá ficando tarde mesmo","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"pode falar as horas","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que horas são por aí","label":"HORA","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"e aí tudo bem","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me explica como funciona isso","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cara que loucura isso","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não tô entendendo direito","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"por que será que acontece isso","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tipo assim não faz sentido pra mim","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"sabe me dizer se tem como","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ó que interessante não sabia","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hum sei lá acho que não","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"e se a gente pensar de outro jeito","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não concordo muito com isso não","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"pera aí deixa eu pensar","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"você acha mesmo que dá certo","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tipo qual a lógica por trás","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"mano isso é muito doido","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não sei explicar direito mas","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tá ligado no que eu tô falando","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"e daí o que que muda","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"sabe aquilo que a gente conversou","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não é bem assim que funciona","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cara que sacada boa essa","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hum então é por isso","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não tô conseguindo acompanhar","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me conta mais sobre isso","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tipo assim meio confuso ainda","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ó que legal nunca tinha pensado","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"e se não der certo aí","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"sabe me dizer por que não","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não é que eu não queira","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"pera deixa eu ver se entendi","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"você já ouviu falar disso","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"mano que viagem isso aí","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não faço a menor ideia","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tipo qual seria o motivo","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"ó que massa isso aqui","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"e aí como é que fica","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"sabe quando a gente pensa","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não tô achando muito isso não","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"cara faz sentido sim","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hum então tá explicado","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não sei se é bem assim","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"me dá uma luz aí","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tipo assim não sei se entendi","label":"NENHUMA_COMUM","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"eu lembro que você tinha falado aquilo ontem","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"o dia do juízo final ninguém sabe quando é","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"quanto tempo dura a hora do culto mesmo","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"o que que é um lembrete na psicologia afinal","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"tirou nota dez na prova de matemática","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a hora da verdade chegou pra gente","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembrei daquela música que você gosta","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anotar aí o endereço da festa depois","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apagar a luz do quarto antes de sair","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"que dia que é hoje mesmo terça ou quarta","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a data do aniversário dela é mês que vem","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"essa nota fiscal tá toda errada","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembra quando a gente foi na praia ano passado","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não vou anotar nada no caderno hoje","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaguei sem querer aquele arquivo importante","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a hora do almoço já passou faz tempo","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"dia de folga amanhã finalmente","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual a data de validade desse iogurte","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"nota mental: comprar pão na volta","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembrar de tudo é impossível né","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anotei o telefone dele no guardanapo","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga essa mensagem antes que ela veja","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"horas iguais 11:11 faz um pedido","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"o dia tá lindo lá fora","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"data comemorativa de casamento ano que vem","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"nota de rodapé do livro tá ilegível","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembrei que preciso ligar pra mãe","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não anota isso não é segredo","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaguei o histórico do navegador","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"a hora que eu acordo todo dia","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"dia das mães já comprou presente","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"qual data que cai o feriado","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"essa nota de cem é falsa","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembra do nome daquele ator","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"anotando mentalmente pra não esquecer","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaga a vela antes de dormir","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"hora de ir embora já","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"o dia rendeu bastante hoje","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"data de nascimento dele é setembro","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"nota de corte do vestibular subiu","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"lembrei da senha do wifi","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"não anotei o número do pedido","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}
+{"text":"apaguei a foto sem querer","label":"NENHUMA_DIFICIL","split":"heldout","gen":"opencode/nemotron-3-ultra-free"}

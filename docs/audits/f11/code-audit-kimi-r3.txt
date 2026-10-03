@@ -1,0 +1,24 @@
+[0m
+> build · moonshotai/kimi-k3
+[0m
+## Auditoria adversarial — 3ª rodada (classificador de confirmação)
+
+Tracei os dois caminhos que produzem SIM (forte: qualquer STRONG token + resto todo em vocabulário, sem cheque de interjeição; fraco: SOFT token + ≤2 tokens + sem INTERJECTIONS/THANKS) contra as listas. Os bloqueios novos de vish/uai/oxi/ue só cobrem 4 interjeições — **`ah` e `cara` estão em INTERJECTIONS/FILLER, que só são checadas no caminho SOFT**. Aí mora o achado 1.
+
+**Achados (entrada real pt-BR → saída deduzida):**
+
+1. **"Ah, claro…" → SIM** (ou "cara, pode", "ah, manda"). `claro`/`pode`/`manda` são STRONG; no caminho forte, o loop trata `ah`/`cara` como FILLER e `continue`-a. O gate de interjeição (`HEDGING_INTERJECTIONS`) só lista vish/uai/oxi/ue. "Ah, claro…" com tom de ironia/resignação ("ah, claro, faz o que você quiser") é exatamente o padrão de sim cético que a 5c tentava matar — e ele executa a mutação.
+
+2. **"Pode continuar" → SIM**. `pode` (STRONG) + `continuar` (FILLER) = SIM. Responde a "confirmo apagar o lembrete X?" — o usuário querendo dizer "deixe como está, siga em frente" (desistência implícita) dispara o DELETE. `tocar`/`dar`/`ir`/`mandar`/`confiar` em FILLER dão a mesma classe: "pode confiar", "pode dar" (truncado de "pode dar, não precisa") viram SIM.
+
+3. **"Ok, então" → SIM**. Caminho SOFT: `ok` soft + `entao` filler, 2 tokens, sem interjeição — passa no `tokens.length <= SOFT_MAX_TOKENS`. É transição de assunto ("ok, então… deixa eu pensar") com a cauda engolida pelo STT; o classificador executa.
+
+4. **"Segue em frente" → SIM**. `segue` (STRONG) + `em` (FILLER) + `frente` (FILLER). "Siga em frente" numa conversa ("segue em frente com o seu dia, esquece isso" — `esquece` viria antes e daria NAO, mas isolada a frase vira SIM) é fala de despedida/continuação, não confirmação de mutação.
+
+5. **"Falou, manda" → SIM**. `manda` (STRONG) + `falou` (FILLER). "Falou" como despedida ("valeu, falou… manda o sorvete pra cá" — outro destinatário) contamina; mais importante, a presença de `falou` em FILLER deixa qualquer fala coloquial com verbo forte ecoar confirmação sem que o THANks-check ajude (THANKS só é consultada no caminho soft; `falou` nem está em THANKS).
+
+**Observação honesta:** os vetores de negação estão bons — `nem/nada/nunca/errado/no/para-inicial`, frases de cancelamento e o gate verbo×ação fecham o grosso (rastreei "muda não", "esquece isso", "pode cancelar", "para tudo" → todos NAO; "vamos ver", "claro que podia", "deixa pra lá" → AMBIGUO/NAO). A superfície residual é a combinação STRONG genérico (`pode`/`segue`/`manda`) + FILLER amplo demais (`continuar`/`confiar`/`tocar`/`falou`/`frente`).
+
+## VEREDITO: **APROVADO COM RESSALVAS**
+
+Ressalvas: (a) estender o gate de interjeição ao caminho strong (ou incluir `ah`/`cara`/`vish`… em HEDGING para ambas as vias) — mata o achado 1 de graça; (b) estreitar FILLER retirando verbos com semântica de ação (`continuar`, `tocar`, `confiar`, `dar`, `ir`) — mata 2 e 4; (c) aceitar que 3 ("ok então") e 5 são custo de mundo fechado: o chamador re-perguntar UMA vez em AMBIGUO mitiga, mas se o prompt de re-pergunta usar o mesmo classificador, a ironia do achado 1 sobrevive à segunda rodada.

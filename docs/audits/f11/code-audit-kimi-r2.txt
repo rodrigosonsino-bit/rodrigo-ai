@@ -1,0 +1,39 @@
+[0m
+> build · moonshotai/kimi-k3
+[0m
+# Auditoria adversarial — 2ª rodada (classificador de confirmação, mundo fechado)
+
+Tracei token a token. Confirmo que os achados da 1ª rodada estão mortos: "claro que podia" agora cai em `unknowns` → AMBIGUO; `aham`/`uhum` são filler puro (não sustentam SIM); "está valendo" só vive nas frases soft. Achados novos abaixo.
+
+---
+
+**ACHADO 1 — "pode ser" continua SIM, e é a hesitação mais comum do português falado**
+**ENTRADA -> SAÍDA:** `"Pode ser..."` → normaliza para `pode ser` → STRONG_PHRASE `pode ser` casa, `rest` esvazia, `strong=true` → **SIM**. Idem `"pode ser então"` (`entao` é FILLER) e `"pode ser né"` (`ne` filler).
+**GRAVIDADE: ALTA.** "Pode ser..." é marcador clássico de *indecisão* ("aham... pode ser..."), não de autorização. A frase mais suspeita do vocabulário está marcada como forte. STT não pontua reticências, então a proteção não vem de pontuação. No melhor caso é ambivalência; no pior, confirmação de uma ação que o usuário ainda estava deliberando.
+**AÇÃO:** remover `pode ser` de STRONG_PHRASES. "Pode ser" sem articulador ("que sim", "acho que") não é afirmação — e se o usuário quiser dizer sim, dirá "pode" sozinho, que permanece.
+
+**ACHADO 2 — "vamos ver" vira SIM: hesitação escondida em verbo forte + filler**
+**ENTRADA -> SAÍDA:** `"Hmm... vamos ver"` → tokens `vamos`, `ver` → `vamos` ∈ STRONG_TOKENS (`strong=true`), `ver` ∈ FILLER_TOKENS → zero unknowns → **SIM**. Variante: `"vamos ver então"` (fantástico: os três hedges encadeados) → mesma saída.
+**GRAVIDADE: ALTA.** "Vamos ver" é literalmente "deixa eu pensar". É o padrão-irmão do ACHADO 1: frase de compra de tempo que o parser lê como ordem por decomposição token a token — exatamente a classe de bug que o mundo fechado devia matar. Cada token isolada é inócuo; a composição é hesitação.
+**AÇÃO:** adicionar `vamos ver` a WEAK_PHRASES (ou tratá-la como frase de hesitação própria, antes de qualquer token forte).
+
+**ACHADO 3 — interjeição só bloqueia o caminho soft; o caminho strong ignora o próprio detector de sarcasmo**
+**ENTRADA -> SAÍDA:** `"Vish, manda"` → `vish` ∈ INTERJECTIONS (∈ FILLER também, passa), `manda` ∈ STRONG → **SIM**. Idem `"Ah... executa"`, `"Uai, fecha"`, `"Cara, bora"`.
+**GRAVIDADE: MÉDIA.** O código já modela interjeição como marcador de desprendimento/sarcasmo (o comentário em SOFT_TOKENS e o check `hasInterjection` provam isso) — mas só aplica o freio quando `soft`. Resultado: a interjeição desqualifica "tá bom" mas não "manda", o que é avesso ao risco (quanto mais forte o token, mais irreversível a execução). Discurso zombeteiro/irônico que inicia com interjeição seguida de token forte passa.
+**AÇÃO:** aplicar `hasInterjection` (INTERJECTIONS ∪ THANKS) também ao ramo `strong` — ou, mais conservador: se há interjeição na fala, SIM só se exatamente 1 token forte e nenhum soft.
+
+**ACHADO 4 — "demorou" isolado vira SIM, e "demorou" é ironia freemium do português**
+**ENTRADA -> SAÍDA:** `"Demorou!"` → token único, `soft=true`, sem interjeição, `tokens.length=1 ≤ 2` → **SIM** em "reconhecimento curto".
+**GRAVIDADE: MÉDIA-BAIXA.** "Demorou" carrega dois sentidos opostos: "finalmente, manda" (aprovação) e "tá na hora, né" (ironia que frequentemente introduz correção: "demorou... mas não era isso"). O segundo sentido normalmente traz tokens desconhecidos na sequência (→ AMBIGUO), mas o uso isolado prompt-resposta é genuinamente ambíguo e o mundo fechado o colapsa na direção perigosa. Mesma classe: `"maravilha, show"` → 2 tokens, sem interjeição → SIM ("maravilha..." sarcástico colapsa quando seguido de soft).
+**AÇÃO:** rebaixar `demorou` para exigir co-ocorrência com token forte; ou estender a regra de `NEGATION_ONLY_WHEN_ALONE` (só vale com companhia) aos softs ambíguos.
+
+**ACHADO 5 — verbo×ação fica sem efeito quando o chamador omite `pendingKind`, e o verbo errado dentro do grupo certo nunca é checado**
+**ENTRADA -> SAÍDA:** com `pendingKind` ausente, `"Apaga"` diante de uma janela de *criação* pendente → `expected=null` → check de grupo pulado → **SIM**. E mesmo com kind presente: pending `MEMORIA_GUARDAR` (CREATE), usuário responde `"Guarda a nota errada"` — `"errada"` ∈ NEGATION_TOKENS salva este caso (NAO); mas `"Cria qualquer coisa"` → `qualquer`,`coisa` unknowns → AMBIGUO ✓ — porém `"Salva"` contra `LEMBRETE_CRIAR` é SIM sem nenhuma prova de que o usuário entendeu o objeto.
+**GRAVIDADE: BAIXA** (é defeito de contrato de API, não de classificação em si; o módulo faz o que promete quando o parâmetro chega).
+**AÇÃO:** tornar `pendingKind` obrigatório na assinatura, ou tratar ausência como AMBIGUO estrutural — a checagem verbo×ação é uma das poucas proteções semânticas reais e não deveria ser opcional por padrão de parâmetro.
+
+---
+
+**Testados e limpos (para o registro):** `"tanto faz"` (`tanto` unknown → AMBIGUO), `"capaz"` / `"talvez"` (unknown → AMBIGUO), `"pode, mas só dessa vez"` (`mas` unknown → AMBIGUO), `"que isso"` (unknown → AMBIGUO), negação explodida por STT com resíduo afirmativo (limite estrutural documentado, não re-litigo), `"manda o jogo"` (weakened → AMBIGUO — conservador, ok), hedges longos ("acho que sim", "se puder", "quem sabe") → todos AMBIGUO.
+
+**VEREDITO: REPROVADO — ir para v3.** Os achados 1 e 2 são a mesma doença e são bloqueantes: duas das hesitações mais frequentes da fala brasileira ("pode ser", "vamos ver") decompõem em tokens que o mundo fechado lê como autorização. A correção é barata (uma remoção + uma entrada em WEAK_PHRASES) e não abre superfície nova. O achado 3 deveria ir junto, já que a regra de interjeição existe e está aplicada pela metade. Achados 4 e 5 podem ser registrados como dívida assumida se o custo de cobertura incomodar, mas 1–3 não.

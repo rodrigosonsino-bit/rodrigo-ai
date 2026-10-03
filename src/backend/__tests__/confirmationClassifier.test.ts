@@ -7,10 +7,10 @@ const v = (t: string) => classifyConfirmation(t).verdict;
 describe('classifyConfirmation (F11 — mundo fechado)', () => {
   it('SIM: afirmações curtas e naturais em vocabulário conhecido', () => {
     for (const f of [
-      'sim', 'Sim.', 'claro', 'com certeza', 'pode ser', 'pode sim', 'isso mesmo', 'fechou', 'beleza',
+      'sim', 'Sim.', 'claro', 'com certeza', 'pode sim', 'isso mesmo', 'fechou', 'beleza',
       'pode criar', 'pode apagar', 'sim, pode editar', 'Pode trocar, por favor.', 'tá bom', 'está bom',
       'manda ver', 'perfeito', 'combinado', 'ok', 'blz', 'sem dúvida', 'claro que sim', 'pode mudar isso',
-      'sim sim', 'aham', 'uhum', 'confirmo'
+      'sim sim', 'confirmo'
     ]) assert.equal(v(f), 'SIM', `esperava SIM para "${f}"`);
   });
 
@@ -35,6 +35,10 @@ describe('classifyConfirmation (F11 — mundo fechado)', () => {
     assert.equal(v('hum'), 'AMBIGUO');
     assert.equal(v('E, depois eu faço.'), 'AMBIGUO');
     assert.equal(v('pode ser?'), 'AMBIGUO');
+    // auditoria Kimi r2 (2026-10-03): hesitações comuns não são autorização
+    for (const f of ['pode ser', 'pode ser então', 'vamos ver', 'vamos ver então', 'vish, manda', 'uai, fecha', 'demorou', 'ué, pode'])
+      assert.notEqual(v(f), 'SIM', `"${f}" não pode virar SIM`);
+    assert.equal(v('manda ver'), 'SIM');
   });
 
   it('"sem dúvida" não é negação; "sem" solto em fala maior é', () => {
@@ -51,5 +55,26 @@ describe('classifyConfirmation (F11 — mundo fechado)', () => {
     assert.equal(v('  SIM!!! '), 'SIM');
     assert.equal(v('NÃO...'), 'NAO');
     assert.equal(v('Não, tá bom?'), 'NAO');
+  });
+
+  it('auditoria Kimi 2026-10-03: sarcasmo, subordinação, interjeição e murmúrio nunca viram SIM', () => {
+    for (const f of [
+      'claro que podia', 'claro que eu confio', 'claro que sim, cadê o jogo', 'vish, está valendo',
+      'aham', 'uhum', 'aham deixa eu ver', 'com certeza meu filho pode deixar comigo', 'pode me explicar isso'
+    ]) assert.notEqual(v(f), 'SIM', `"${f}" não pode virar SIM (veio ${v(f)})`);
+    assert.equal(v('ah sim claro'), 'SIM');
+  });
+
+  it('verbo de ação diferente da pendente nunca confirma', () => {
+    assert.equal(classifyConfirmation('pode apagar', 'LEMBRETE_CRIAR').verdict, 'AMBIGUO');
+    assert.equal(classifyConfirmation('pode criar', 'LEMBRETE_APAGAR').verdict, 'AMBIGUO');
+    assert.equal(classifyConfirmation('pode apagar', 'LEMBRETE_APAGAR').verdict, 'SIM');
+    assert.equal(classifyConfirmation('pode sim', 'LEMBRETE_CRIAR').verdict, 'SIM');
+  });
+
+  it('ordem de parar e símbolos: "pára, por favor" é NAO; emoji e "？" não viram SIM', () => {
+    assert.equal(v('pára, por favor'), 'NAO');
+    assert.notEqual(v('sim 👎'), 'SIM');
+    assert.notEqual(v('pode apagar？'), 'SIM');
   });
 });

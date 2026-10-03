@@ -1,2 +1,9 @@
 heldout v1 (sha256 4f944b51e72fc040887e64df4da635909b42b8158c6e8f302397530bbaa53670) medido uma vez em agregado (73,7% / 5 falsos SIM) e então QUEIMADO: renomeado dev2.jsonl para permitir inspeção. Nova reservada será gerada.
 Reservada de INTENÇÃO (linhas não-CONF do heldout v1) nunca medida nem inspecionada: congelada com o hash acima. Reservada de CONFIRMAÇÃO v1 queimada (ver heldout-v1-burned.txt); v2 gerada abaixo.
+heldout2 (sha256 dc33da2d581ce35c69ec12bfe7c3655d68412d26e9e05da39c5ff035072375c5) medido em agregado (40,7% / 0 falsos SIM) e então QUEIMADO como dev3.
+heldout3 (sha256 fa8685f20a9cd4e0716bae8fbf267b8e638cb916ed8701d8f3db42453136a1f1) medido em agregado (0/51 afirmativas, 0 falsos SIM) e então QUEIMADO como dev4 (também vi 8 afirmativas).
+heldout3/dev4 INVÁLIDA como base: o gerador (persona) produziu falas com confusão de papel (o usuário falando como executor: 'já resolvo'). Não usada para tuning nem aceite.
+heldout4 (sha256 c4d8903e2682eb3709140345cbbdcefaa7e86f0c127c58754ad4cd41154a0b61) medido em agregado (85,2% / 19 falsos SIM) e então QUEIMADO como dev5.
+Reservada de INTENÇÃO v1 (sha256 9b720b36d30fa4056cc84609264bf5790ee53aad521c8e00b89300037598f0b0) medida uma vez: mutação binária recall 79,6% (explícitos 94,5%) / precisão 96,6%; tempo recall 98,0% / precisão 94,2%. QUEIMADA como dev6 para inspeção.
+heldout5 (sha256 caf052db6da0d23e846cfb287aaf2373a34c22018126930f28885854c1e154b0) medido: 89,7% afirmativas na 1ª resposta, 1 falso SIM em 172; QUEIMADO como dev7 para inspecionar o falso SIM.
+dev5: a categoria CONF_RUIDO é inválida (19/21 itens são afirmativas claras como 'sim'); dev7: o único 'falso SIM' ('ah sim claro') é afirmativa clara rotulada ruído. Erros de rótulo do gerador, não do classificador.

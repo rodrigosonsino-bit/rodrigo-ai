@@ -1319,7 +1319,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         });
 
         // F11: fala inteira em vocabulário afirmativo fechado -> SIM, sem LLM
-        h.engine.fixedTranscript = 'Pode ser, obrigado';
+        h.engine.fixedTranscript = 'Pode sim, obrigado';
         h.engine.confirmationToReturn = 'NAO'; // prova que o LLM não participa mais da decisão
 
         await fetch(`${h.baseUrl}/api/voice/session/audio`, {
@@ -1944,14 +1944,14 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       assert.equal(hasAffirmativeMarker('pode trocar'), true);
       assert.equal(hasAffirmativeMarker('pode editar'), true);
       assert.equal(hasAffirmativeMarker('pode corrigir'), true);
-      assert.equal(hasAffirmativeMarker('pode ser'), true);
+      assert.equal(hasAffirmativeMarker('pode sim'), true);
       assert.equal(hasAffirmativeMarker('pode mudar'), true);
 
       // Com variações coloquiais e pontuação
       assert.equal(hasAffirmativeMarker('Pode trocar, por favor.'), true);
       assert.equal(hasAffirmativeMarker('sim, pode editar'), true);
       assert.equal(hasAffirmativeMarker('Pode corrigir!'), true);
-      assert.equal(hasAffirmativeMarker('pode ser, obrigado'), true);
+      assert.equal(hasAffirmativeMarker('pode sim, obrigado'), true);
       assert.equal(hasAffirmativeMarker('pode mudar isso'), true);
 
       // Prova que negações na mesma frase continuam vetadas

@@ -83,18 +83,17 @@ const NEGATION_ONLY_WHEN_ALONE = new Set(['sem']);
 
 /** Frases afirmativas fortes — contam como token forte e são removidas antes da checagem de vocabulário. */
 const STRONG_PHRASES = [
+  'fechou negocio', 'e pra ja', 'mao na massa',
   'pode crer que sim', 'pode crer', 'claro que pode', 'bora que sim',
-  'pode ser', 'pode sim', 'com certeza', 'sem duvida', 'claro que sim', 'isso mesmo',
-  'esta valendo',
-  'esta combinado'
+  'manda ver', 'mande ver', 'mandar ver', 'pode sim', 'com certeza', 'sem duvida', 'claro que sim', 'isso mesmo',
 ];
 
 /** Tokens afirmativos fortes. */
 const STRONG_TOKENS = new Set([
   'sim', 'claro', 'confirmo', 'confirma', 'confirmar', 'confirmado', 'positivo', 'pode', 'fechou',
   'fechado', 'manda', 'mande', 'bora', 'perfeito', 'combinado', 'aceito', 'autorizo', 'autorizado',
-  'faz', 'faca', 'fazer', 'vai', 'vamos', 'segue', 'seguir', 'proceder', 'prossiga', 'prossegue',
-  'prosseguir', 'executa', 'executar', 'roda', 'rodar', 'aprova', 'aprovado', 'fecha', 'fechar',
+  'faz', 'faca', 'fazer', 'vai', 'vamos', 'vamo', 'segue', 'seguir', 'proceder', 'prossiga', 'prossegue',
+  'prosseguir', 'avancar', 'avanca', 'firmou', 'acertou', 'executa', 'executar', 'roda', 'rodar', 'aprova', 'aprovado', 'fecha', 'fechar',
   'topo', 'topa', 'topar', 'acertado',
   ...Object.keys(VERB_GROUP)
 ]);
@@ -104,26 +103,29 @@ const STRONG_TOKENS = new Set([
  * bom") ou encerramento ("beleza, valeu"). Só valem quando a fala INTEIRA é curta e sem interjeição.
  */
 const SOFT_TOKENS = new Set([
-  'certo', 'ok', 'okay', 'blz', 'beleza', 'otimo', 'show', 'tranquilo', 'correto', 'aham', 'uhum',
-  'ahan', 'valendo', 'demorou', 'sussa', 'liberado', 'liberada', 'isso', 'exato', 'exatamente',
-  'suave', 'firme'
+  'certo', 'ok', 'okay', 'blz', 'beleza', 'otimo', 'show', 'tranquilo', 'correto',
+  'valendo', 'sussa', 'liberado', 'liberada', 'isso', 'exato', 'exatamente',
+  'suave', 'firme', 'certinho'
 ]);
 const SOFT_PHRASES = ['ta bom', 'esta bom', 'ta certo', 'esta certo', 'ta valendo', 'esta valendo',
   'ta fechado', 'esta fechado', 'ta combinado', 'esta combinado'];
 const SOFT_MAX_TOKENS = 2;
 /** 'hum'/'hm' (hesitação) ficam FORA de propósito: nunca são vocabulário aceito. */
 const INTERJECTIONS = new Set(['ah', 'uai', 'oxi', 'vish', 'cara', 'ue']);
+/** Interjeições de surpresa/hesitação/ironia: com elas, nenhum caminho produz SIM. */
+const HEDGING_INTERJECTIONS = new Set(['vish', 'uai', 'oxi', 'ue']);
 const THANKS = new Set(['valeu', 'vlw', 'obrigado', 'obrigada']);
 
 
 /** Preenchimento neutro: pode acompanhar a afirmação, mas não a sustenta sozinho. */
 const FILLER_TOKENS = new Set([
+  'aham', 'uhum', 'ahan', 'demorou',
   'ai', 'a', 'o', 'e', 'eh', 'ne', 'entao', 'ta', 'esta', 'bom', 'bem', 'tudo', 'esse', 'essa',
   'isto', 'pra', 'mim', 'me', 'por', 'favor', 'mesmo', 'demais', 'certinho', 'uma', 'um',
-  'lembrete', 'nota', 'memoria', 'ver', 'bala', 'obrigado', 'obrigada', 'valeu', 'vlw', 'amem',
+  'lembrete', 'nota', 'memoria', 'bala', 'obrigado', 'obrigada', 'valeu', 'vlw', 'amem',
   'em', 'de', 'boa', 'frente', 'fundo', 'la', 'nessa', 'nisso', 'desse', 'jeito', 'linha', 'total',
-  'assim', 'brasa', 'ah', 'cara', 'uai', 'oxi', 'vish', 'falou', 'nois', 'dar', 'ir', 'top', 'massa',
-  'maravilha', 'joia', 'legal', 'absoluta', 'comigo', 'senhor', 'tocar', 'confiar', 'continua', 'continuar', 'mandar', 'logo', 'com', 'to', 'acordo'
+  'assim', 'brasa', 'ah', 'cara', 'uai', 'oxi', 'vish', 'falou', 'nois', 'ir', 'top', 'massa',
+  'maravilha', 'joia', 'legal', 'absoluta', 'comigo', 'pa', 'nos', 'negocio', 'senhor', 'continua', 'continuar', 'mandar', 'logo', 'com', 'to', 'acordo'
 ]);
 
 /** Pontuação tolerada; qualquer outro símbolo (emoji, '？', etc.) impede o SIM. */
@@ -131,7 +133,9 @@ const ALLOWED_PUNCT_RE = /[\p{L}\p{M}\p{N}\s.,!;:'"\-…]/gu;
 const QUESTION_RE = /[?？¿‽؟]/;
 
 /** Frases sem força própria: removidas antes da checagem de vocabulário; não contam como afirmação. */
-const WEAK_PHRASES = ['sem problema', 'de acordo'];
+const WEAK_PHRASES = ['sem problema', 'de acordo', 'semstress', 'semerro', 'to dentro', 'to contigo', 'to junto',
+  'to pronto', 'to ligado', 'to na mao', 'conta comigo', 'manda o pau', 'manda o jogo', 'vamos embora',
+  'por conta'];
 const WEAK_PHRASE_REGEXES = WEAK_PHRASES.map((p) => new RegExp(`\\b${p}\\b`, 'g'));
 
 const STRONG_PHRASE_REGEXES = STRONG_PHRASES.map((p) => new RegExp(`\\b${p}\\b`, 'g'));
@@ -143,7 +147,10 @@ export function classifyConfirmation(transcript: string, pendingKind?: string): 
   if (!n) return { verdict: 'AMBIGUO', reason: 'fala vazia' };
 
   // "sem dúvida" não é negação: mascara antes de procurar 'sem'.
-  const masked = n.replace(/\bsem duvida\b/g, 'comcerteza');
+  const masked = n
+    .replace(/\bsem duvida\b/g, 'comcerteza')
+    .replace(/\bsem erro\b/g, 'semerro')
+    .replace(/\bsem stress\b/g, 'semstress');
   const tokens = masked.split(' ');
 
   for (const re of NEGATION_PHRASE_REGEXES) {
@@ -177,6 +184,7 @@ export function classifyConfirmation(transcript: string, pendingKind?: string): 
     if (re.test(rest)) { soft = true; rest = rest.replace(re, ' '); }
   }
   const expected = pendingKind ? actionGroupOf(pendingKind) : null;
+  const unknowns: string[] = [];
   for (const t of rest.split(' ').filter(Boolean)) {
     if (t === 'comcerteza') { strong = true; continue; }
     const group = VERB_GROUP[t];
@@ -186,7 +194,13 @@ export function classifyConfirmation(transcript: string, pendingKind?: string): 
     if (STRONG_TOKENS.has(t)) { strong = true; continue; }
     if (SOFT_TOKENS.has(t)) { soft = true; continue; }
     if (FILLER_TOKENS.has(t) || INTERJECTIONS.has(t)) continue;
-    return { verdict: 'AMBIGUO', reason: `token fora do vocabulário: ${t}` };
+    unknowns.push(t);
+  }
+  // Mundo fechado: qualquer palavra fora do vocabulário => AMBIGUO (auditoria Kimi 2026-10-03:
+  // uma regra relaxada com âncora inicial deixava "claro que podia" virar SIM).
+  if (unknowns.length > 0) return { verdict: 'AMBIGUO', reason: `token fora do vocabulário: ${unknowns[0]}` };
+  if (tokens.some((t) => HEDGING_INTERJECTIONS.has(t))) {
+    return { verdict: 'AMBIGUO', reason: 'interjeição de hesitação/ironia' };
   }
   if (strong) return { verdict: 'SIM', reason: 'vocabulário fechado com afirmação forte' };
   if (soft) {
@@ -198,3 +212,4 @@ export function classifyConfirmation(transcript: string, pendingKind?: string): 
   }
   return { verdict: 'AMBIGUO', reason: 'sem afirmação' };
 }
+
