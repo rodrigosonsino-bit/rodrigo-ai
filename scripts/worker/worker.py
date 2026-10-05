@@ -213,7 +213,7 @@ DETECT_CONFIRMATION_SYSTEM_PROMPT = (
 
 
 INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA"}
-CLOUD_INTENT_MODEL = os.environ.get("RODRIGO_CLOUD_INTENT_MODEL", "gemini-flash-lite-latest")
+CLOUD_INTENT_MODEL = os.environ.get("RODRIGO_CLOUD_INTENT_MODEL", "gemini-3.5-flash-lite")  # fixado pelo nome (sem alias): ver docs/phase-11-addendum-cloud-intent.md §5.2
 CLOUD_INTENT_HTTP_TIMEOUT_MS = 10_000  # mínimo aceito pela API do Gemini
 CLOUD_INTENT_WAIT_S = 4.0  # espera real: passou disso => fallback local (a chamada HTTP segue em 2º plano)
 

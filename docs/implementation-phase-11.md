@@ -55,3 +55,37 @@ Classificador sempre-SIM → 38 de 113 testes falham. `/played` sem checar texto
 ## 5. O que fecha a F11
 - Você executar `docs/f11-roteiro-voz-real.md` (H11.2c).
 - Decidir (1)–(2) e (5) acima: reabrir cobertura com modelo maior, ou aceitar os números como dívida explícita (mesma classe das Fases 5b/5c).
+
+---
+
+## 6. Adendo: intenção via Gemini (decisão do usuário, 2026-10-03; modelo escolhido em 2026-10-05)
+
+Plano e disposição da auditoria: `docs/phase-11-addendum-cloud-intent.md`. Modelo: **`gemini-3.5-flash-lite`**, gratuito, fixado pelo nome (único estável no teste de 2026-10-05; 0,85–1,1 s por chamada). Fallback para o Qwen local em indisponibilidade/timeout/429.
+
+### Medição na reservada de intenção v4 (nunca inspecionada; congelada no commit 206b4c1; n = 108 positivas de mutação, 50 hora/data, 88 negativas)
+| Medida | Filtro real | Filtro perfeito (oracle)† |
+|---|---|---|
+| Mutação — precisão | **100%** | 100% |
+| Mutação — recall, todos os positivos | 63,0% | 71,3% |
+| Mutação — recall, pedidos **com conteúdo acionável** (75) | 86,7% | 94,7% |
+| Mutação — recall, explícitos / implícitos (12) | 69,8% / 8,3% | 75,0% / 41,7% |
+| Hora/data — recall / precisão | 82,0% / 97,6% | 94,0% / 95,9% |
+| Taxa de fallback para o Qwen local | 3,4% | 31,7% (cota diária do Gemini estourou) |
+
+† A rodada com filtro perfeito ficou **híbrida** (78 de 246 chamadas caíram no Qwen por 429); leia como indicação, não como medida limpa da nuvem.
+
+Outras medidas: desenvolvimento (nuvem, 17,5% de fallback): mutação binária recall 90,6% / precisão 98,7%, hora/data 97,5% / 100%. Injeção de prompt: 8 frases adversariais, **0 falsas mutações**. Recall do filtro local, offline: mutação 88–93%, hora/data 99–100%; 52–62% dos negativos "difíceis" passam pelo filtro (custo: chamadas extras).
+
+### Leitura honesta
+- **H11.1 continua NÃO atingido** pela definição estrita (recall sobre todos os positivos): 63,0% de mutação e 82,0% de hora/data na reservada limpa. A precisão está boa (100% / 97,6%).
+- **33 das 72 frases "criar/editar/guardar" geradas (46%) não trazem conteúdo** ("guarda isso pra mim"); o sistema não tem o que gravar e responde NENHUMA por desenho. Isso derruba o recall "todos", não é erro de detecção. Rotulado por Kimi K3, independente do sistema (`raw/heldout-intent4.content.json`).
+- Hora/data: o filtro deixa passar 100% dos positivos da v4, então os 18% perdidos são do **modelo lite**, que foi pior que o Qwen local nesta amostra (Qwen: 94,0% na v3). Na amostra de desenvolvimento a nuvem foi melhor (97,5%). Variação entre amostras, não uma tendência clara.
+- Gargalo da mutação: implícitos (correções de memória sem verbo de comando) e o filtro (perde 7–12% das mutações, quase todas correções do tipo "não era X, era Y").
+
+### Fato de produção descoberto
+**Cota gratuita do Gemini: 500 requisições por dia por modelo**, 429 após ~16 chamadas seguidas por minuto. Cada fala filtrada gasta uma. Uso real de uma pessoa tende a ficar abaixo, mas desenvolvimento e medição já estouraram o teto em um dia. Estourou ⇒ modo degradado local (Qwen), que é o comportamento anterior.
+
+### Decisões que o usuário precisa tomar para fechar H11.1
+1. **Critério:** aceitar medir o recall só sobre pedidos **com conteúdo acionável** (a definição que faz sentido de produto)? Mudar o alvo exige aprovação. Mesmo assim o número (86,7% com filtro real) ainda é < 95%.
+2. **Segunda opinião local:** quando a nuvem diz NENHUMA e o filtro passou, consultar também o Qwen. Sobe o recall (principalmente hora/data), mas custa +3–7 s de latência nesses turnos e mais falsos positivos (a pergunta falada ainda protege).
+3. **Filtro:** ampliar para padrões de correção ("não era X", "não, é Y"), ao custo de mais chamadas à cota.
