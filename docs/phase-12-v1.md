@@ -1,8 +1,8 @@
-# Fase 12 — Privacidade condizente com a promessa — v1
+# Fase 12 — Privacidade condizente com a promessa — v1.1 (decisões D1–D3 incorporadas)
 
-Versão: v1
+Versão: v1.1 (mesmo desenho do v1; só §3 e os padrões do §2.2 mudaram)
 Data: 2026-10-06
-Status: **Rascunho para auditoria de plano. Nada implementado.** Três decisões do usuário em aberto (§3).
+Status: **Pronto para auditoria de plano (rodada 1). Nada implementado.** Decisões D1–D3 tomadas pelo usuário em 2026-10-06 (§3).
 Origem: `docs/prompt-proxima-sessao-2026-10-02.md` §7 (F12) e `docs/phase-11-addendum-cloud-intent.md` §5.1
 ("A UI/README ainda precisam dizer isso (F12)"). Ordem aprovada pelo usuário: F11 → F12 → …
 
@@ -95,8 +95,8 @@ possa divergir). `GET /api/privacy` é a única fonte da tela e do texto do READ
 | Variável | Efeito | Padrão |
 |---|---|---|
 | `RODRIGO_CLOUD_GENERATION` | `0` ⇒ nenhuma geração em nuvem; falas que dependem de geração recebem resposta fixa e clara ("geração em nuvem desligada"); ferramentas locais seguem funcionando. **Sem fallback para outro provedor.** | `1` |
-| `RODRIGO_SEND_MEMORIES` (D2) | `0` ⇒ `buildMemoryBlock` não entra no prompt enviado | a decidir (D2) |
-| `RODRIGO_SEND_KNOWLEDGE` (D1) | `0` ⇒ `buildKnowledgeBlock` não entra no prompt enviado | a decidir (D1) |
+| `RODRIGO_SEND_MEMORIES` (D2) | `0` ⇒ `buildMemoryBlock` não entra no prompt enviado | `1` (mantém o comportamento da Fase 7; declarado na UI) |
+| `RODRIGO_SEND_KNOWLEDGE` (D1) | `0` ⇒ `buildKnowledgeBlock` não entra no prompt enviado | **`0`** (decisão D1: trecho de `docs/research/` NÃO vai ao Gemini; `1` liga) |
 
 Quando a geração está `off` e a pergunta exige geração, o turno diz isso por voz e por SSE (tipo `error`/mensagem
 fixa), em vez de silêncio ou resposta inventada (H12.3).
@@ -133,7 +133,11 @@ Python **e** em Node antes de spawnar o worker; qualquer outro host ⇒ ignora a
 Teste que roda uma sessão com marcadores sintéticos ("MARCADOR-FALA-123", "MARCADOR-NOTA-456", chave sintética) e afirma
 que **nenhum** aparece em stdout/stderr do servidor e do worker nem em arquivos sob `.runtime/` além de `data/*.json`.
 
-## 3. Decisões do usuário necessárias (não vou escolher sozinho)
+## 3. Decisões do usuário (tomadas em 2026-10-06: "D1, D2, D3 sim" = aceitou as três recomendações)
+
+Resposta literal do usuário: "D1 , D2 , D3 sim, manda para auditoria". Interpretação registrada: aceita a recomendação de cada item abaixo. **Se a interpretação estiver errada, o auditor/usuário corrige aqui.** Consequência de D1 padrão `0`: a F5a deixa de enriquecer Teologia/Virtologia por padrão; medir a queda de qualidade (§6) antes de declarar a fase fechada.
+
+(Texto original das opções abaixo.)
 
 **D1 — trecho de `docs/research/` na geração.** Hoje vai ao Gemini (Achado 1). Opções:
 (a) manter e declarar na UI/README/CLAUDE.md; (b) **não enviar** por padrão (Teologia/Virtologia respondem sem o trecho,
