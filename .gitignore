@@ -10,3 +10,8 @@ dist
 data/
 __pycache__
 *.pyc
+
+# material pessoal (perfil teologico, Virtologia): nunca versionar nem enviar a terceiros
+docs/research/
+# configuracao local de preview
+.claude/
