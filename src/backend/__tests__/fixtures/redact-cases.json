@@ -1,0 +1,247 @@
+{
+ "cases": [
+  {
+   "name": "chave em texto corrido",
+   "input": "falha com chave AIzaSyD-SEGREDO-SINTETICO-0123456789abcd na chamada",
+   "notContain": [
+    "SEGREDO",
+    "SINTETICO",
+    "0123456789abcd"
+   ],
+   "contain": [
+    "falha com chave",
+    "na chamada"
+   ]
+  },
+  {
+   "name": "?key= na URL",
+   "input": "POST https://generativelanguage.googleapis.com/v1/models/x:generate?key=AIzaSyD-SEGREDO-SINTETICO-0123456789abcd 400",
+   "notContain": [
+    "SEGREDO",
+    "0123456789abcd"
+   ],
+   "contain": [
+    "?key=",
+    "400"
+   ]
+  },
+  {
+   "name": "&key= no meio da query",
+   "input": "GET /v1?alt=sse&key=AIzaSyD-SEGREDO-SINTETICO-0123456789abcd&foo=1",
+   "notContain": [
+    "SEGREDO"
+   ],
+   "contain": [
+    "foo=1",
+    "alt=sse"
+   ]
+  },
+  {
+   "name": "chave URL-encoded (%2D)",
+   "input": "key=AIzaSyD%2DSEGREDO%2DSINTETICO%2D0123456789abcd",
+   "notContain": [
+    "SEGREDO",
+    "SINTETICO"
+   ]
+  },
+  {
+   "name": "repr de cabeçalho (dict Python)",
+   "input": "headers={'x-goog-api-key': 'AIzaSyD-SEGREDO-SINTETICO-0123456789abcd', 'accept': 'json'}",
+   "notContain": [
+    "SEGREDO"
+   ],
+   "contain": [
+    "accept"
+   ]
+  },
+  {
+   "name": "JSON escapado",
+   "input": "{\\\"x-goog-api-key\\\": \\\"AIzaSyD-SEGREDO-SINTETICO-0123456789abcd\\\", \\\"a\\\": 1}",
+   "notContain": [
+    "SEGREDO"
+   ],
+   "contain": [
+    "\\\"a\\\": 1"
+   ]
+  },
+  {
+   "name": "Authorization Bearer",
+   "input": "Authorization: Bearer ya29.tokenSEGREDOtoken",
+   "notContain": [
+    "SEGREDO"
+   ],
+   "contain": [
+    "Authorization"
+   ]
+  },
+  {
+   "name": "X-Goog-Api-Key maiúsculas/minúsculas",
+   "input": "X-Goog-Api-Key: SEGREDO-HDR-777",
+   "notContain": [
+    "SEGREDO-HDR"
+   ]
+  },
+  {
+   "name": "api_key=valor",
+   "input": "api_key=SEGREDO-Xyz789 e mais texto",
+   "notContain": [
+    "SEGREDO-Xyz789"
+   ],
+   "contain": [
+    "e mais texto"
+   ]
+  },
+  {
+   "name": "apiKey: \"valor\" (JS)",
+   "input": "{ apiKey: \"SEGREDO-ABC123\", model: \"m\" }",
+   "notContain": [
+    "SEGREDO-ABC123"
+   ],
+   "contain": [
+    "model"
+   ]
+  },
+  {
+   "name": "GEMINI_API_KEY=valor (dump de ambiente)",
+   "input": "GEMINI_API_KEY=SEGREDO-ENV-888\nPATH=/usr/bin",
+   "notContain": [
+    "SEGREDO-ENV-888"
+   ],
+   "contain": [
+    "PATH=/usr/bin"
+   ]
+  },
+  {
+   "name": "chave do ambiente (formato não-AIza) é mascarada",
+   "env": "chave-sintetica-de-teste-9981",
+   "input": "erro com chave-sintetica-de-teste-9981 inválida",
+   "notContain": [
+    "teste-9981",
+    "chave-sintetica"
+   ],
+   "contain": [
+    "erro com",
+    "inválida"
+   ]
+  },
+  {
+   "name": "chave do ambiente partida por quebra de linha",
+   "env": "chave-sintetica-de-teste-9981",
+   "input": "erro: chave-sintetica-\nde-teste-9981 inválida",
+   "notContain": [
+    "9981",
+    "de-teste"
+   ]
+  },
+  {
+   "name": "chave do ambiente URL-encoded",
+   "env": "segredo com espaco+/=1234",
+   "input": "?q=segredo%20com%20espaco%2B%2F%3D1234&x=1",
+   "notContain": [
+    "espaco%2B",
+    "1234"
+   ],
+   "contain": [
+    "&x=1"
+   ]
+  },
+  {
+   "name": "chave antiga informada como segredo extra",
+   "extra": [
+    "chave-antiga-rotacionada-5521"
+   ],
+   "input": "usou chave-antiga-rotacionada-5521 ontem",
+   "notContain": [
+    "5521",
+    "rotacionada"
+   ]
+  },
+  {
+   "name": "várias chaves na mesma string",
+   "input": "a AIzaSyD-SEGREDO-SINTETICO-0123456789abcd b AIzaSyD-SEGREDO-SINTETICO-0123456789abcd c",
+   "notContain": [
+    "SEGREDO"
+   ],
+   "contain": [
+    "a ",
+    "b ",
+    "c"
+   ]
+  },
+  {
+   "name": "corte de 160 no meio da chave: mascara ANTES de truncar",
+   "maxLen": 160,
+   "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxAIzaSyD-SEGREDO-SINTETICO-0123456789abcd",
+   "notContain": [
+    "AIza",
+    "SyD",
+    "SEGREDO"
+   ],
+   "maxLength": 160
+  },
+  {
+   "name": "texto benigno fica intacto",
+   "input": "Falha ao gerar resposta via Gemini. código 429, max_output_tokens=160, token_count 12",
+   "unchanged": true
+  },
+  {
+   "name": "'AIza' curto não é chave",
+   "input": "o usuário disse AIza e depois algo",
+   "unchanged": true
+  },
+  {
+   "name": "segredo de ambiente curto (<8) não é aplicado",
+   "env": "abc",
+   "input": "o valor abc aparece em abcdef",
+   "unchanged": true
+  },
+  {
+   "name": "pontuação final preservada",
+   "input": "usando AIzaSyD-SEGREDO-SINTETICO-0123456789abcd.",
+   "endsWith": "[REDACTED]."
+  },
+  {
+   "name": "string vazia",
+   "input": "",
+   "unchanged": true
+  },
+  {
+   "name": "unicode ao redor",
+   "input": "ação inválida — AIzaSyD-SEGREDO-SINTETICO-0123456789abcd — não",
+   "notContain": [
+    "SEGREDO"
+   ],
+   "contain": [
+    "ação inválida",
+    "não"
+   ]
+  },
+  {
+   "name": "?key= com valor que NÃO começa com AIza",
+   "input": "GET /v1?key=SEGREDO-NAO-AIZA-999&x=1 falhou",
+   "notContain": [
+    "SEGREDO-NAO-AIZA"
+   ],
+   "contain": [
+    "&x=1",
+    "falhou"
+   ]
+  },
+  {
+   "name": "fragmento de chave de tamanho intermediário (AIza + 11)",
+   "input": "cortado em AIzaSyD-SEGRE aqui",
+   "notContain": [
+    "SyD-SEGRE"
+   ],
+   "contain": [
+    "cortado em",
+    "aqui"
+   ]
+  },
+  {
+   "name": "AIza + 7 caracteres ainda não é chave",
+   "input": "prefixo AIzaSyD-SE solto",
+   "unchanged": true
+  }
+ ]
+}

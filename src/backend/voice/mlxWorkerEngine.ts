@@ -1,4 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { createLineSink } from './lineSink.js';
+import { redact } from '../redact.js';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import type { ConversationMessage, IntentDetection, IntentName, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
@@ -139,9 +141,11 @@ export class MlxWorkerEngine implements VoiceEngine {
     const rl = readline.createInterface({ input: child.stdout });
     rl.on('line', (line) => this.handleLine(line));
 
-    child.stderr.on('data', (chunk: Buffer) => {
-      console.error(`[voice-worker] ${chunk.toString('utf-8').trimEnd()}`);
-    });
+    // Fase 12 (§2.6): o stderr chega em blocos de tamanho arbitrário. Acumula por LINHA e só então mascara
+    // (redact), senão uma chave partida entre dois blocos vazaria em duas fatias.
+    const stderrSink = createLineSink((line) => console.error(`[voice-worker] ${line}`));
+    child.stderr.on('data', (chunk: Buffer) => stderrSink.push(chunk));
+    child.stderr.on('end', () => stderrSink.flush());
 
     child.on('exit', (code, signal) => {
       const wasReady = this.isReady;
@@ -192,7 +196,7 @@ export class MlxWorkerEngine implements VoiceEngine {
     try {
       msg = JSON.parse(line);
     } catch {
-      console.error(`[voice-worker] Linha de protocolo inválida ignorada: ${line}`);
+      console.error(`[voice-worker] Linha de protocolo inválida ignorada: ${redact(line, [], 500)}`);
       return;
     }
 

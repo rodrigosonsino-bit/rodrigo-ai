@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -367,9 +368,51 @@ MAX_TURN_TOKENS = 160
 
 
 
+# --- Fase 12 (docs/phase-12-v2.md §2.6): máscara de segredos. ESPELHO EXATO de src/backend/redact.ts — os dois
+# passam pelos mesmos casos (src/backend/__tests__/fixtures/redact-cases.json). Ordem: segredos exatos, formato de
+# chave Gemini, pares nome=valor, ?key=; SÓ DEPOIS trunca (corte no meio de uma chave não deixa fragmento).
+REDACTED = "[REDACTED]"
+_KEY_RE = re.compile(r"AIza(?:[0-9A-Za-z_-]|%2[Dd]|%5[Ff]){8,}")
+_NAMED_RE = re.compile(
+    r"((?:[A-Za-z_-]*(?:api[_-]?key)|x-goog-api-key|authorization)\\?[\"']?\s*[:=]\s*\\?[\"']?(?:(?:bearer|basic)\s+)?)"
+    r"[^\s,;&\"'}\\<>]+",
+    re.IGNORECASE,
+)
+_QUERY_KEY_RE = re.compile(r"([?&]key=)[^\s&\"'<>]+", re.IGNORECASE)
+_MIN_SECRET_LEN = 8
+
+
+def redact(text: str, extra_secrets: tuple = (), max_len: Optional[int] = None) -> str:
+    out = text
+    secrets = [os.environ.get("GEMINI_API_KEY", ""), *extra_secrets]
+    for secret in secrets:
+        if len(secret.strip()) < _MIN_SECRET_LEN:
+            continue
+        # tolera espaço/quebra de linha entre QUAISQUER caracteres (chave partida)
+        out = re.sub(r"\s*".join(re.escape(c) for c in secret), REDACTED, out)
+        encoded = urllib.parse.quote(secret, safe="!~*'()")  # = encodeURIComponent
+        if encoded != secret:
+            out = out.replace(encoded, REDACTED)
+    out = _KEY_RE.sub(REDACTED, out)
+    out = _NAMED_RE.sub(lambda m: m.group(1) + REDACTED, out)
+    out = _QUERY_KEY_RE.sub(lambda m: m.group(1) + REDACTED, out)
+    if max_len is not None and len(out) > max_len:
+        out = out[:max_len]
+    return out
+
+
+def safe_exc(exc: BaseException) -> str:
+    """Exceção para log: tipo + mensagem MASCARADA e truncada em 160 (nunca o corpo bruto da requisição/resposta
+    que bibliotecas HTTP costumam embutir) + até 6 posições arquivo:linha do traceback."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    where = " <- ".join(f"{os.path.basename(f.filename)}:{f.lineno}" for f in reversed(frames[-6:]))
+    return f"{type(exc).__name__}: {redact(str(exc), max_len=160)} [{where}]"
+
+
 def log_diag(message: str) -> None:
-    """Diagnóstico técnico em stderr — nunca inclui transcrição ou conteúdo de conversa."""
-    print(f"[worker] {message}", file=sys.stderr, flush=True)
+    """Diagnóstico técnico em stderr — nunca inclui transcrição ou conteúdo de conversa.
+    Fase 12: TODA mensagem passa por redact() (ponto único de saída de diagnóstico)."""
+    print(f"[worker] {redact(message)}", file=sys.stderr, flush=True)
 
 
 def emit(event: dict[str, Any]) -> None:
@@ -548,7 +591,7 @@ class Worker:
             text = (result.get("text") or "").strip()
             emit({"event": "transcript", "reqId": req_id, "text": text})
         except Exception as exc:  # noqa: BLE001
-            log_diag(f"Erro na transcrição: {exc}\n{traceback.format_exc()}")
+            log_diag(f"Erro na transcrição: {safe_exc(exc)}")
             emit({"event": "error", "reqId": req_id, "message": "Falha ao transcrever áudio."})
         finally:
             if self._mx is not None:
@@ -607,7 +650,7 @@ class Worker:
 
             emit({"event": "classification", "reqId": req_id, "turnId": turn_id, "label": normalized})
         except Exception as exc:  # noqa: BLE001
-            log_diag(f"Erro na classificação: {exc}\n{traceback.format_exc()}")
+            log_diag(f"Erro na classificação: {safe_exc(exc)}")
             emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao classificar a intenção."})
         finally:
             with self._current_lock:
@@ -655,7 +698,7 @@ class Worker:
             tool = parse_tool_output(raw)
             emit({"event": "tool_detection", "reqId": req_id, "turnId": turn_id, "tool": tool})
         except Exception as exc:  # noqa: BLE001
-            log_diag(f"Erro na detecção de ferramenta: {exc}\n{traceback.format_exc()}")
+            log_diag(f"Erro na detecção de ferramenta: {safe_exc(exc)}")
             emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar ferramenta."})
         finally:
             with self._current_lock:
@@ -719,7 +762,7 @@ class Worker:
                 "content": content,
             })
         except Exception as exc:  # noqa: BLE001
-            log_diag(f"Erro na detecção de mutação: {exc}\n{traceback.format_exc()}")
+            log_diag(f"Erro na detecção de mutação: {safe_exc(exc)}")
             emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar mutação."})
         finally:
             with self._current_lock:
@@ -783,7 +826,7 @@ class Worker:
             try:
                 resp = self._intent_pool.submit(call).result(timeout=CLOUD_INTENT_WAIT_S)
             except Exception as exc:  # noqa: BLE001 — inclui TimeoutError
-                return unavailable(f"{type(exc).__name__}: {str(exc)[:160]}")
+                return unavailable(f"{safe_exc(exc)}")
             model_version = getattr(resp, "model_version", None) or CLOUD_INTENT_MODEL
             parsed = parse_intent_json(resp.text or "", text)
             log_diag(f"Intenção em nuvem: {time.monotonic() - started:.2f}s (turnId={turn_id})")
@@ -793,7 +836,7 @@ class Worker:
             emit({"event": "intent_detection", "reqId": req_id, "turnId": turn_id, "available": True,
                   "intent": intent, "content": content, "model": model_version})
         except Exception as exc:  # noqa: BLE001
-            unavailable(f"erro: {type(exc).__name__}: {str(exc)[:200]}")
+            unavailable(f"erro: {safe_exc(exc)}")
 
     def handle_detect_confirmation(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
@@ -839,7 +882,7 @@ class Worker:
                 "confirmation": confirmation,
             })
         except Exception as exc:  # noqa: BLE001
-            log_diag(f"Erro na detecção de confirmação: {exc}\n{traceback.format_exc()}")
+            log_diag(f"Erro na detecção de confirmação: {safe_exc(exc)}")
             emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar confirmação."})
         finally:
             with self._current_lock:
@@ -958,7 +1001,7 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 — chave ausente, timeout de rede (20s, acima),
                                     # erro de cota/API do Gemini, ValueError de to_gemini_contents —
                                     # todos tratados igual: erro honesto
-            log_diag(f"Erro na geração via Gemini: {exc}\n{traceback.format_exc()}")
+            log_diag(f"Erro na geração via Gemini: {safe_exc(exc)}")
             emit({
                 "event": "error",
                 "reqId": req_id,
@@ -992,7 +1035,7 @@ class Worker:
                 elif cmd == "generate":
                     self.handle_generate(msg)
             except Exception as exc:  # noqa: BLE001
-                log_diag(f"Erro não tratado no work_loop: {exc}\n{traceback.format_exc()}")
+                log_diag(f"Erro não tratado no work_loop: {safe_exc(exc)}")
                 emit({"event": "error", "message": "Falha interna do worker."})
 
     # --- Thread leitora de stdin (dedicada, nunca bloqueia em inferência) ---
@@ -1042,7 +1085,7 @@ def main() -> None:
     try:
         worker.load_models()
     except Exception as exc:  # noqa: BLE001
-        log_diag(f"Falha catastrófica ao carregar modelos: {exc}\n{traceback.format_exc()}")
+        log_diag(f"Falha catastrófica ao carregar modelos: {safe_exc(exc)}")
         emit({"event": "error", "message": "Falha ao inicializar modelos locais."})
         sys.exit(1)
 
