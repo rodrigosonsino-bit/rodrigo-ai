@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
+import { prepareProcessTmpDir } from './tmpSweeper.js';
 import path from 'node:path';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
@@ -110,7 +111,14 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // Inicializa o agendador carregando lembretes persistidos
   reminderScheduler.bootstrap();
 
-  const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
+  // Fase 12 (§2.4): cada processo usa .runtime/tmp/<pid>-<startEpochMs>/. Antes de aceitar sessões, varre os
+  // subdiretórios de processos mortos/reciclados; os de instâncias vivas ficam intactos (nada de rm -rf da base).
+  const tmpRoot = path.join(rootDir, '.runtime', 'tmp');
+  const tmp = prepareProcessTmpDir(tmpRoot, (m) => console.warn(m));
+  if (tmp.removed.length > 0) {
+    console.log(`[Rodrigo AI] Limpeza de resíduos de áudio: ${tmp.removed.length} diretório(s) órfão(s) removido(s).`);
+  }
+  const audioStore = new AudioStore(tmp.dir);
   const sessionManager = new SessionManager(
     engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools, memoriaStore, privacy
   );
@@ -123,6 +131,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     shutdown: async () => {
       reminderScheduler.shutdown(); // Cancela timers pendentes na finalização do runtime
       await sessionManager.shutdownAll();
+      await audioStore.dispose(); // remove o diretório deste processo (§2.4)
       await engine.shutdown();
     }
   };

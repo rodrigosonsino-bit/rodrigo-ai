@@ -38,7 +38,10 @@ export class SayVoiceProvider implements IVoiceProvider {
   }
 
   async synthesize(text: string, outputPath: string, signal?: AbortSignal): Promise<void> {
-    const tmpAiff = path.join(os.tmpdir(), `rodrigo-say-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.aiff`);
+    // Fase 12: o .aiff intermediário vai para o MESMO diretório da sessão (já recebemos outputPath), não para
+    // os.tmpdir(): assim cleanupSession()/dispose()/a varredura de inicialização o alcançam e uma queda no
+    // meio da síntese não deixa resíduo fora de .runtime/tmp.
+    const tmpAiff = `${outputPath}.aiff`;
 
     try {
       await execFileAsync(

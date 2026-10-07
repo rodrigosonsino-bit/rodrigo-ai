@@ -6,6 +6,9 @@ import path from 'node:path';
  * Armazena arquivos temporários de áudio por sessão em diretórios aleatórios privados
  * (Correção 3: nomes via crypto.randomUUID(), nunca derivados de input do usuário).
  * Cada sessão tem seu próprio diretório, apagado inteiro na preempção/encerramento.
+ *
+ * Fase 12: `baseDir` é o subdiretório DESTE processo (`.runtime/tmp/<pid>-<startEpochMs>/`, ver
+ * tmpSweeper.ts) — nunca a base compartilhada, então limpar aqui não afeta outra instância viva.
  */
 export class AudioStore {
   private readonly baseDir: string;
@@ -20,9 +23,11 @@ export class AudioStore {
     let dir = this.sessionDirs.get(sessionId);
     if (!dir) {
       dir = path.join(this.baseDir, crypto.randomUUID());
-      fs.mkdirSync(dir, { recursive: true });
       this.sessionDirs.set(sessionId, dir);
     }
+    // Fase 12: o cache não prova que a pasta ainda existe (alguém pode tê-la removido) — recria sempre
+    // que faltar, em vez de falhar com ENOENT na próxima gravação.
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
 
@@ -53,6 +58,12 @@ export class AudioStore {
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {
       // limpeza é best-effort
     });
+  }
+
+  /** Fase 12: remove o diretório DESTE processo no shutdown gracioso (não recria). */
+  async dispose(): Promise<void> {
+    this.sessionDirs.clear();
+    await fs.promises.rm(this.baseDir, { recursive: true, force: true }).catch(() => {});
   }
 
   async cleanupAll(): Promise<void> {
