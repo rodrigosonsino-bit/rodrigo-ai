@@ -3,8 +3,8 @@
 Assistente de voz pessoal local, em TypeScript/Node.js (backend/frontend) + Python/MLX (voz).
 A Fase 1 estabeleceu a fundação técnica (comunicação frontend/backend em loopback estrito). A Fase 2
 adiciona conversa por voz em PT-BR: captura de microfone, detecção de fala (VAD),
-transcrição (Whisper local), classificação de intenção e síntese de voz locais.
-A partir da Fase 10a, a geração de resposta discursiva usa o Gemini (Google GenAI API via nuvem), mantendo STT, classificação e TTS locais em loopback.
+transcrição (Whisper local) e síntese de voz locais.
+A partir da Fase 10a, a geração de resposta discursiva usa o Gemini (Google GenAI API via nuvem); a partir da Fase 11, o texto de falas sobre hora, data, lembretes e notas também vai ao Gemini para classificar a intenção. Áudio, transcrição (STT), voz sintética (TTS), notas, lembretes e memórias ficam neste computador. A seção 7 descreve exatamente o que sai e como controlar.
 
 ---
 
@@ -13,7 +13,7 @@ A partir da Fase 10a, a geração de resposta discursiva usa o Gemini (Google Ge
 - **Node.js**: `>= 20.0.0` (validado e testado no Node v26.5.1).
 - **npm**: `>= 10.0.0` (validado e testado no npm 11.17.0).
 - **Sistema Operacional**: **macOS testado e validado**. Ambientes Linux e Windows **não foram validados** nesta fase.
-- **Rede**: Acesso à internet necessário durante a instalação inicial de dependências (`npm ci`), o download dos modelos de voz (`npm run setup:voice`) e, a partir da Fase 10a, para a geração de respostas discursivas via API do Gemini (`GEMINI_API_KEY`). Captura de áudio, STT, classificação de intenções, ferramentas, memória e TTS continuam operando localmente em loopback.
+- **Rede**: Acesso à internet necessário durante a instalação inicial de dependências (`npm ci`), o download dos modelos de voz (`npm run setup:voice`) e, a partir da Fase 10a, para a geração de respostas discursivas via API do Gemini (`GEMINI_API_KEY`). Captura de áudio, STT, ferramentas, armazenamento de memória e TTS operam neste computador. O que vai ao Gemini está na seção 7.
 - **Voz (Fase 2)**: `uv` instalado (https://docs.astral.sh/uv/) e `ffmpeg` no PATH. Hardware validado: MacBook Air Apple M5, 16 GB de RAM unificada — outras configurações Apple Silicon devem funcionar, mas não foram medidas.
 
 ---
@@ -36,7 +36,7 @@ Cria um venv Python isolado em `.runtime/.venv` (nunca usa o Python de sistema),
 `mlx-community/Qwen3-4B-Instruct-2507-4bit` (LLM) e `mlx-community/whisper-small-mlx` (STT) do
 Hugging Face para `.runtime/hf-cache` (teto de 8 GiB verificado **antes** de baixar qualquer byte —
 aborta sem baixar nada se o tamanho projetado exceder o limite), e grava um manifesto em
-`.runtime/models-manifest.json` com as revisões e tamanhos resolvidos. Depois desse passo único, STT e classificação rodam inteiramente offline (`HF_HUB_OFFLINE=1` é forçado em operação normal), enquanto a geração de respostas utiliza a API do Gemini via nuvem (Fase 10a).
+`.runtime/models-manifest.json` com as revisões e tamanhos resolvidos. Depois desse passo único, o STT e o classificador local não baixam nada da internet (`HF_HUB_OFFLINE=1` é forçado em operação normal); a geração de respostas e a classificação de intenção de pedidos de ferramenta usam a API do Gemini via nuvem (Fases 10a e 11).
 
 Se `npm run setup:voice` não tiver rodado (ou `.runtime` for removido), as rotas `/api/voice/*`
 respondem `503` com uma mensagem PT-BR explicando o que falta — o resto da aplicação (Fase 1)
@@ -188,10 +188,27 @@ rodrigo-ai/
 
 ## 6. Transparência de Recursos e Custos
 
-- **Custos de API e inferência**: STT (Whisper), classificação de intenção (Qwen3) e TTS rodam 100% localmente sem custo de API. A partir da Fase 10a, a geração de resposta discursiva consome a API do Gemini (Google GenAI), sujeita a cotas e custos por chamada do provedor conforme o uso.
-- **Hardware e Energia**: a aplicação opera localmente para STT, classificação e áudio, demandando processamento e energia da máquina hospedeira. Voz validada em MacBook Air Apple M5 (16 GB); benchmark real em `docs/audits/voice-benchmark-latest.json` após `npm run bench:voice`.
-- **Qualidade de voz e modelos**: o STT e o classificador utilizam modelos locais leves para garantir baixa latência e operação loopback, enquanto a geração textual foi migrada para o Gemini na Fase 10a após decisão explícita e auditoria adversarial (docs/phase-10-v3.md). A síntese de voz (`say` ou Kokoro) roda localmente.
+- **Custos de API e inferência**: STT (Whisper) e TTS rodam neste computador, sem custo de API. A partir da Fase 10a, a geração de resposta discursiva (e, desde a Fase 11, a classificação de intenção de pedidos de ferramenta) consome a API do Gemini (Google GenAI), sujeita a cotas e custos por chamada do provedor conforme o uso.
+- **Hardware e Energia**: a aplicação processa neste computador o STT, a classificação local e o áudio, demandando processamento e energia da máquina hospedeira. Voz validada em MacBook Air Apple M5 (16 GB); benchmark real em `docs/audits/voice-benchmark-latest.json` após `npm run bench:voice`.
+- **Qualidade de voz e modelos**: o STT e o classificador local utilizam modelos leves para garantir baixa latência, enquanto a geração textual foi migrada para o Gemini na Fase 10a após decisão explícita e auditoria adversarial (docs/phase-10-v3.md). A síntese de voz (`say` ou Kokoro) roda localmente.
 - **Roteiro e Fases**:
   - **Fase 3**: Orquestrador (roteamento entre especialistas);
   - **Fase 4**: Primeiros especialistas;
   - **Fase 10a**: Provedor de geração em nuvem (Gemini) — implementado conforme plano auditado.
+
+## 7. Privacidade: o que fica neste computador e o que vai ao Gemini (Fase 12)
+
+**Nunca sai:** o áudio do microfone (a transcrição é feita aqui, pelo Whisper local), as notas, lembretes e memórias salvos em `data/`, e a voz sintética. Nenhuma tela ou texto deste projeto deve afirmar o contrário; um teste automatizado falha se reaparecer, em qualquer tela ou documento, uma frase que prometa ausência de nuvem, de custo, de chave ou de tráfego externo.
+
+**Vai ao Gemini (Google), com a geração em nuvem ligada:**
+
+| O quê | Quando | Como desligar |
+|---|---|---|
+| Texto da conversa recente (as últimas `RODRIGO_HISTORY_TURNS` trocas, 8 por padrão): o que você disse e o que o assistente respondeu, **inclusive conteúdo de notas ou memórias repetido na conversa** | em toda resposta gerada | `RODRIGO_SEND_HISTORY=0` (só a fala atual vai) |
+| Memórias salvas | junto com cada resposta | `RODRIGO_SEND_MEMORIES=0` |
+| Trecho de `docs/research/` (Teologia/Virtologia) | só se ligado; **desligado por padrão** | `RODRIGO_SEND_KNOWLEDGE=1` liga |
+| Texto da fala atual, para entender o pedido (hora, data, lembretes, notas) | falas que parecem esses pedidos | `RODRIGO_CLOUD_INTENT=0` |
+
+**Modo sem nuvem:** `RODRIGO_CLOUD=0` desliga **toda** chamada ao Gemini (geração e intenção). Hora, data, lembretes e notas continuam funcionando; o que exigir uma resposta gerada recebe, por voz, o aviso de que a geração está desligada. Não há fallback para outro provedor.
+
+Valores aceitos são exatamente `0` ou `1` (e um inteiro de 1 a 8 para `RODRIGO_HISTORY_TURNS`); qualquer outro valor impede a inicialização. A tela inicial mostra a configuração em vigor (`GET /api/privacy`), que é a configuração declarada, não uma medição do tráfego real.

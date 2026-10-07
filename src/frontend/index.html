@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Rodrigo AI — Orchestrator Local (Fase 3)" />
+    <meta name="description" content="Rodrigo AI — assistente de voz pessoal (áudio e dados guardados neste computador; respostas geradas pelo Gemini)" />
     <title>Rodrigo AI — Fase 3</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
@@ -15,6 +15,20 @@
       </header>
 
       <main class="main-content">
+        <!-- Card de Privacidade (Fase 12): lido de GET /api/privacy, visível antes de iniciar a conversa -->
+        <section class="card privacy-card" aria-labelledby="privacy-title">
+          <h2 id="privacy-title">Privacidade desta conversa</h2>
+          <p id="privacy-headline" class="privacy-headline" role="status" aria-live="polite">Lendo a configuração de privacidade…</p>
+          <div id="privacy-details" hidden>
+            <h3>Fica neste computador</h3>
+            <ul id="privacy-stays"></ul>
+            <h3>Vai ao Gemini (Google)</h3>
+            <ul id="privacy-goes"></ul>
+            <ul id="privacy-warnings" class="privacy-warnings"></ul>
+          </div>
+          <p id="privacy-footnote" class="cost-note"></p>
+        </section>
+
         <!-- Card de Conversa por Voz -->
         <section class="card voice-card" aria-labelledby="voice-title">
           <h2 id="voice-title">Conversa por Voz</h2>
@@ -37,7 +51,7 @@
 
           <p class="voice-note">
             Recomendado usar fone de ouvido no primeiro teste — sem ele, o eco do alto-falante pode
-            confundir a detecção de fala. Voz 100% local, sem envio de áudio para serviços externos.
+            confundir a detecção de fala. Seu áudio é transcrito neste computador e não é enviado a nenhum serviço; veja acima o que o texto da conversa envia ao Gemini.
           </p>
         </section>
 
@@ -88,9 +102,9 @@
                 <h3>2. Comunicação por Voz</h3>
                 <span class="badge badge-active">Ativo</span>
               </header>
-              <p>Conversa por voz em PT-BR — captura, transcrição, classificação e síntese de voz
-                100% locais; a geração da resposta (Fase 10a) usa a API do Gemini, em nuvem —
-                veja o card "Conversa por Voz" acima.</p>
+              <p>Conversa por voz em PT-BR — captura, transcrição e síntese de voz acontecem neste
+                computador; a geração da resposta usa a API do Gemini, em nuvem (e, para pedidos de hora, data, lembretes e
+                notas, a classificação da intenção também) — veja o cartão "Privacidade desta conversa" acima.</p>
             </article>
 
             <article class="module-item active">
@@ -113,18 +127,18 @@
 
         <!-- Transparência de Custos -->
         <section class="card cost-card" aria-labelledby="cost-title">
-          <h2 id="cost-title">Sem cobrança de API nesta fase</h2>
+          <h2 id="cost-title">Custos e uso de internet</h2>
           <p>
-            Nenhum serviço pago, chave de acesso ou chamada a servidores externos é utilizada pela aplicação.
+            As respostas geradas usam a API do Gemini com a sua chave (GEMINI_API_KEY) e podem consumir a cota ou gerar cobrança no Google, conforme o seu plano.
           </p>
           <p class="cost-note">
-            O aplicativo opera localmente no seu computador, consumindo apenas o processamento e energia da sua máquina. A instalação inicial de pacotes (npm) e o download único dos modelos de voz (via "npm run setup:voice") requerem internet; a conversa em si roda sempre offline.
+            Áudio, transcrição, notas, lembretes e voz sintética funcionam neste computador, gastando processamento e energia da sua máquina. A instalação inicial (npm) e o download único dos modelos de voz (via "npm run setup:voice") precisam de internet. Sem internet, só as ferramentas locais respondem; a geração de respostas depende da nuvem.
           </p>
         </section>
       </main>
 
       <footer class="app-footer">
-        <p>Rodrigo AI — Execução local no computador sem tráfego de dados para terceiros.</p>
+        <p>Rodrigo AI — áudio e dados guardados neste computador; o texto das conversas vai ao Gemini quando a geração em nuvem está ligada (veja o cartão de privacidade).</p>
       </footer>
     </div>
 

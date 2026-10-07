@@ -1,4 +1,5 @@
-import type { HealthResponse } from '../shared/types.ts';
+import type { HealthResponse, PrivacyStatus } from '../shared/types.ts';
+import { describePrivacy, PRIVACY_UNAVAILABLE_TEXT, PRIVACY_FOOTNOTE } from '../shared/privacyText.ts';
 import { VoiceController } from './voice.ts';
 
 // Elementos da interface do usuário
@@ -115,9 +116,64 @@ retryButton.addEventListener('click', () => {
   checkHealth();
 });
 
+// --- Privacidade (Fase 12): lê GET /api/privacy e mostra o que fica local e o que vai ao Gemini ---
+
+function isPrivacyStatus(value: unknown): value is PrivacyStatus {
+  const v = value as Partial<PrivacyStatus> | null;
+  return (
+    !!v &&
+    (v.mode === 'cloud' || v.mode === 'local-only') &&
+    typeof v.keyPresent === 'boolean' &&
+    !!v.sends &&
+    typeof v.sends.history === 'boolean'
+  );
+}
+
+function fillList(listId: string, items: string[]): void {
+  const list = document.getElementById(listId) as HTMLUListElement;
+  list.replaceChildren(
+    ...items.map((text) => {
+      const li = document.createElement('li');
+      li.textContent = text; // textContent: nunca innerHTML com texto derivado de dados
+      return li;
+    })
+  );
+}
+
+async function loadPrivacy(): Promise<void> {
+  const headline = document.getElementById('privacy-headline') as HTMLParagraphElement;
+  const details = document.getElementById('privacy-details') as HTMLDivElement;
+  const goesTitle = document.querySelector('#privacy-details h3:nth-of-type(2)') as HTMLElement;
+  const footnote = document.getElementById('privacy-footnote') as HTMLParagraphElement;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('/api/privacy', { headers: { Accept: 'application/json' }, signal: controller.signal });
+    if (!response.ok) throw new Error(`código ${response.status}`);
+    const data: unknown = await response.json();
+    if (!isPrivacyStatus(data)) throw new Error('formato não reconhecido');
+    const text = describePrivacy(data);
+    headline.textContent = text.headline;
+    fillList('privacy-stays', text.stays);
+    fillList('privacy-goes', text.goes);
+    fillList('privacy-warnings', text.warnings);
+    goesTitle.hidden = text.goes.length === 0;
+    (document.getElementById('privacy-goes') as HTMLElement).hidden = text.goes.length === 0;
+    details.hidden = false;
+    footnote.textContent = text.footnote;
+  } catch {
+    headline.textContent = PRIVACY_UNAVAILABLE_TEXT;
+    details.hidden = true;
+    footnote.textContent = PRIVACY_FOOTNOTE;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 // Verificação inicial ao carregar a página
 document.addEventListener('DOMContentLoaded', () => {
   checkHealth();
+  void loadPrivacy();
 });
 
 // --- Conversa por Voz (Fase 2) ---

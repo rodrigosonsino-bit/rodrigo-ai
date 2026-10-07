@@ -86,9 +86,12 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // Fase 5a: o corpus é carregado SOMENTE neste caminho — ou seja, só quando a voz está de fato
   // disponível. Mesma regra de honestidade que a Fase 4 aplica ao registro dos agentes: nada é
   // reportado como disponível antes de existir.
-  const knowledgeChunks = loadKnowledgeCorpus(rootDir);
+  // Fase 12 (D1): com RODRIGO_SEND_KNOWLEDGE=0 (padrão) o trecho nunca iria ao prompt, então o corpus
+  // pessoal nem é carregado em memória — e o módulo se declara desligado em vez de "ativo".
+  const knowledgeChunks = privacy.sendKnowledge ? loadKnowledgeCorpus(rootDir) : [];
   const retriever = knowledgeChunks.length > 0 ? new KnowledgeRetriever(knowledgeChunks) : null;
   ExtensionRegistry.getInstance().registerKnowledge(knowledgeChunks.length);
+  ExtensionRegistry.getInstance().registerKnowledgeDisabledByPrivacy(!privacy.sendKnowledge);
 
   const tools = createSystemTools();
   for (const tool of tools) ExtensionRegistry.getInstance().registerTool(tool);

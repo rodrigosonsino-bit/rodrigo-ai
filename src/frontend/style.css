@@ -298,6 +298,28 @@ html, body {
   color: var(--color-text-muted) !important;
 }
 
+/* Privacidade (Fase 12) */
+.privacy-card h3 {
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.privacy-card ul {
+  margin: 0 0 0.25rem 1.25rem;
+  padding: 0;
+  font-size: 0.95rem;
+  color: var(--color-text-main);
+}
+
+.privacy-headline {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.privacy-warnings {
+  color: var(--status-error-text) !important;
+}
+
 /* Footer */
 .app-footer {
   text-align: center;

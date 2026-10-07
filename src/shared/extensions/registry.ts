@@ -17,6 +17,8 @@ export class ExtensionRegistry {
   private readonly mutatingTools: IMutatingTool[] = [];
   /** Fase 5a: nº de trechos de referência carregados. 0 = corpus ausente => módulo indisponível. */
   private knowledgeChunkCount = 0;
+  /** Fase 12 (D1): o trecho de pesquisa só vai ao Gemini com RODRIGO_SEND_KNOWLEDGE=1; desligado, o corpus nem é carregado. */
+  private knowledgeDisabledByPrivacy = false;
 
   private constructor() {}
 
@@ -82,6 +84,11 @@ export class ExtensionRegistry {
     this.knowledgeChunkCount = chunkCount;
   }
 
+  /** Fase 12: marca a consulta de conhecimento como desligada por privacidade (não por ausência de material). */
+  public registerKnowledgeDisabledByPrivacy(disabled: boolean): void {
+    this.knowledgeDisabledByPrivacy = disabled;
+  }
+
   /** Só para teste: zera o estado do singleton in-place, sem substituir a instância. */
   public resetForTesting(): void {
     this.voiceProviders.length = 0;
@@ -89,6 +96,7 @@ export class ExtensionRegistry {
     this.tools.length = 0;
     this.mutatingTools.length = 0;
     this.knowledgeChunkCount = 0;
+    this.knowledgeDisabledByPrivacy = false;
   }
 
   public getModuleStatuses(): readonly ModuleStatus[] {
@@ -135,9 +143,10 @@ export class ExtensionRegistry {
         name: 'Conhecimento especializado',
         phase: 5,
         available: this.knowledgeChunkCount > 0,
-        description:
-          this.knowledgeChunkCount > 0
-            ? `Consulta léxica local sobre ${this.knowledgeChunkCount} trechos de referência de Teologia e Virtologia.`
+        description: this.knowledgeDisabledByPrivacy
+          ? 'Desligado por privacidade: os textos de pesquisa não são carregados nem enviados ao Gemini (ligue com RODRIGO_SEND_KNOWLEDGE=1).'
+          : this.knowledgeChunkCount > 0
+            ? `Consulta léxica local sobre ${this.knowledgeChunkCount} trechos de referência de Teologia e Virtologia; o trecho consultado é enviado ao Gemini junto com a resposta.`
             : 'Material de referência não encontrado em docs/research — agentes respondem sem consulta.'
       }
     ];

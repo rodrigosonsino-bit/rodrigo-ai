@@ -5,6 +5,9 @@ import { parsePrivacyConfig, effectivePrivacy, workerPrivacyEnv, DEFAULT_PRIVACY
 import { windowHistory } from '../voice/sessionManager.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { startServer } from '../server.js';
+import { describePrivacy, PRIVACY_UNAVAILABLE_TEXT } from '../../shared/privacyText.js';
+import { ExtensionRegistry } from '../../shared/extensions/registry.js';
+import { findViolations } from './privacyClaims.js';
 import type { AppConfig, PrivacyStatus } from '../../shared/types.js';
 import type { ConversationMessage } from '../../shared/voiceProtocol.js';
 
@@ -136,6 +139,74 @@ describe('GET /api/privacy (Fase 12)', () => {
     } finally {
       if (saved === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = saved;
+    }
+  });
+});
+
+describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 12)', () => {
+  const base = effectivePrivacy({ GEMINI_API_KEY: 'x' });
+  const flat = (t: ReturnType<typeof describePrivacy>): string => [t.headline, ...t.stays, ...t.goes, ...t.warnings, t.footnote].join('\n');
+
+  it('nuvem ligada: o histórico, a intenção, as memórias e o trecho aparecem com o estado certo', () => {
+    const on = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_KNOWLEDGE: '1' }));
+    assert.match(on.headline, /usa a nuvem \(Gemini\)/);
+    assert.ok(on.goes.some((l) => /últimas 8 trocas/.test(l) && /nota ou memória/.test(l)), 'declara que conteúdo de nota/memória repetido na conversa vai junto');
+    assert.ok(on.goes.some((l) => /memórias que você salvou são enviadas/.test(l)));
+    assert.ok(on.goes.some((l) => /Trechos dos seus textos de pesquisa .* são enviados/.test(l)));
+    assert.ok(on.goes.some((l) => /hora, data, lembretes e notas também vai ao Gemini/.test(l)));
+    assert.deepEqual(on.warnings, []);
+  });
+
+  it('cada controle desligado troca a frase correspondente (controle positivo da frase oposta acima)', () => {
+    const off = describePrivacy(
+      effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_HISTORY: '0', RODRIGO_SEND_MEMORIES: '0', RODRIGO_CLOUD_INTENT: '0' })
+    );
+    assert.ok(off.goes.some((l) => /Só a sua fala atual/.test(l)));
+    assert.ok(off.goes.some((l) => /memórias que você salvou não são enviadas/.test(l)));
+    assert.ok(off.goes.some((l) => /entendidos neste computador/.test(l)));
+    assert.ok(off.goes.some((l) => /não são enviados ao Gemini/.test(l)), 'trecho de pesquisa não enviado por padrão (D1)');
+    assert.ok(!flat(off).includes('últimas'));
+  });
+
+  it('modo sem nuvem: nada vai ao Gemini e a tela diz isso', () => {
+    const t = describePrivacy(effectivePrivacy({ RODRIGO_CLOUD: '0' }));
+    assert.match(t.headline, /Modo sem nuvem/);
+    assert.deepEqual(t.goes, []);
+    assert.ok(t.stays.some((l) => /geração está desligada/.test(l)));
+  });
+
+  it('sem chave: avisa que a geração não vai funcionar', () => {
+    assert.ok(describePrivacy(base).warnings.length === 0);
+    assert.ok(describePrivacy(effectivePrivacy({})).warnings.some((w) => /GEMINI_API_KEY/.test(w)));
+  });
+
+  it('o próprio texto do cartão não contém nenhuma frase proibida, em nenhum modo', () => {
+    for (const env of [{}, { RODRIGO_CLOUD: '0' }, { RODRIGO_SEND_HISTORY: '0' }, { RODRIGO_SEND_KNOWLEDGE: '1' }]) {
+      const t = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', ...env }));
+      assert.deepEqual(findViolations(flat(t)), [], JSON.stringify(env));
+    }
+    assert.deepEqual(findViolations(PRIVACY_UNAVAILABLE_TEXT), []);
+  });
+});
+
+describe('módulo de conhecimento sob a privacidade (Fase 12, D1)', () => {
+  it('desligado por privacidade não se declara ativo; ligado e carregado, avisa que o trecho vai ao Gemini', () => {
+    const reg = ExtensionRegistry.getInstance();
+    reg.resetForTesting();
+    try {
+      reg.registerKnowledge(0);
+      reg.registerKnowledgeDisabledByPrivacy(true);
+      const off = reg.getModuleStatuses().find((m) => m.id === 'knowledge')!;
+      assert.equal(off.available, false);
+      assert.match(off.description, /Desligado por privacidade/);
+
+      reg.registerKnowledge(12);
+      reg.registerKnowledgeDisabledByPrivacy(false);
+      const on = reg.getModuleStatuses().find((m) => m.id === 'knowledge')!;
+      assert.equal(on.available, true);
+      assert.match(on.description, /enviado ao Gemini/);
+    } finally {
+      reg.resetForTesting();
     }
   });
 });
