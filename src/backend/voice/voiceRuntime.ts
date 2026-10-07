@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
 import path from 'node:path';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
@@ -65,7 +66,15 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     };
   }
 
-  const engine = new MlxWorkerEngine({ pythonBin: venvPython, workerScript, hfCacheDir });
+  // Fase 12: a mesma configuração de privacidade governa o Node e o worker. Valor inválido lança
+  // aqui (falhar alto em privacidade), e o mestre RODRIGO_CLOUD chega ao worker como defesa em profundidade.
+  const privacy = parsePrivacyConfig(process.env);
+  const engine = new MlxWorkerEngine({
+    pythonBin: venvPython,
+    workerScript,
+    hfCacheDir,
+    env: workerPrivacyEnv(privacy)
+  });
   const ttsProvider = selectVoiceProvider();
   ExtensionRegistry.getInstance().registerVoiceProvider(ttsProvider);
 
@@ -100,7 +109,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
 
   const audioStore = new AudioStore(path.join(rootDir, '.runtime', 'tmp'));
   const sessionManager = new SessionManager(
-    engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools, memoriaStore
+    engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools, memoriaStore, privacy
   );
 
   return {

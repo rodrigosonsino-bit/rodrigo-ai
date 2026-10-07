@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, type PrivacyConfig } from '../privacy.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
@@ -154,6 +155,8 @@ export class SessionManager {
   private readonly mutatingTools: readonly IMutatingTool[];
   /** Fase 7: persistência de memória de contexto entre sessões. */
   private readonly memoriaStore: JsonStore<StoredItem> | null;
+  /** Fase 12: o que pode sair para o Gemini (docs/phase-12-v2.md §2.1). */
+  private readonly privacy: PrivacyConfig;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -167,7 +170,8 @@ export class SessionManager {
     retriever: KnowledgeRetriever | null = null,
     tools: readonly ITool[] = [],
     mutatingTools: readonly IMutatingTool[] = [],
-    memoriaStore: JsonStore<StoredItem> | null = null
+    memoriaStore: JsonStore<StoredItem> | null = null,
+    privacy: PrivacyConfig = DEFAULT_PRIVACY
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
@@ -177,6 +181,7 @@ export class SessionManager {
     this.tools = tools;
     this.mutatingTools = mutatingTools;
     this.memoriaStore = memoriaStore;
+    this.privacy = privacy;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -424,8 +429,10 @@ export class SessionManager {
       // pergunta falada e pelo "sim" determinístico.
       let cloudIntent: IntentDetection | null = null;
       if (
-        (this.mutatingTools.length > 0 && mightBeMutation(transcript)) ||
-        (this.tools.length > 0 && mightBeTemporal(transcript))
+        this.privacy.cloud &&
+        this.privacy.cloudIntent &&
+        ((this.mutatingTools.length > 0 && mightBeMutation(transcript)) ||
+          (this.tools.length > 0 && mightBeTemporal(transcript)))
       ) {
         try {
           cloudIntent = await this.engine.detectIntent(turn.turnId, turn.epoch, transcript);
@@ -571,7 +578,7 @@ export class SessionManager {
       // antes — nada é anunciado antes de estar decidido. Síncrono e em memória; nunca lança para
       // fora, porque perder a consulta não deve custar a resposta.
       let retrieved: RetrievedChunk[] = [];
-      if (this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA')) {
+      if (this.privacy.sendKnowledge && this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA')) {
         try {
           retrieved = this.retriever.retrieve(agent.id, transcript);
         } catch (err) {
@@ -590,7 +597,7 @@ export class SessionManager {
       // (mesmo padrão de resiliência da Fase 5a: falha de disco nunca derruba o turno).
       // Entra SEMPRE, para todos os 4 rótulos (decisão do usuário §0.3).
       let memoryItems: readonly StoredItem[] = [];
-      if (this.memoriaStore) {
+      if (this.privacy.sendMemories && this.memoriaStore) {
         try {
           memoryItems = this.memoriaStore.read().items;
         } catch (err) {
@@ -619,12 +626,12 @@ export class SessionManager {
 
       const messagesForEngine: ConversationMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...session.history
+        ...windowHistory(session.history, this.privacy)
       ];
 
       let claimGuarded = false;
       try {
-        await this.engine.generate(turn.turnId, turn.epoch, messagesForEngine, {
+        await this.generateOrDisabled(session, turn, messagesForEngine, {
           onSentence: (rawText, index) => {
             if (session.activeTurn !== turn) return;
             let text = cleanTextForSpeech(rawText);
@@ -678,6 +685,24 @@ export class SessionManager {
         session.activeTurn = null;
       }
     }
+  }
+
+  /**
+   * Fase 12: com o mestre RODRIGO_CLOUD=0 nenhuma chamada ao Gemini é feita — o turno diz, por voz,
+   * que a geração está desligada (sem fallback para outro provedor, decisão D3).
+   */
+  private async generateOrDisabled(
+    session: Session,
+    turn: ActiveTurn,
+    messages: ConversationMessage[],
+    handlers: Parameters<VoiceEngine['generate']>[3]
+  ): Promise<void> {
+    if (!this.privacy.cloud) {
+      turn.expectedSentences.add(0);
+      turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, GENERATION_DISABLED_TEXT, 0));
+      return;
+    }
+    await this.engine.generate(turn.turnId, turn.epoch, messages, handlers);
   }
 
   private async synthesizeSentence(session: Session, turn: ActiveTurn, text: string, index: number): Promise<void> {
@@ -795,4 +820,23 @@ export class SessionManager {
       await this.terminate(this.current, false);
     }
   }
+}
+
+
+/**
+ * Fase 12: parte do histórico que pode ir à geração. SEND_HISTORY=0 => só a fala do turno atual
+ * (a última mensagem, que é a do usuário). Caso contrário, janela de HISTORY_TURNS turnos, sem
+ * começar por mensagem do assistente (o formato do Gemini exige começar pelo usuário).
+ */
+export function windowHistory(
+  history: readonly ConversationMessage[],
+  privacy: Pick<PrivacyConfig, 'sendHistory' | 'historyTurns'>
+): ConversationMessage[] {
+  if (!privacy.sendHistory) {
+    return history.length > 0 ? [history[history.length - 1]] : [];
+  }
+  const windowed = history.slice(-(privacy.historyTurns * 2));
+  let start = 0;
+  while (start < windowed.length - 1 && windowed[start].role === 'assistant') start += 1;
+  return windowed.slice(start);
 }

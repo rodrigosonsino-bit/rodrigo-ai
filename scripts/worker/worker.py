@@ -743,6 +743,8 @@ class Worker:
             emit({"event": "intent_detection", "reqId": req_id, "turnId": turn_id, "available": True,
                   "intent": "NENHUMA", "content": None})
             return
+        if os.environ.get("RODRIGO_CLOUD", "1") == "0":
+            return unavailable("desligado por RODRIGO_CLOUD=0")  # Fase 12: mestre (defesa em profundidade)
         if os.environ.get("RODRIGO_CLOUD_INTENT", "1") == "0":
             return unavailable("desligado por RODRIGO_CLOUD_INTENT=0")
         if not os.environ.get("GEMINI_API_KEY"):
@@ -857,6 +859,9 @@ class Worker:
             self._current = handle
 
         try:
+            if os.environ.get("RODRIGO_CLOUD", "1") == "0":
+                # Fase 12: mestre desligado — nenhuma chamada ao Gemini, mesmo que o Node peça (defesa em profundidade).
+                raise RuntimeError("Geração em nuvem desligada (RODRIGO_CLOUD=0).")
             if not os.environ.get("GEMINI_API_KEY"):
                 raise RuntimeError("GEMINI_API_KEY ausente — configure a variável de ambiente.")
 

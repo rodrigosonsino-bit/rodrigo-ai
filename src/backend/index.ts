@@ -1,9 +1,12 @@
 import { loadConfig } from './config.js';
 import { startServer } from './server.js';
 import { createVoiceRuntime } from './voice/voiceRuntime.js';
+import { parsePrivacyConfig } from './privacy.js';
 
 try {
   const config = loadConfig();
+  // Fase 12: configuração de privacidade inválida derruba o startup (nunca assume um padrão em silêncio).
+  parsePrivacyConfig(process.env);
   const voiceRuntime = createVoiceRuntime(process.cwd());
 
   if (voiceRuntime.available) {

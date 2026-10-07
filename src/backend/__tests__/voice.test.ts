@@ -1,4 +1,5 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, type PrivacyConfig } from '../privacy.js';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import os from 'node:os';
@@ -75,7 +76,8 @@ async function setupHarness(
   retriever: KnowledgeRetriever | null = null,
   tools: readonly ITool[] = [],
   mutatingTools: readonly IMutatingTool[] = [],
-  memoriaStore: JsonStore<StoredItem> | null = null
+  memoriaStore: JsonStore<StoredItem> | null = null,
+  privacy: PrivacyConfig = DEFAULT_PRIVACY
 ): Promise<Harness> {
   const testConfig: AppConfig = { port: 0, host: '127.0.0.1', clientPort: 0 };
   // porta 0 -> o SO escolhe uma porta livre; startServer atual exige config.port fixo,
@@ -95,7 +97,8 @@ async function setupHarness(
     retriever,
     tools,
     mutatingTools,
-    memoriaStore
+    memoriaStore,
+    privacy
   );
 
   const server = await startServer(config, undefined, { config, sessionManager, audioStore });
@@ -696,7 +699,8 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
       ...chunkMarkdown('virtologia', KNOWLEDGE_FIXTURE),
       ...chunkMarkdown('teologia', KNOWLEDGE_FIXTURE)
     ];
-    h = await setupHarness(new KnowledgeRetriever(chunks));
+    // F12/D1: o trecho de pesquisa só vai ao prompt com RODRIGO_SEND_KNOWLEDGE=1 — estes testes cobrem o envio LIGADO.
+    h = await setupHarness(new KnowledgeRetriever(chunks), [], [], null, { ...DEFAULT_PRIVACY, sendKnowledge: true });
   });
 
   async function runTurn(label: string, transcript: string): Promise<string> {
@@ -2184,3 +2188,155 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
 
 
 
+
+// ---------------------------------------------------------------------------------------------
+// Fase 12 — controles de saída para o Gemini (docs/phase-12-v2.md §2.1, critérios H12.2/H12.3).
+// Cada teste "ausente" tem um controle positivo (mesmo cenário com o envio ligado mostra o conteúdo).
+// ---------------------------------------------------------------------------------------------
+describe('Privacidade (Fase 12) — controles de saída', () => {
+  const MARCADOR_MEMORIA = 'MARCADOR-MEMORIA-7731';
+  const MARCADOR_FALA = 'MARCADOR-FALA-4412';
+  const cleanups: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+  });
+
+  async function waitForType(sse: ReturnType<typeof readSse>, type: string, ms = 5000): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if ((sse.events as Array<{ type: string }>).some((e) => e.type === type)) return;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error(`evento "${type}" não chegou em ${ms}ms`);
+  }
+
+  async function openSession(h: Harness): Promise<{ sessionId: string; token: string; sse: ReturnType<typeof readSse> }> {
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+    cleanups.push(async () => {
+      sse.close();
+    });
+    return { sessionId, token, sse };
+  }
+
+  async function speak(h: Harness, s: { sessionId: string; token: string }): Promise<void> {
+    const res = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    assert.equal(res.status, 200);
+  }
+
+  async function start(
+    privacy: PrivacyConfig,
+    opts: { retriever?: KnowledgeRetriever | null; tools?: readonly ITool[]; memorias?: string[] } = {}
+  ): Promise<Harness> {
+    let memoriaStore: JsonStore<StoredItem> | null = null;
+    let mutatingTools: readonly IMutatingTool[] = [];
+    if (opts.memorias) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-f12-mem-'));
+      cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
+      const made = createMutatingTools(dir);
+      made.memoriaStore.write({
+        items: opts.memorias.map((text, i) => ({ id: String(i + 1), text, createdAt: new Date().toISOString() }))
+      });
+      memoriaStore = made.memoriaStore;
+      mutatingTools = made.tools;
+    }
+    const h = await setupHarness(opts.retriever ?? null, opts.tools ?? [], mutatingTools, memoriaStore, privacy);
+    cleanups.push(async () => teardownHarness(h));
+    return h;
+  }
+
+  it('memórias: SEND_MEMORIES=0 não põe o bloco no prompt; SEND_MEMORIES=1 põe (controle positivo)', async () => {
+    for (const [sendMemories, expected] of [[false, false], [true, true]] as const) {
+      const h = await start({ ...DEFAULT_PRIVACY, sendMemories }, { memorias: [MARCADOR_MEMORIA] });
+      const s = await openSession(h);
+      h.engine.fixedTranscript = 'conta uma curiosidade qualquer';
+      await speak(h, s);
+      await waitForType(s.sse, 'turn_done');
+      const prompt = h.engine.generateCalls[0]?.messages[0]?.content ?? '';
+      assert.equal(prompt.includes(MARCADOR_MEMORIA), expected, `sendMemories=${sendMemories}`);
+      await cleanups.pop()!(); // h
+    }
+  });
+
+  it('conhecimento: padrão (D1) não envia o trecho; SEND_KNOWLEDGE=1 envia (controle positivo)', async () => {
+    const chunks = [...chunkMarkdown('teologia', KNOWLEDGE_FIXTURE)];
+    for (const [sendKnowledge, expected] of [[false, false], [true, true]] as const) {
+      const h = await start({ ...DEFAULT_PRIVACY, sendKnowledge }, { retriever: new KnowledgeRetriever(chunks) });
+      const s = await openSession(h);
+      h.engine.classificationToReturn = 'TEOLOGIA' as never;
+      h.engine.fixedTranscript = 'Faça uma análise exegética desse texto';
+      await speak(h, s);
+      await waitForType(s.sse, 'turn_done');
+      const prompt = h.engine.generateCalls[0]?.messages[0]?.content ?? '';
+      assert.equal(prompt.includes(KNOWLEDGE_PREAMBLE), expected, `sendKnowledge=${sendKnowledge}`);
+      await cleanups.pop()!();
+    }
+    assert.equal(DEFAULT_PRIVACY.sendKnowledge, false, 'D1: o padrão de produção NÃO envia o trecho de docs/research');
+  });
+
+  it('histórico: SEND_HISTORY=0 manda só a fala atual; padrão manda o turno anterior (controle positivo)', async () => {
+    for (const [sendHistory, expectPrevious] of [[false, false], [true, true]] as const) {
+      const h = await start({ ...DEFAULT_PRIVACY, sendHistory });
+      const s = await openSession(h);
+      h.engine.fixedTranscript = `${MARCADOR_FALA} primeira fala`;
+      await speak(h, s);
+      await waitForType(s.sse, 'turn_done');
+      const first = (s.sse.events as Array<{ type: string; turnId?: string }>).find((e) => e.type === 'turn_done')!;
+      // a frase do assistente só entra no histórico depois de tocada
+      await fetch(`${h.baseUrl}/api/voice/session/played`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId: first.turnId, text: 'Olá!' })
+      });
+      h.engine.fixedTranscript = 'segunda fala sem marcador';
+      await speak(h, s);
+      await new Promise((r) => setTimeout(r, 250));
+      const second = h.engine.generateCalls[1]?.messages ?? [];
+      const body = second.filter((m) => m.role !== 'system');
+      const mentionsFirst = body.some((m) => m.content.includes(MARCADOR_FALA));
+      assert.equal(mentionsFirst, expectPrevious, `sendHistory=${sendHistory}`);
+      if (!sendHistory) {
+        assert.equal(body.length, 1, 'só a fala do turno atual');
+        assert.equal(body[0].role, 'user');
+        assert.ok(body[0].content.includes('segunda fala'));
+      }
+      await cleanups.pop()!();
+    }
+  });
+
+  it('mestre RODRIGO_CLOUD=0: nenhuma geração, nenhuma intenção; o turno diz que a geração está desligada', async () => {
+    const h = await start({ ...DEFAULT_PRIVACY, cloud: false }, { tools: createSystemTools(() => new Date('2026-10-03T14:30:00-03:00')) });
+    const s = await openSession(h);
+    h.engine.fixedTranscript = 'que horas são agora';
+    await speak(h, s);
+    await waitForType(s.sse, 'turn_done');
+    assert.equal(h.engine.detectIntentCalls.length, 0, 'intenção em nuvem NÃO pode ser chamada com o mestre desligado');
+    assert.equal(h.engine.generateCalls.length, 0, 'geração NÃO pode ser chamada com o mestre desligado');
+
+    h.engine.fixedTranscript = 'conta uma curiosidade qualquer';
+    await speak(h, s);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(h.engine.generateCalls.length, 0, 'geração continua não chamada');
+    assert.ok(h.tts.synthesizeCalls.includes(GENERATION_DISABLED_TEXT), 'a fala diz que a geração está desligada');
+  });
+
+  it('controle positivo da intenção: com a nuvem ligada, "que horas são" chama a intenção; cloudIntent=false não chama mas gera', async () => {
+    const tools = () => createSystemTools(() => new Date('2026-10-03T14:30:00-03:00'));
+    for (const [cloudIntent, expectedCalls] of [[true, 1], [false, 0]] as const) {
+      const h = await start({ ...DEFAULT_PRIVACY, cloudIntent }, { tools: tools() });
+      const s = await openSession(h);
+      h.engine.fixedTranscript = 'que horas são agora';
+      await speak(h, s);
+      await waitForType(s.sse, 'turn_done');
+      assert.equal(h.engine.detectIntentCalls.length, expectedCalls, `cloudIntent=${cloudIntent}`);
+      await cleanups.pop()!();
+    }
+  });
+});

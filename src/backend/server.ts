@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { AppConfig } from '../shared/types.js';
 import { isAllowedHost } from './hostValidator.js';
 import { handleHealthRequest } from './routes/health.js';
+import { handlePrivacyRequest } from './routes/privacy.js';
 import { handleVoiceRoute, type VoiceRouteDeps } from './voice/routes.js';
 
 const MIME_TYPES: Record<string, string> = {
@@ -62,6 +63,11 @@ export function createRequestHandler(
     if (pathname.startsWith('/api/') || pathname === '/api') {
       if (pathname === '/api/health') {
         handleHealthRequest(req, res);
+        return;
+      }
+
+      if (pathname === '/api/privacy') {
+        handlePrivacyRequest(req, res);
         return;
       }
 
