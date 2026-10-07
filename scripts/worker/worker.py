@@ -409,6 +409,51 @@ def safe_exc(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {redact(str(exc), max_len=160)} [{where}]"
 
 
+# --- Fase 12 (docs/phase-12-v2.md §2.5): endpoint do Gemini. RODRIGO_GEMINI_BASE_URL só existe para o teste de
+# egresso (Gemini FALSO em loopback). Regras: só vale com RODRIGO_TEST=1; só aceita http://127.0.0.1:<porta> ou
+# http://[::1]:<porta> (fullmatch, dígitos ASCII, porta 1024..65535); em modo de teste usa chave SINTÉTICA e
+# RECUSA a chave real; URL inválida em modo de teste => não cria cliente (nunca cai no endpoint real); redirecionamentos
+# desligados SEMPRE (httpx mantém x-goog-api-key num 307 para outro host — reproduzido em 2026-10-07).
+GEMINI_TEST_KEY = "test-dummy-key"
+_BASE_URL_RE = re.compile(r"http://(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})")
+
+
+def parse_gemini_base_url(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    m = _BASE_URL_RE.fullmatch(raw)
+    if m is None:
+        return None
+    return raw if 1024 <= int(m.group(2)) <= 65535 else None
+
+
+def resolve_gemini_endpoint(env: Any) -> tuple:
+    """(api_key, base_url|None). Modo de teste + URL válida => (chave sintética, url). Fora do teste a variável é ignorada."""
+    raw = env.get("RODRIGO_GEMINI_BASE_URL", "")
+    if raw and env.get("RODRIGO_TEST") != "1":
+        log_diag("RODRIGO_GEMINI_BASE_URL ignorada: só vale com RODRIGO_TEST=1.")
+        raw = ""
+    if raw:
+        url = parse_gemini_base_url(raw)
+        if url is None:
+            raise RuntimeError("RODRIGO_GEMINI_BASE_URL inválida em modo de teste — recusando criar cliente.")
+        return GEMINI_TEST_KEY, url
+    return env["GEMINI_API_KEY"], None
+
+
+def build_gemini_client(genai: Any, timeout_ms: int) -> Any:
+    """ÚNICO ponto que cria cliente Gemini (geração e intenção): mesma regra de endpoint e redirect desligado."""
+    import httpx
+
+    api_key, base_url = resolve_gemini_endpoint(os.environ)
+    if base_url and os.environ.get("RODRIGO_TEST_GEMINI_TIMEOUT_MS", "").isdigit():
+        timeout_ms = int(os.environ["RODRIGO_TEST_GEMINI_TIMEOUT_MS"])  # só em modo de teste (base_url só existe nele)
+    opts: dict = {"timeout": timeout_ms, "httpx_client": httpx.Client(follow_redirects=False)}
+    if base_url:
+        opts["base_url"] = base_url
+    return genai.Client(api_key=api_key, http_options=genai.types.HttpOptions(**opts))
+
+
 def log_diag(message: str) -> None:
     """Diagnóstico técnico em stderr — nunca inclui transcrição ou conteúdo de conversa.
     Fase 12: TODA mensagem passa por redact() (ponto único de saída de diagnóstico)."""
@@ -543,6 +588,11 @@ class Worker:
     # --- Carregamento de modelos (warmup) ---
 
     def load_models(self) -> None:
+        if os.environ.get("RODRIGO_TEST") == "1" and os.environ.get("RODRIGO_WORKER_NO_MODELS") == "1":
+            # Fase 12: teste de egresso — só os caminhos Gemini (geração/intenção) são exercitados, sem carregar GBs de modelos.
+            log_diag("Modo de teste: modelos locais NÃO carregados (RODRIGO_WORKER_NO_MODELS=1).")
+            emit({"event": "ready"})
+            return
         import mlx.core as mx
 
         self._mx = mx
@@ -796,10 +846,7 @@ class Worker:
             if getattr(self, "_intent_client", None) is None:
                 from google import genai
                 self._intent_genai = genai
-                self._intent_client = genai.Client(
-                    api_key=os.environ["GEMINI_API_KEY"],
-                    http_options=genai.types.HttpOptions(timeout=CLOUD_INTENT_HTTP_TIMEOUT_MS),
-                )
+                self._intent_client = build_gemini_client(genai, CLOUD_INTENT_HTTP_TIMEOUT_MS)
             genai = self._intent_genai
             started = time.monotonic()
             if getattr(self, "_intent_pool", None) is None:
@@ -916,13 +963,10 @@ class Worker:
                 # cliente nunca é construído com api_key vazia.
                 from google import genai
                 self._genai = genai
-                self._gemini_client = genai.Client(
-                    api_key=os.environ["GEMINI_API_KEY"],
-                    http_options=genai.types.HttpOptions(timeout=20_000),  # 20s — bem abaixo do
-                    # timeout de 60s do Node (VOICE_LIMITS.TURN_TIMEOUT_MS), pra que uma falha de
-                    # rede emita "error" NDJSON e libere o turno, em vez de deixar o Node matar o
-                    # worker inteiro com SIGKILL por uma causa que não é travamento de GPU.
-                )
+                # 20s — bem abaixo do timeout de 60s do Node (VOICE_LIMITS.TURN_TIMEOUT_MS), pra que uma falha de
+                # rede emita "error" NDJSON e libere o turno, em vez de deixar o Node matar o worker inteiro
+                # com SIGKILL por uma causa que não é travamento de GPU.
+                self._gemini_client = build_gemini_client(genai, 20_000)
             else:
                 genai = self._genai
 

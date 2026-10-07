@@ -211,4 +211,6 @@ rodrigo-ai/
 
 **Modo sem nuvem:** `RODRIGO_CLOUD=0` desliga **toda** chamada ao Gemini (geração e intenção). Hora, data, lembretes e notas continuam funcionando; o que exigir uma resposta gerada recebe, por voz, o aviso de que a geração está desligada. Não há fallback para outro provedor.
 
+**Variáveis só de teste** (não fazem parte do uso normal): `RODRIGO_TEST=1`, `RODRIGO_GEMINI_BASE_URL` (aponta o worker para um Gemini falso em loopback; só vale com `RODRIGO_TEST=1`, só aceita `http://127.0.0.1:<porta>` ou `http://[::1]:<porta>` com porta de 1024 a 65535, usa uma chave sintética e nunca a sua), `RODRIGO_WORKER_NO_MODELS=1` e `RODRIGO_TEST_GEMINI_TIMEOUT_MS`. Fora do modo de teste, `RODRIGO_GEMINI_BASE_URL` é ignorada com um aviso. O worker nunca segue redirecionamentos do Gemini.
+
 Valores aceitos são exatamente `0` ou `1` (e um inteiro de 1 a 8 para `RODRIGO_HISTORY_TURNS`); qualquer outro valor impede a inicialização. A tela inicial mostra a configuração em vigor (`GET /api/privacy`), que é a configuração declarada, não uma medição do tráfego real.

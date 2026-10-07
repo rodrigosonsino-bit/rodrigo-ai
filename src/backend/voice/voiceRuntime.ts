@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
+import { workerGeminiEnv } from '../geminiTestEndpoint.js';
 import { prepareProcessTmpDir } from './tmpSweeper.js';
 import path from 'node:path';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
@@ -74,7 +75,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     pythonBin: venvPython,
     workerScript,
     hfCacheDir,
-    env: workerPrivacyEnv(privacy)
+    env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) }
   });
   const ttsProvider = selectVoiceProvider();
   ExtensionRegistry.getInstance().registerVoiceProvider(ttsProvider);

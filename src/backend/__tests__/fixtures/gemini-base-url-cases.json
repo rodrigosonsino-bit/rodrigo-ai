@@ -1,0 +1,224 @@
+{
+ "cases": [
+  {
+   "input": "http://127.0.0.1:9000",
+   "accept": true
+  },
+  {
+   "input": "http://[::1]:9000",
+   "accept": true
+  },
+  {
+   "input": "http://127.0.0.1:1024",
+   "accept": true
+  },
+  {
+   "input": "http://127.0.0.1:65535",
+   "accept": true
+  },
+  {
+   "input": "http://[::1]:50000",
+   "accept": true
+  },
+  {
+   "input": "",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:0",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:80",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:443",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:1023",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:65536",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:99999",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:09000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:100000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000\n",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000\r\n",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000 ",
+   "accept": false
+  },
+  {
+   "input": " http://127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000\t",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:９０００",
+   "accept": false
+  },
+  {
+   "input": "http://127.０.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000/",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000/v1",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000?key=1",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000#x",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1@evil.com:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000@evil.com",
+   "accept": false
+  },
+  {
+   "input": "http://user:pass@127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://evil.com\\@127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://evil.com#@127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://evil.com?@127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1.evil.com:9000",
+   "accept": false
+  },
+  {
+   "input": "http://localhost:9000",
+   "accept": false
+  },
+  {
+   "input": "http://LOCALHOST:9000",
+   "accept": false
+  },
+  {
+   "input": "http://localhost.evil.com:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.2:9000",
+   "accept": false
+  },
+  {
+   "input": "http://0.0.0.0:9000",
+   "accept": false
+  },
+  {
+   "input": "http://[::ffff:127.0.0.1]:9000",
+   "accept": false
+  },
+  {
+   "input": "http://[0:0:0:0:0:0:0:1]:9000",
+   "accept": false
+  },
+  {
+   "input": "http://[::1]:09000",
+   "accept": false
+  },
+  {
+   "input": "http://0x7f.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://2130706433:9000",
+   "accept": false
+  },
+  {
+   "input": "http://017700000001:9000",
+   "accept": false
+  },
+  {
+   "input": "http://0177.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.1:9000",
+   "accept": false
+  },
+  {
+   "input": "https://127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "HTTP://127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "ftp://127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "file:///etc/passwd",
+   "accept": false
+  },
+  {
+   "input": "//127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "127.0.0.1:9000",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000%0a",
+   "accept": false
+  },
+  {
+   "input": "http://127.0.0.1:9000\nhttp://evil.com",
+   "accept": false
+  }
+ ]
+}
