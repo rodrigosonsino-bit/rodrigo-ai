@@ -2,7 +2,7 @@
 
 Versão: v2 (corrige a rodada 1 de auditoria sobre `docs/phase-12-v1.md` v1.1)
 Data: 2026-10-06
-Status: **Rodada 2 feita (Kimi K3 — REJEITADO, 11 achados: 10 aceitos, 1 refutado no código; Hermes falhou por cota). Pronto para decisão D4 do usuário e, depois, rodada 3 com auditor diferente.** Nada implementado.
+Status: **Rodada 2 feita (Kimi K3 — REJEITADO, 11 achados: 10 aceitos, 1 refutado no código; Hermes falhou por cota). D4 decidida (2026-10-07). Rodada 3 com o agy (usuário escolheu o agy; limitação registrada: o agy também foi auditor da rodada 1 — não é auditor novo, então a rodada 3 é de CONFERÊNCIA do v2.1, não de independência).** Nada implementado.
 Base: `docs/phase-12-v1.md` (levantamento §1, decisões D1–D3 do usuário, critérios). Este arquivo **substitui** o v1 nas seções abaixo; o §1 (levantamento) do v1 continua válido e é acrescido do §1A.
 
 ## 0. Rastreabilidade da rodada 1 (CLI + modelo, capturados em 2026-10-06)
@@ -110,7 +110,7 @@ Procedimento **manual** (o script de rotação **não** lê `RODRIGO_GEMINI_BASE
 
 ## 3. Decisões do usuário (inalteradas) e novas implicações
 
-D1 `SEND_KNOWLEDGE` padrão `0`; D2 `SEND_MEMORIES` controle global; D3 sem fallback. Resposta literal registrada: "D1 , D2 , D3 sim, manda para auditoria". **Nova decisão implícita a confirmar com o usuário (D4):** o padrão de `SEND_HISTORY` é `1` (comportamento atual). Mudar o padrão para `0` degradaria a continuidade da conversa; a recomendação é manter `1` e declarar. **O usuário decide.**
+D1 `SEND_KNOWLEDGE` padrão `0`; D2 `SEND_MEMORIES` controle global; D3 sem fallback. Resposta literal registrada: "D1 , D2 , D3 sim, manda para auditoria". **D4 (decidida pelo usuário em 2026-10-07, literal: "SEND_HISTORY=1 e D4 sim"):** `RODRIGO_SEND_HISTORY` tem padrão `1` (histórico enviado ao Gemini, como hoje), **declarado** na UI/README/`/api/privacy`. Mudar o padrão para `0` degradaria a continuidade da conversa; o controle existe para quem quiser desligar.
 
 ## 4. Critérios de aceite (substituem §4 do v1)
 
