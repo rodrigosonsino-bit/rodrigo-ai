@@ -12,7 +12,7 @@ Base: `docs/phase-12-v1.md` (levantamento §1, decisões D1–D3 do usuário, cr
 | Kimi (CLI `deepseek -m`) | `moonshotai/kimi-k3` (NVIDIA NIM) | tentativa 1: plano + 3 trechos de código colados (26 KB) → **saída degenerada, descartada** (piso quantitativo do skill); tentativa 2: só o plano (15 KB) | 6 achados, 1 REJEITADO |
 | agy | modelo padrão do agy (não capturado — **registrar na rodada 2**) | repositório limpo (`git archive`, sem `docs/research/`, sem `.env`) | 10 achados, REJEITADO |
 | Simulação própria (Python 3 + Node) | — | bateria de 25 payloads de URL | divergência reproduzida (§2.5) |
-| Hermes | — | **não rodou**: Docker desligado; usuário pediu para não consumir RAM | gap declarado: Hermes ainda não viu este plano |
+| Hermes | modelo configurado `meituan/longcat-2.0:free` (conta Nous) | **falhou duas vezes** (2026-10-06 e 2026-10-07, ~20 min cada): resposta "You've used up the allowance for chatting without signing in", **nenhum arquivo produzido**; uma chamada trivial (`ok`) funcionou entre as duas tentativas | gap declarado: Hermes ainda não viu este plano; a parte executável (regex) foi rodada por mim |
 | Jev | `jev-1.13.0` | triagem | nova auditoria de plano 0,98 (conf. 0,96); achados reais entre 0,61–0,84 |
 
 Registro de uso de material pessoal: **nenhum auditor viu `docs/research/` ou `.env`**.
@@ -77,7 +77,7 @@ Teste: (a) órfão de pid morto some; (b) diretório de instância viva (process
 
 Variável de teste `RODRIGO_GEMINI_BASE_URL`. Regras:
 1. **Só vale em modo de teste explícito** (`RODRIGO_TEST=1`). Fora dele é ignorada e um aviso é logado.
-2. **Validação única, no Node, antes de spawnar o worker.** Aceita apenas o regex `^http://(127\.0\.0\.1|\[::1\]):\d{1,5}$` (sem caminho, sem userinfo, sem barra invertida, sem `localhost`, sem formas hex/decimal/octal). O Node passa ao worker **a string já validada**; o worker só a aceita se for **igual por igualdade exata** ao regex acima (segunda checagem independente, não segundo parser).
+2. **Validação única, no Node, antes de spawnar o worker.** Aceita apenas o regex `^http://(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})$`, **aplicado com correspondência total** (`re.fullmatch` em Python, `RegExp.test` em JS — nunca `re.match`+`$`) e **somente dígitos ASCII** (`[0-9]`, nunca `\d`), mais checagem numérica da porta `1024..65535` (sem caminho, sem userinfo, sem barra invertida, sem `localhost`, sem formas hex/decimal/octal, sem zero à esquerda). **Reproduzido em 2026-10-07** (`docs/audits/f12/loopback-regex-battery.py/.mjs`): o regex original `\d{1,5}$` aceitava `\n` final no `re.match` do Python, dígitos Unicode `９０００` no Python (e não no Node — divergência), porta `0`, `99999` e `09000`. O Node passa ao worker **a string já validada**; o worker só a aceita se for **igual por igualdade exata** ao regex acima (segunda checagem independente, não segundo parser).
 3. **Em modo de teste o worker usa chave sintética** (`test-dummy-key`) e **recusa** usar `GEMINI_API_KEY` real. Assim, mesmo um desvio, a chave real nunca viaja para o host falso.
 4. **Redirecionamentos desligados** nos dois clientes (`httpx.Client(follow_redirects=False)` repassado a `HttpOptions`), também fora do modo de teste (hardening de produção).
 5. **Os dois clientes** (`_intent_client` e `_gemini_client`) recebem a mesma `base_url`. O Gemini falso responde aos **dois contratos**: SSE de `streamGenerateContent` (geração) e JSON com o schema fechado da intenção (`generateContent`).
