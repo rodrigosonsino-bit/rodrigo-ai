@@ -178,6 +178,10 @@ D1 `SEND_KNOWLEDGE` padrão `0`; D2 `SEND_MEMORIES` controle global; D3 sem fall
 
 Aplicativo local de usuário único. **Dentro do escopo:** o que o app envia pela rede, logs, arquivos temporários, chave em logs/erros/UI. **Fora do escopo (declarado):** outros processos do mesmo usuário lendo `/proc`/ambiente do app ou o `.env`, malware local, acesso físico. A UI não promete proteção contra essas ameaças.
 
+## 7B. Fato novo descoberto na F12 (2026-10-07): nível gratuito do Gemini
+
+Pela página oficial dos termos da API (ai.google.dev/gemini-api/terms, "Last updated 2026-04-28", lida por uma ferramenta de resumo — o usuário foi convidado a conferir): no nível gratuito o Google usa o conteúdo para melhorar produtos e "human reviewers may read, annotate, and process" a entrada e a saída; no pago afirma que não usa. O projeto do usuário está no nível gratuito (captura do AI Studio: "Nível gratuito", gasto mensal "-"). Decisão do usuário (2026-10-07): **divulgar** na tela e nos docs, sem mudar comportamento nem ativar faturamento nem alterar padrões. Implementado: `FREE_TIER_NOTICE` no cartão (sempre que algo vai ao Gemini), README seção 7, `.env.example`, `CLAUDE.md`, e testes que EXIGEM a divulgação. Decisão sobre rotacionar a chave: **não rotacionar** (nível gratuito, sem faturamento: risco financeiro nulo; o transcript é privado) — escolha consciente, a reavaliar se o faturamento for ativado.
+
 ## 7A. Fora de escopo
 
 Marca "só local" por item (F14); resumos derivados de histórico (se a F13 criá-los, entram sob `SEND_HISTORY`); busca web (F15, aprovação nominal própria); gate de boot por rotação de chave (rejeitado).

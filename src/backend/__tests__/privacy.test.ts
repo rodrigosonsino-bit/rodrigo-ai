@@ -5,7 +5,7 @@ import { parsePrivacyConfig, effectivePrivacy, workerPrivacyEnv, DEFAULT_PRIVACY
 import { windowHistory } from '../voice/sessionManager.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { startServer } from '../server.js';
-import { describePrivacy, PRIVACY_UNAVAILABLE_TEXT } from '../../shared/privacyText.js';
+import { describePrivacy, PRIVACY_UNAVAILABLE_TEXT, FREE_TIER_NOTICE } from '../../shared/privacyText.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import { findViolations } from './privacyClaims.js';
 import type { AppConfig, PrivacyStatus } from '../../shared/types.js';
@@ -154,7 +154,7 @@ describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 1
     assert.ok(on.goes.some((l) => /memórias que você salvou são enviadas/.test(l)));
     assert.ok(on.goes.some((l) => /Trechos dos seus textos de pesquisa .* são enviados/.test(l)));
     assert.ok(on.goes.some((l) => /hora, data, lembretes e notas também vai ao Gemini/.test(l)));
-    assert.deepEqual(on.warnings, []);
+    assert.deepEqual(on.warnings, [FREE_TIER_NOTICE], 'com a nuvem ligada e a chave presente, o único aviso é o do nível gratuito');
   });
 
   it('cada controle desligado troca a frase correspondente (controle positivo da frase oposta acima)', () => {
@@ -168,6 +168,17 @@ describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 1
     assert.ok(!flat(off).includes('últimas'));
   });
 
+  it('divulgação do nível gratuito: aparece sempre que algo vai ao Gemini e NUNCA no modo sem nuvem', () => {
+    for (const env of [{}, { RODRIGO_SEND_HISTORY: '0' }, { RODRIGO_SEND_MEMORIES: '0', RODRIGO_CLOUD_INTENT: '0' }]) {
+      const t = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', ...env }));
+      assert.ok(t.warnings.includes(FREE_TIER_NOTICE), JSON.stringify(env));
+    }
+    assert.match(FREE_TIER_NOTICE, /nível gratuito/);
+    assert.match(FREE_TIER_NOTICE, /revis/);
+    assert.match(FREE_TIER_NOTICE, /ai\.google\.dev\/gemini-api\/terms/);
+    assert.deepEqual(describePrivacy(effectivePrivacy({ RODRIGO_CLOUD: '0' })).warnings, []);
+  });
+
   it('modo sem nuvem: nada vai ao Gemini e a tela diz isso', () => {
     const t = describePrivacy(effectivePrivacy({ RODRIGO_CLOUD: '0' }));
     assert.match(t.headline, /Modo sem nuvem/);
@@ -176,7 +187,7 @@ describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 1
   });
 
   it('sem chave: avisa que a geração não vai funcionar', () => {
-    assert.ok(describePrivacy(base).warnings.length === 0);
+    assert.ok(!describePrivacy(base).warnings.some((w) => /GEMINI_API_KEY/.test(w)));
     assert.ok(describePrivacy(effectivePrivacy({})).warnings.some((w) => /GEMINI_API_KEY/.test(w)));
   });
 

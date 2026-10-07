@@ -209,6 +209,8 @@ rodrigo-ai/
 | Trecho de `docs/research/` (Teologia/Virtologia) | só se ligado; **desligado por padrão** | `RODRIGO_SEND_KNOWLEDGE=1` liga |
 | Texto da fala atual, para entender o pedido (hora, data, lembretes, notas) | falas que parecem esses pedidos | `RODRIGO_CLOUD_INTENT=0` |
 
+**Atenção ao nível da sua chave do Gemini.** Pelos termos da API (ai.google.dev/gemini-api/terms, atualizados em 28/04/2026, conferidos em 07/10/2026), no **nível gratuito** o Google usa o conteúdo enviado para melhorar seus produtos e **pessoas podem revisá-lo**; no **nível pago**, o Google afirma que não usa os prompts nem as respostas para melhorar produtos. Um projeto sem faturamento configurado no Google AI Studio está no nível gratuito. Tudo o que a tabela acima lista como "vai ao Gemini" fica sujeito a isso.
+
 **Modo sem nuvem:** `RODRIGO_CLOUD=0` desliga **toda** chamada ao Gemini (geração e intenção). Hora, data, lembretes e notas continuam funcionando; o que exigir uma resposta gerada recebe, por voz, o aviso de que a geração está desligada. Não há fallback para outro provedor.
 
 **Variáveis só de teste** (não fazem parte do uso normal): `RODRIGO_TEST=1`, `RODRIGO_GEMINI_BASE_URL` (aponta o worker para um Gemini falso em loopback; só vale com `RODRIGO_TEST=1`, só aceita `http://127.0.0.1:<porta>` ou `http://[::1]:<porta>` com porta de 1024 a 65535, usa uma chave sintética e nunca a sua), `RODRIGO_WORKER_NO_MODELS=1` e `RODRIGO_TEST_GEMINI_TIMEOUT_MS`. Fora do modo de teste, `RODRIGO_GEMINI_BASE_URL` é ignorada com um aviso. O worker nunca segue redirecionamentos do Gemini.

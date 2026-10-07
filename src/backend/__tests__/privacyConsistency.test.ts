@@ -45,6 +45,15 @@ describe('Consistência da promessa de privacidade (Fase 12, H12.1)', () => {
     });
   }
 
+  it('a divulgação do nível gratuito do Gemini está presente nos documentos (promessa omitida também é falha)', () => {
+    for (const rel of ['README.md', '.env.example', 'CLAUDE.md']) {
+      const c = fs.readFileSync(path.join(ROOT, rel), 'utf-8');
+      assert.match(c, /n[ií]vel gratuito|free tier|GRATUITO/i, `${rel} deve divulgar o nível gratuito`);
+    }
+    const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf-8');
+    assert.match(readme, /pessoas podem revis/);
+  });
+
   it('o qualificador legítimo libera a linha (e só ela)', () => {
     assert.deepEqual(findViolations('Voz 100% local com geração em nuvem desligada.'), []);
     assert.equal(findViolations('Voz 100% local.\nOutra linha com geração em nuvem desligada.').length, 1);

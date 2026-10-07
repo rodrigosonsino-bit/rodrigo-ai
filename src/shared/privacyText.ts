@@ -16,6 +16,14 @@ export interface PrivacyCardText {
 export const PRIVACY_FOOTNOTE =
   'Isto mostra a configuração em vigor, não uma medição do tráfego. Mude com as variáveis RODRIGO_* no arquivo .env e reinicie.';
 
+/**
+ * Fato verificado em 2026-10-07 nos termos da API (ai.google.dev/gemini-api/terms, atualizados em 2026-04-28): no nível
+ * GRATUITO o Google usa o conteúdo para melhorar produtos e revisores humanos podem lê-lo; no PAGO afirma que não usa.
+ * A tela não sabe o nível do projeto, então diz isso de forma condicional e manda conferir.
+ */
+export const FREE_TIER_NOTICE =
+  'Atenção: no nível gratuito da API do Gemini, o Google pode usar o conteúdo enviado para melhorar seus produtos e pessoas podem revisá-lo; no nível pago, o Google afirma que não usa. Confira o nível do seu projeto no Google AI Studio e os termos em ai.google.dev/gemini-api/terms.';
+
 export const PRIVACY_UNAVAILABLE_TEXT =
   'Não foi possível ler a configuração de privacidade. Assuma que, com a geração em nuvem ligada, o texto das suas falas vai ao Gemini.';
 
@@ -61,6 +69,7 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
       : 'Os seus textos de pesquisa (Teologia e Virtologia) não são enviados ao Gemini.'
   );
 
+  warnings.push(FREE_TIER_NOTICE);
   if (!status.keyPresent) {
     warnings.push('Não há chave do Gemini configurada (GEMINI_API_KEY): as respostas geradas em nuvem não vão funcionar.');
   }
