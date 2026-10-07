@@ -1,8 +1,8 @@
-# Fase 12 — Privacidade condizente com a promessa — v2.1 (rodada 2 incorporada)
+# Fase 12 — Privacidade condizente com a promessa — v2.2 (rodadas 2 e 3 incorporadas)
 
 Versão: v2 (corrige a rodada 1 de auditoria sobre `docs/phase-12-v1.md` v1.1)
 Data: 2026-10-06
-Status: **Rodada 2 feita (Kimi K3 — REJEITADO, 11 achados: 10 aceitos, 1 refutado no código; Hermes falhou por cota). D4 decidida (2026-10-07). Rodada 3 com o agy (usuário escolheu o agy; limitação registrada: o agy também foi auditor da rodada 1 — não é auditor novo, então a rodada 3 é de CONFERÊNCIA do v2.1, não de independência).** Nada implementado.
+Status: **Rodada 3 (agy, `docs/audits/f12/plan-r3-agy.md`) = APROVADO COM RESSALVAS; seus 9 achados (todos de implementação/detalhe) estão incorporados neste v2.2 (§0B). Pronto para implementar. Histórico: rodada 2 feita (Kimi K3 — REJEITADO, 11 achados: 10 aceitos, 1 refutado no código; Hermes falhou por cota). D4 decidida (2026-10-07). Rodada 3 com o agy (usuário escolheu o agy; limitação registrada: o agy também foi auditor da rodada 1 — não é auditor novo, então a rodada 3 é de CONFERÊNCIA do v2.1, não de independência).** Nada implementado.
 Base: `docs/phase-12-v1.md` (levantamento §1, decisões D1–D3 do usuário, critérios). Este arquivo **substitui** o v1 nas seções abaixo; o §1 (levantamento) do v1 continua válido e é acrescido do §1A.
 
 ## 0. Rastreabilidade da rodada 1 (CLI + modelo, capturados em 2026-10-06)
@@ -33,6 +33,22 @@ Registro de uso de material pessoal: **nenhum auditor viu `docs/research/` ou `.
 | 10 | D4 aberta, Hermes sem plano B, "igualdade exata" ambígua | aceito → §3, §5, §2.5 |
 | 11 | modelo de ameaça não declarado | aceito → §7 |
 
+## 0B. Rodada 3 — disposição (agy, 2026-10-07; veredito APROVADO COM RESSALVAS; Jev: achados são de implementação 0,06 de ser de desenho; escolha implementar×nova rodada 0,53/0,47, confiança 0,06 — decisão minha, declarada)
+
+| # | Achado | Disposição |
+|---|---|---|
+| 1 | `ps -o lstart=` em `pt_BR` devolve data não parseável (`NaN`) | **REPRODUZIDO por mim** (2026-10-07: `qua  7 out 10:00:35 2026` → `NaN`; `LC_ALL=C` → válido). Aceito → §2.4 |
+| 2 | `redact()` no stderr do Node vaza chave partida entre chunks | aceito → §2.6 (buffer por linha) |
+| 3 | `HTTPS_PROXY` não é respeitado pelo `fetch` do Node (H12.3 falso-sucesso) | aceito → §4 H12.3 |
+| 4 | `RODRIGO_CLOUD`×`RODRIGO_CLOUD_GENERATION` ambíguo | aceito → §2.1/§2.2 |
+| 5 | `lstart` tem resolução de 1 s | aceito como **limitação residual declarada** → §6 |
+| 6 | EPERM mantém órfão eterno | aceito → §2.4 |
+| 7 | texto fóssil do v1 em §2.4 | aceito → removido |
+| 8 | pasta do próprio processo não é removida no shutdown | aceito → §2.4 |
+| 9 | "validação única" contraditória; "nunca tocar" derrubável | aceito → §2.5/§2.4 |
+
+Também: o agy **reproduziu** o redirecionamento 307 do `httpx` mantendo `x-goog-api-key` para outro host (§1A.7 deixa de ser suposição).
+
 ## 1A. Novos fatos verificados (acrescentam-se ao §1 do v1)
 
 1. **Dois clientes Gemini no worker**: `worker.py:754` (intenção, `_intent_client`) e `worker.py:871` (geração, `_gemini_client`). O v1 falava de "o cliente".
@@ -42,7 +58,7 @@ Registro de uso de material pessoal: **nenhum auditor viu `docs/research/` ou `.
 5. **`AudioStore.cleanupAll()`** faz `rm -rf` de todo `baseDir` e recria vazio (`audioStore.ts:58-61`); `dirFor()` guarda o diretório em cache e **não o recria** (`:19-27`). Uma segunda instância (porta diferente, mesmo `.runtime/tmp`) apagaria sessões vivas e as gravações dela passariam a falhar com `ENOENT`. `EADDRINUSE` (`server.ts:162`) só protege a mesma porta.
 6. **Validação de URL**: reproduzido que a leitura literal do §2.5 do v1 diverge entre Python e Node em 6 de 25 payloads, e que `http://evil.com\@127.0.0.1/` é aceito pelo Python (`hostname` = 127.0.0.1) e lido como `evil.com` pelo Node. Os demais divergentes são formas legítimas de loopback (`0x7f.1`, `2130706433`, `127.1`, IPv6 longo) que o Node normaliza e o Python rejeita.
 8. **Captura e saída de voz são 100% locais ao backend** (conferido em `src/frontend/voice.ts:155-166,260,337`): sem Web Speech API, sem `speechSynthesis`; o áudio vai por `fetch`/`EventSource` ao próprio servidor. O STT é o `mlx-whisper` do worker.
-7. **Redirecionamento** (relatado pelo agy como reproduzido com `google-genai` 2.28.0; **não reproduzido por mim** — marcado SUPOSIÇÃO VEROSSÍMIL): `httpx` segue 307 preservando o header da chave. A mitigação é barata e independe da confirmação.
+7. **Redirecionamento** (**reproduzido pelo agy na rodada 3** com `httpx` 0.28.1: o 307 cross-origin descarta `authorization` mas **mantém `x-goog-api-key`**; eu não o reproduzi — status: REPRODUZIDO por auditor, não por mim): `httpx` segue 307 preservando o header da chave. A mitigação é barata e independe da confirmação.
 
 ## 2. Desenho (substitui §2 do v1)
 
@@ -50,7 +66,7 @@ Registro de uso de material pessoal: **nenhum auditor viu `docs/research/` ou `.
 
 | Variável | Canal | Padrão | Observação |
 |---|---|---|---|
-| `RODRIGO_CLOUD=0` | **mestre**: nenhuma chamada Gemini (geração **e** intenção) | `1` | substitui o `RODRIGO_CLOUD_GENERATION` do v1; `RODRIGO_CLOUD_INTENT` continua existindo e vale só quando o mestre é `1` |
+| `RODRIGO_CLOUD=0` | **mestre**: nenhuma chamada Gemini (geração **e** intenção) | `1` | **`RODRIGO_CLOUD_GENERATION` do v1 está EXTINTO.** `RODRIGO_CLOUD_INTENT` é o único sub-interruptor (vale só com mestre `1`). Não existe modo "geração off + intenção on" (sem caso de uso: sem geração a intenção em nuvem não tem para quem entregar) — declarado, não omitido |
 | `RODRIGO_SEND_HISTORY` | histórico da sessão na geração | `1` | `0` ⇒ só a fala do turno atual vai à geração (sem turnos anteriores). Rótulo na UI: sem histórico a resposta perde continuidade |
 | `RODRIGO_HISTORY_TURNS` | tamanho da janela quando `SEND_HISTORY=1` | valor atual de `maxMessages` | torna o limite visível e ajustável |
 | `RODRIGO_SEND_MEMORIES` (D2) | bloco de memórias armazenadas | `1` | |
@@ -67,7 +83,6 @@ Mesmas guardas Host/Origin da API. Resposta sem segredos, derivada das **mesmas 
 ```ts
 interface PrivacyStatus {
   mode: 'cloud' | 'local-only';           // RODRIGO_CLOUD
-  generation: 'gemini' | 'off';
   intent: 'gemini' | 'local';
   keyPresent: boolean;                    // nunca valor nem tamanho
   sends: { utteranceForIntent: boolean; history: boolean; historyTurns: number | null; memories: boolean; knowledgeSnippet: boolean };
@@ -83,9 +98,12 @@ Teste de consistência (falha se reaparecer): varre `src/frontend/`, `README.md`
 
 ### 2.4 Limpeza de resíduos (substitui §2.4 do v1)
 
-Sem `rm -rf` cego da base. Regras de decisão por subdiretório `<pid>-<startEpochMs>`: (a) `process.kill(pid,0)` lança `ESRCH` ⇒ pid morto ⇒ remove; (b) lança `EPERM` ⇒ pid existe sob **outro usuário** ⇒ tratado como vivo, **não remove** e registra aviso (trade-off declarado); (c) pid vivo ⇒ compara `startEpochMs` do nome com o início real do processo obtido por `ps -o lstart= -p <pid>` (macOS não tem `/proc`), tolerância de 2 s: **divergência ⇒ pid reciclado ⇒ remove** (cobre reciclagem **dentro do mesmo boot**, sem depender do boot do sistema). Detalhamento anterior: Cada processo cria um **subdiretório próprio** `.runtime/tmp/<pid>-<startEpochMs>/` e guarda nele os diretórios de sessão. Na inicialização:
-1. varrer `.runtime/tmp/*`; para cada subdiretório cujo `<pid>` **não existe** (`process.kill(pid, 0)` lança ESRCH) **ou** cujo `startEpochMs` é anterior ao boot do sistema (reutilização de pid após reboot), remover;
-2. nunca tocar em subdiretório de pid vivo com `startEpochMs` coerente.
+Sem `rm -rf` cego da base. Cada processo cria o subdiretório `.runtime/tmp/<pid>-<startEpochMs>/`, onde `startEpochMs = Date.now() - round(process.uptime()*1000)` (**início real do processo**, não a hora em que a pasta é criada), e guarda nele os diretórios de sessão. Regras de decisão por subdiretório, na inicialização:
+1. `process.kill(pid,0)` lança `ESRCH` ⇒ pid morto ⇒ **remove**.
+2. pid existe (sem erro) **ou** `EPERM` ⇒ consulta o início real com `ps -o lstart= -p <pid>` **executado com ambiente `LC_ALL=C LANG=C`** (sem isso o formato varia por idioma: em `pt_BR` sai `qua  7 out …`, que o Node lê como `NaN` — reproduzido em 2026-10-07). Compara com `startEpochMs` do nome (tolerância de 2 s): divergência ⇒ pid reciclado ⇒ **remove**; coerente ⇒ instância viva ⇒ **não toca**. Para `EPERM` o `ps` também funciona sem privilégio, então o mesmo critério se aplica (não há "vivo eterno").
+3. **Se a consulta falhar ou o parse der `NaN`/vazio: nunca remover** (fail-safe), registrar aviso e deixar para a próxima inicialização.
+4. No **shutdown gracioso** (`SIGINT`/`SIGTERM`/`server.close()`) o runtime remove a **própria** pasta `<pid>-<startEpochMs>/` (evita acumular pastas vazias).
+Limitação residual declarada (§6): `lstart` tem resolução de 1 s; um pid reciclado no mesmo segundo é visto como o mesmo processo e fica para a próxima limpeza.
 `dirFor()` passa a recriar o diretório se faltar (`mkdirSync recursive`) em vez de confiar no cache.
 O `.aiff` do `say` passa a ser gravado como `${outputPath}.aiff`, **no mesmo diretório da sessão** (já recebe `outputPath`), limpo por `cleanupSession()` — **a varredura de `os.tmpdir()` é descartada** (achado 6 do agy).
 Teste: (a) órfão de pid morto some; (b) diretório de instância viva (processo-filho real mantido vivo pelo teste) permanece; (c) kill -9 no meio de um turno e reinício deixam zero `.wav`/`.aiff`.
@@ -94,13 +112,15 @@ Teste: (a) órfão de pid morto some; (b) diretório de instância viva (process
 
 Variável de teste `RODRIGO_GEMINI_BASE_URL`. Regras:
 1. **Só vale em modo de teste explícito** (`RODRIGO_TEST=1`). Fora dele é ignorada e um aviso é logado.
-2. **Validação única, no Node, antes de spawnar o worker.** Aceita apenas ("igual" abaixo = `fullmatch` do regex, inequívoco) o regex `^http://(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})$`, **aplicado com correspondência total** (`re.fullmatch` em Python, `RegExp.test` em JS — nunca `re.match`+`$`) e **somente dígitos ASCII** (`[0-9]`, nunca `\d`), mais checagem numérica da porta `1024..65535` (sem caminho, sem userinfo, sem barra invertida, sem `localhost`, sem formas hex/decimal/octal, sem zero à esquerda). **Reproduzido em 2026-10-07** (`docs/audits/f12/loopback-regex-battery.py/.mjs`): o regex original `\d{1,5}$` aceitava `\n` final no `re.match` do Python, dígitos Unicode `９０００` no Python (e não no Node — divergência), porta `0`, `99999` e `09000`. O Node passa ao worker **a string já validada**; o worker só a aceita se for **igual por igualdade exata** ao regex acima (segunda checagem independente, não segundo parser).
+2. **Validação dupla com fonte única da regra**: o Node valida antes de spawnar o worker e o worker revalida (mesma regra, fullmatch, sem parser diferente). Aceita apenas ("igual" abaixo = `fullmatch` do regex, inequívoco) o regex `^http://(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})$`, **aplicado com correspondência total** (`re.fullmatch` em Python, `RegExp.test` em JS — nunca `re.match`+`$`) e **somente dígitos ASCII** (`[0-9]`, nunca `\d`), mais checagem numérica da porta `1024..65535` (sem caminho, sem userinfo, sem barra invertida, sem `localhost`, sem formas hex/decimal/octal, sem zero à esquerda). **Reproduzido em 2026-10-07** (`docs/audits/f12/loopback-regex-battery.py/.mjs`): o regex original `\d{1,5}$` aceitava `\n` final no `re.match` do Python, dígitos Unicode `９０００` no Python (e não no Node — divergência), porta `0`, `99999` e `09000`. O Node passa ao worker **a string já validada**; o worker só a aceita se for **igual por igualdade exata** ao regex acima (segunda checagem independente, não segundo parser).
 3. **Em modo de teste o worker usa chave sintética** (`test-dummy-key`) e **recusa** usar `GEMINI_API_KEY` real. Assim, nos **dois clientes enumerados** (`_intent_client`, `_gemini_client`) a chave real não viaja para o host falso; qualquer terceiro caminho que crie cliente Gemini (diagnóstico, script de rotação do §2.7) **não pode** ler `RODRIGO_GEMINI_BASE_URL` — verificado por busca no repositório por `genai.Client` na implementação.
 4. **Redirecionamentos desligados** nos dois clientes (`httpx.Client(follow_redirects=False)` repassado a `HttpOptions`), também fora do modo de teste (hardening de produção).
 5. **Os dois clientes** (`_intent_client` e `_gemini_client`) recebem a mesma `base_url`. O Gemini falso responde aos **dois contratos**: SSE de `streamGenerateContent` (geração) e JSON com o schema fechado da intenção (`generateContent`).
 Teste de mutação: cada payload da bateria (25 do §1A.6 + redirect 307 do servidor falso) deve ser rejeitado/ignorado; remover a regra 3 ou a 4 deve derrubar pelo menos um teste.
 
 ### 2.6 Logs e erros
+
+**Buffer por linha obrigatório antes do `redact()` no Node:** `mlxWorkerEngine.ts:143` deve acumular o stderr por linha (`readline` sobre `child.stderr` ou acumulador com quebra por `\n`; linha sem `\n` é emitida só ao fechar o stream ou ao passar de 8 KB, e **sempre** passa por `redact()` já completa). Sem isso uma chave partida entre dois `data` vaza em duas fatias (reproduzido pelo agy). Teste: injetar a chave sintética partida em todos os pontos de corte possíveis e exigir mascaramento.
 
 Função única `redact()` (implementada no worker **e** reaplicada no Node sobre todo stderr do worker repassado em `mlxWorkerEngine.ts:143` e sobre qualquer `console.error` que formate exceção de rede) aplicada a toda mensagem de exceção antes de `log_diag`/`unavailable`: mascara, **sobre a string completa e antes de qualquer truncamento**, `AIza[0-9A-Za-z_-]{8,}` (inclui fragmentos de chave), formas URL-encoded e com quebra de linha, `?key=...`, o valor atual de `GEMINI_API_KEY` (se definido) e o valor da chave antiga informado ao script de rotação e remove corpo bruto de requisição/resposta (trunca a 160 caracteres). Testes com **caminhos de erro forçados** no Gemini falso: 4xx, 5xx, timeout, redirect — afirma que stdout/stderr do servidor e do worker não contêm a chave sintética nem os marcadores. Controle positivo: um teste que injeta propositalmente a chave sintética numa exceção e verifica que `redact()` a mascara.
 
@@ -116,7 +136,7 @@ D1 `SEND_KNOWLEDGE` padrão `0`; D2 `SEND_MEMORIES` controle global; D3 sem fall
 
 - **H12.1** Nenhuma tela/doc afirma ausência de nuvem/custo/chave/terceiros com geração ligada; modo efetivo visível antes da conversa; teste de consistência (§2.3) com controle positivo.
 - **H12.2** 100 turnos (inclui cenários em que uma nota/memória sintética foi **ditada e confirmada num turno anterior**): zero `.wav`/áudio; com `SEND_MEMORIES=0` o bloco de memórias armazenadas ausente; com `SEND_KNOWLEDGE=0` nenhum trecho; com `SEND_HISTORY=0` nenhuma fala anterior; com tudo ligado, o payload capturado é comparado a um **gabarito escrito à mão por cenário** (independente de `effectivePrivacy`, que seria circular); `/api/privacy` é conferida **contra o mesmo gabarito**, não contra o código que a gera. **O conceito "só local" foi removido** (não existe antes da F14).
-- **H12.3** 50 tarefas locais com a rede bloqueada **e `RODRIGO_CLOUD=0`** (mestre): funcionam sem timeout de intenção; fala que exige geração diz "geração desligada"; zero **tentativas** de conexão a outros hosts, medido por um **proxy de rede em loopback** (`HTTPS_PROXY`/`HTTP_PROXY` do servidor e do worker apontados para um registrador que recusa e conta as tentativas; bloquear a rede sem registrar mascara as tentativas). Escopo declarado: processos do servidor Node e do worker Python. Parte de voz: só o usuário mede.
+- **H12.3** 50 tarefas locais com a rede bloqueada **e `RODRIGO_CLOUD=0`** (mestre): funcionam sem timeout de intenção; fala que exige geração diz "geração desligada"; zero **tentativas** de conexão a outros hosts, medido assim: (i) **worker Python** — `HTTPS_PROXY`/`HTTP_PROXY` para um registrador em loopback que recusa e conta tentativas; (ii) **servidor Node** — o `fetch` nativo (undici) **ignora** essas variáveis (reproduzido pelo agy), então o teste instala um `setGlobalDispatcher` do undici (e/ou monkeypatch de `globalThis.fetch`) que registra/recusa qualquer destino fora de loopback. Bloquear a rede sem registrar mascara as tentativas. Escopo declarado: processos do servidor Node e do worker Python. Parte de voz: só o usuário mede.
 - **H12.4** `cleanupSession` limpa a sessão; após kill -9, reinício deixa zero órfãos; instância viva intacta (§2.4); logs sem marcador/chave inclusive em caminhos de erro (§2.6).
 - **H12.5** Chave nova em uso; chave antiga recusada pela API (§2.7), sem persistir nenhuma das duas.
 
@@ -137,7 +157,9 @@ D1 `SEND_KNOWLEDGE` padrão `0`; D2 `SEND_MEMORIES` controle global; D3 sem fall
 | Desligar trecho (D1) degrada Teologia/Virtologia | medir com perguntas fixas antes/depois |
 | `redact()` incompleto | controle positivo + teste com chave sintética em erros forçados |
 | `process.kill(pid,0)` falso positivo por pid reciclado | combinado com `startEpochMs` vs boot do sistema |
-| Redirect confirmado só por relato do agy | mitigação aplicada de qualquer forma; testar no Gemini falso |
+| Redirect (reproduzido pelo agy, não por mim) | `follow_redirects=False` + chave sintética em teste; testar com 307 no Gemini falso |
+| `lstart` com resolução de 1 s: pid reciclado no mesmo segundo | limitação residual aceita (desktop); o órfão é removido numa limpeza posterior |
+| Locale do usuário muda o formato do `ps` | `LC_ALL=C` + fail-safe `NaN ⇒ não remove` + teste com `LC_ALL=pt_BR.UTF-8` |
 
 ## 7. Modelo de ameaça
 
