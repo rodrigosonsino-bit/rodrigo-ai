@@ -85,8 +85,8 @@
         <section class="card info-card" aria-labelledby="features-title">
           <h2 id="features-title">Funcionalidades do Rodrigo AI</h2>
           <p class="info-intro">
-            A Fase 1 entrega o núcleo inicial do aplicativo em execução direta no seu computador.
-            As capacidades avançadas de voz, conversação e automação serão integradas nas próximas fases.
+            O que o app já faz hoje. Próximos passos: conversa mais rápida e natural, consultar notas e lembretes por voz,
+            e enxergar a tela quando você pedir.
           </p>
 
           <div class="modules-grid">
@@ -103,25 +103,31 @@
                 <h3>2. Comunicação por Voz</h3>
                 <span class="badge badge-active">Ativo</span>
               </header>
-              <p>Conversa por voz em PT-BR — captura, transcrição e síntese de voz acontecem neste
-                computador; a geração da resposta usa a API do Gemini, em nuvem (e, para pedidos de hora, data, lembretes e
-                notas, a classificação da intenção também) — veja o cartão "Privacidade desta conversa" acima.</p>
+              <p>Conversa por voz em PT-BR — a captura do microfone e a transcrição acontecem neste computador; a resposta
+                é gerada pelo Gemini, em nuvem, e por padrão a voz também é sintetizada pelo Gemini (com a voz do sistema,
+                local, quando a cota do dia acaba ou o canal está desligado). Para pedidos de hora, data, lembretes e notas, a
+                classificação da intenção também usa o Gemini — veja o cartão "Privacidade desta conversa" acima.</p>
             </article>
 
             <article class="module-item active">
               <header class="module-header">
                 <h3>3. Orquestrador</h3>
-                <span class="badge badge-active">Ativo (classificação, sem especialistas ainda)</span>
+                <span class="badge badge-active">Ativo</span>
               </header>
-              <p>Cada pergunta é classificada (Geral/Teologia/Virtologia/Ambíguo) e a decisão é mostrada na conversa — mas os especialistas de verdade ainda não existem (Fase 4); toda categoria continua respondida pelo agente geral.</p>
+              <p>Cada pergunta é classificada (Geral/Teologia/Virtologia/Ambíguo) e encaminhada ao especialista: Geral,
+                Teologia ou Virtologia, cada um com instruções próprias. A decisão aparece na conversa. Ambíguo é respondido
+                pelo Geral.</p>
             </article>
 
-            <article class="module-item inactive">
+            <article class="module-item active">
               <header class="module-header">
                 <h3>4. Ferramentas e Ações</h3>
-                <span class="badge badge-inactive">Indisponível nesta fase</span>
+                <span class="badge badge-active">Ativo</span>
               </header>
-              <p>A integração de ferramentas do sistema e automações será habilitada futuramente.</p>
+              <p>Hora e data. Lembretes (criar, editar, apagar, repetir; aviso no Mac na hora marcada), notas (criar,
+                editar, apagar) e memórias que valem entre conversas (guardar, editar, esquecer). Toda ação que altera algo
+                só acontece depois de o app ler a pergunta em voz alta e você responder "sim". Ainda não dá para consultar
+                notas e lembretes por voz.</p>
             </article>
           </div>
         </section>
@@ -133,7 +139,7 @@
             As respostas geradas usam a API do Gemini com a sua chave (GEMINI_API_KEY) e podem consumir a cota ou gerar cobrança no Google, conforme o seu plano.
           </p>
           <p class="cost-note">
-            Áudio, transcrição, notas, lembretes e voz sintética funcionam neste computador, gastando processamento e energia da sua máquina. A instalação inicial (npm) e o download único dos modelos de voz (via "npm run setup:voice") precisam de internet. Sem internet, só as ferramentas locais respondem; a geração de respostas depende da nuvem.
+            Áudio, transcrição, notas, lembretes e memórias funcionam neste computador, gastando processamento e energia da sua máquina. A voz sintética usa o Gemini por padrão, dentro de uma cota diária; esgotada ou desligada, entra a voz do sistema, local. A instalação inicial (npm) e o download único dos modelos de voz (via "npm run setup:voice") precisam de internet. Sem internet, só as ferramentas locais respondem; a geração de respostas depende da nuvem.
           </p>
         </section>
       </main>

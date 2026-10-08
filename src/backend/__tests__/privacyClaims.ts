@@ -12,7 +12,13 @@ export const FORBIDDEN: ReadonlyArray<{ name: string; re: RegExp; sample: string
   { name: 'chave de acesso', re: /chave\s+de\s+acesso/i, sample: 'nenhuma chave de acesso é usada' },
   { name: 'servidores externos', re: /servidores\s+externos/i, sample: 'sem chamada a servidores externos' },
   { name: 'never go out', re: /never\s+go\s+out/i, sample: 'data never go out.' },
-  { name: 'zero external', re: /zero\s+external/i, sample: 'zero external deps.' }
+  { name: 'zero external', re: /zero\s+external/i, sample: 'zero external deps.' },
+  // F13a: a voz é sintetizada pelo Gemini por padrão — o painel ainda afirmava o contrário (achado em 2026-10-08)
+  {
+    name: 'síntese de voz local',
+    re: /s[ií]ntese\s+de\s+voz\s+acontece[m]?\s+neste|voz\s+sint[eé]tica\s+funciona[m]?\s+neste/i,
+    sample: 'captura, transcrição e síntese de voz acontecem neste computador'
+  }
 ];
 
 export interface Violation {
