@@ -20,6 +20,37 @@ export interface PrivacyConfig {
   readonly sendMemories: boolean;
   /** RODRIGO_SEND_KNOWLEDGE — trecho de docs/research/ no prompt (decisão D1: padrão 0). */
   readonly sendKnowledge: boolean;
+  /** Fase 13a — RODRIGO_CLOUD_TTS: o texto de cada frase falada vai ao Gemini para virar voz. Só vale com o mestre ligado. */
+  readonly cloudTts: boolean;
+  /** Fase 13a, decisão D-b — RODRIGO_TTS_DICTATED: confirmações que repetem conteúdo ditado (prévia de nota/lembrete/memória) também vão à voz em nuvem. */
+  readonly ttsDictated: boolean;
+}
+
+/** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
+export const TTS_DEFAULT_MODEL = 'gemini-3.8-flash-lite-tts';
+export const TTS_DEFAULT_VOICE = 'Charon';
+
+/**
+ * Fase 13a (v3 §3): o TTS em nuvem só fica EFETIVAMENTE ligado com o mestre ligado, o canal ligado E o histórico enviado
+ * (RODRIGO_SEND_HISTORY=1). Regra conservadora: quem desligou o histórico declarou que fala do assistente não sai da
+ * máquina; na dúvida, voz local. O cartão mostra o motivo.
+ */
+export function ttsCloudEffective(cfg: PrivacyConfig): boolean {
+  return cfg.cloud && cfg.cloudTts && cfg.sendHistory;
+}
+
+export type TtsOffReason = 'master-off' | 'channel-off' | 'history-off';
+
+export function ttsOffReason(cfg: PrivacyConfig): TtsOffReason | null {
+  if (!cfg.cloud) return 'master-off';
+  if (!cfg.cloudTts) return 'channel-off';
+  if (!cfg.sendHistory) return 'history-off';
+  return null;
+}
+
+/** D-b: conteúdo ditado vai à voz em nuvem só com o TTS efetivo, a flag ligada e memórias na nuvem permitidas. */
+export function ttsDictatedViaCloud(cfg: PrivacyConfig): boolean {
+  return ttsCloudEffective(cfg) && cfg.ttsDictated && cfg.sendMemories;
 }
 
 export const GENERATION_DISABLED_TEXT =
@@ -57,7 +88,9 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     sendHistory: parseFlag(env, 'RODRIGO_SEND_HISTORY', true),
     historyTurns: parseTurns(env, 'RODRIGO_HISTORY_TURNS', VOICE_LIMITS.MAX_CONTEXT_TURNS),
     sendMemories: parseFlag(env, 'RODRIGO_SEND_MEMORIES', true),
-    sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false)
+    sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false),
+    cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),
+    ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true)
   };
 }
 
@@ -68,7 +101,8 @@ export const DEFAULT_PRIVACY: PrivacyConfig = parsePrivacyConfig({});
 export function workerPrivacyEnv(cfg: PrivacyConfig): Record<string, string> {
   return {
     RODRIGO_CLOUD: cfg.cloud ? '1' : '0',
-    RODRIGO_CLOUD_INTENT: cfg.cloud && cfg.cloudIntent ? '1' : '0'
+    RODRIGO_CLOUD_INTENT: cfg.cloud && cfg.cloudIntent ? '1' : '0',
+    RODRIGO_CLOUD_TTS: ttsCloudEffective(cfg) ? '1' : '0'
   };
 }
 
@@ -80,6 +114,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
   const cfg = parsePrivacyConfig(env);
   const key = env['GEMINI_API_KEY'];
   const intentOn = cfg.cloud && cfg.cloudIntent;
+  const ttsOn = ttsCloudEffective(cfg);
   return {
     mode: cfg.cloud ? 'cloud' : 'local-only',
     intent: intentOn ? 'gemini' : 'local',
@@ -89,12 +124,15 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       history: cfg.cloud && cfg.sendHistory,
       historyTurns: cfg.cloud && cfg.sendHistory ? cfg.historyTurns : null,
       memories: cfg.cloud && cfg.sendMemories,
-      knowledgeSnippet: cfg.cloud && cfg.sendKnowledge
+      knowledgeSnippet: cfg.cloud && cfg.sendKnowledge,
+      ttsText: ttsOn
     },
     models: {
       generation: cfg.cloud ? 'gemini-flash-latest' : null,
-      intent: intentOn ? (env['RODRIGO_CLOUD_INTENT_MODEL'] || 'gemini-3.5-flash-lite') : null
+      intent: intentOn ? (env['RODRIGO_CLOUD_INTENT_MODEL'] || 'gemini-3.5-flash-lite') : null,
+      tts: ttsOn ? (env['RODRIGO_TTS_MODEL'] || TTS_DEFAULT_MODEL) : null
     },
+    tts: { cloud: ttsOn, reason: ttsOffReason(cfg), dictatedViaCloud: ttsDictatedViaCloud(cfg) },
     neverSends: ['audio']
   };
 }

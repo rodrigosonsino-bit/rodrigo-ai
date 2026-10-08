@@ -1,5 +1,6 @@
 import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
-import type { GenerateCallbacks, VoiceEngine } from './engine.js';
+import fs from 'node:fs';
+import type { GenerateCallbacks, SynthesizeRequest, SynthesizeResult, VoiceEngine } from './engine.js';
 
 interface ClassifyGate {
   resolve: () => void;
@@ -62,6 +63,33 @@ export class FakeVoiceEngine implements VoiceEngine {
   public confirmationToReturn: 'SIM' | 'NAO' = 'NAO';
   public detectConfirmationSettleDelayMs = 0;
   private detectConfirmationGates = new Map<string, DetectConfirmationGate>();
+
+  /** Fase 13a: pedidos de síntese em nuvem recebidos. */
+  public synthCalls: SynthesizeRequest[] = [];
+  /** Comportamento da síntese fake; padrão: grava um WAV mínimo em outPath e devolve ok. */
+  public synthBehavior: ((req: SynthesizeRequest, signal?: AbortSignal) => Promise<SynthesizeResult>) | null = null;
+
+  async synthesize(request: SynthesizeRequest, signal?: AbortSignal): Promise<SynthesizeResult> {
+    this.synthCalls.push(request);
+    if (this.synthBehavior) return this.synthBehavior(request, signal);
+    if (signal?.aborted) return { ok: false, kind: 'cancelled' };
+    const data = Buffer.alloc(4800); // 0,1 s de silêncio a 24 kHz
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0, 'ascii');
+    header.writeUInt32LE(36 + data.length, 4);
+    header.write('WAVEfmt ', 8, 'ascii');
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(1, 22);
+    header.writeUInt32LE(24000, 24);
+    header.writeUInt32LE(48000, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write('data', 36, 'ascii');
+    header.writeUInt32LE(data.length, 40);
+    await fs.promises.writeFile(request.outPath, Buffer.concat([header, data]));
+    return { ok: true, seconds: 0.1, tokensIn: 5, tokensOut: 3 };
+  }
 
   isReadySync(): boolean {
     return true;

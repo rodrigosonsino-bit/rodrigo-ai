@@ -448,6 +448,16 @@ def resolve_gemini_endpoint(env: Any) -> tuple:
 # ATENÇÃO: o prazo HTTP vai ao Google como "deadline" e o MÍNIMO ACEITO É 10 s — abaixo disso a API responde 400
 # INVALID_ARGUMENT ("Manually set deadline 8s is too short") e a geração inteira para de funcionar. Nunca < 10_000.
 GENERATION_MODELS = (("gemini-flash-latest", 10_000), ("gemini-3.5-flash-lite", 20_000))
+# Medido em 2026-10-08: o `gemini-flash-latest` passou a "pensar" por padrão e o raciocínio conta no max_output_tokens: de 160
+# tokens, 150 iam ao pensamento e a resposta falada saía CORTADA no meio ("A capital da França é Paris" -> finish MAX_TOKENS,
+# "Dizer que a graça é mere"). thinking_budget=0 devolve a resposta inteira (finish STOP). O modelo reserva `gemini-3.5-flash-lite`
+# REJEITA esse parâmetro (HTTP 400) e já responde inteiro, então só os modelos listados aqui recebem o ajuste.
+GENERATION_NO_THINKING = frozenset({"gemini-flash-latest"})
+# thinking_budget=0 NÃO é confiável: com o prompt real do app (1017 caracteres, que inclui a salvaguarda de crise) o modelo ainda gastou
+# 130 a 149 tokens pensando (medido 2026-10-08, 3 de 4 chamadas; level=LOW também). O raciocínio conta no limite de saída, então o teto
+# precisa caber raciocínio (~150) + resposta. Medido com teto 700: respostas de 24 a 189 tokens, todas finish=STOP. 512 cobre os dois
+# com folga e ainda limita a fala (~1 min no pior caso). A classificação de intenção em nuvem (JSON curto, modelo sem raciocínio) segue com 160.
+GEMINI_MAX_OUTPUT_TOKENS = 512
 
 
 def should_fallback(exc: BaseException) -> bool:
@@ -485,6 +495,172 @@ def emit(event: dict[str, Any]) -> None:
     """Único ponto de escrita em stdout — protocolo NDJSON."""
     sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
     sys.stdout.flush()
+
+
+# --- Fase 13a (docs/phase-13a-v3.md §4.2): TTS Gemini. `synthesize` NÃO passa por work_loop/work_queue (a geração ocupa
+# o laço único e a fila de tamanho 1 descartaria o pedido): roda num pool próprio de 2 threads daemon, com cancelamento
+# por pedido (reqId), prazo local por pedido e WAV gravado de forma atômica. Só o TEXTO da frase vai ao Google.
+TTS_DEFAULT_MODEL = "gemini-3.8-flash-lite-tts"
+TTS_DEFAULT_VOICE = "Charon"
+TTS_HTTP_TIMEOUT_MS = 12_000  # nunca < 10_000 (piso do Google, ver GENERATION_MODELS) — o prazo menor é LOCAL
+TTS_POOL_WORKERS = 2
+TTS_TARGET_RMS_DBFS = -17.0   # média medida do `say` Felipe (-17,0 a -17,5)
+TTS_SILENCE_GATE_DBFS = -50.0  # só amostras acima disto entram na medida de RMS
+TTS_MAX_GAIN_DB = 9.0
+TTS_PEAK_LIMIT_DBFS = -1.0
+TTS_MIN_ACTIVE_SAMPLES = 240   # < 10 ms de fala ativa a 24 kHz: sem medida confiável, não mexe no ganho
+
+
+def _rms_dbfs_gated(samples: Any) -> Optional[float]:
+    """RMS em dBFS só sobre amostras acima do gate de silêncio (float em [-1, 1]). None se não há fala suficiente."""
+    import numpy as np
+
+    gate = 10.0 ** (TTS_SILENCE_GATE_DBFS / 20.0)
+    active = samples[np.abs(samples) > gate]
+    if active.size < TTS_MIN_ACTIVE_SAMPLES:
+        return None
+    return float(20.0 * np.log10(np.sqrt(np.mean(active * active)) + 1e-12))
+
+
+def normalize_pcm16(pcm: bytes) -> tuple:
+    """Ordem do plano: ganho -> limitador de pico -> (verificação de RMS). Devolve (pcm16 normalizado, estatísticas).
+    O limitador é uma ESCALA da frase inteira (sem corte/distorção). `saturated` = o ganho pedido passou do teto ±9 dB."""
+    import numpy as np
+
+    samples = np.frombuffer(pcm, dtype="<i2").astype(np.float64) / 32768.0
+    stats: dict = {"gainDb": 0.0, "saturated": False, "limited": False, "rmsInDb": None, "rmsOutDb": None}
+    rms_in = _rms_dbfs_gated(samples)
+    if rms_in is None:
+        return pcm, stats
+    wanted = TTS_TARGET_RMS_DBFS - rms_in
+    gain_db = max(-TTS_MAX_GAIN_DB, min(TTS_MAX_GAIN_DB, wanted))
+    out = samples * (10.0 ** (gain_db / 20.0))
+    peak = float(np.max(np.abs(out))) if out.size else 0.0
+    limit = 10.0 ** (TTS_PEAK_LIMIT_DBFS / 20.0)
+    if peak > limit:
+        out = out * (limit / peak)
+        stats["limited"] = True
+    rms_out = _rms_dbfs_gated(out)
+    stats.update(gainDb=round(gain_db, 2), saturated=abs(wanted) > TTS_MAX_GAIN_DB, rmsInDb=round(rms_in, 2),
+                 rmsOutDb=None if rms_out is None else round(rms_out, 2))
+    return (np.clip(np.round(out * 32768.0), -32768, 32767).astype("<i2")).tobytes(), stats
+
+
+def write_wav_atomic(path: str, pcm: bytes, sample_rate: int) -> None:
+    """WAV PCM 16 bits mono via `wave`, em `<path>.part` (mesmo diretório da sessão, varrido pela limpeza da Fase 12) e
+    os.replace ao fim; qualquer erro apaga o .part (nunca deixa arquivo parcial com o nome final)."""
+    import wave
+
+    part = path + ".part"
+    try:
+        with open(part, "wb") as f:  # open() primeiro: falha limpa (OSError) em vez de um Wave_write meio construído
+            with wave.open(f, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sample_rate)
+                w.writeframes(pcm)
+        os.replace(part, path)
+    except BaseException:
+        try:
+            os.unlink(part)
+        except OSError:
+            pass
+        raise
+
+
+_RETRY_DELAY_RE = re.compile(r"retry in ([0-9]+(?:\.[0-9]+)?)s", re.IGNORECASE)
+_QUOTA_ID_RE = re.compile(r"quotaId['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9_]+)")
+
+
+def _parse_duration_s(raw: Any) -> Optional[float]:
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        m = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)s", raw.strip())
+        if m:
+            return float(m.group(1))
+    return None
+
+
+def classify_tts_error(exc: BaseException) -> dict:
+    """Erro do Google -> {kind, status, scope?, retryAfterMs?, quotaId?}. NUNCA inclui o corpo bruto (só campos
+    estruturados). 429: `quotaId` com 'PerDay' => scope 'day'; 'PerMinute' => 'minute'; ausente/desconhecido => 'unknown'
+    (o Node aplica backoff exponencial). `retryDelay` do corpo é repassado (o maior vale no Node)."""
+    names = {c.__name__ for c in type(exc).__mro__}
+    code = getattr(exc, "code", None)
+    if "ServerError" in names:
+        return {"kind": "server", "status": code}
+    if "ClientError" in names:
+        if code == 429:
+            quota_id: Optional[str] = None
+            retry_s: Optional[float] = None
+            details = getattr(exc, "details", None)
+            items: list = []
+            if isinstance(details, dict):
+                inner = details.get("error", details)
+                if isinstance(inner, dict) and isinstance(inner.get("details"), list):
+                    items = inner["details"]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                kind_t = str(item.get("@type", ""))
+                if kind_t.endswith("QuotaFailure"):
+                    for v in item.get("violations", []) or []:
+                        if isinstance(v, dict) and v.get("quotaId"):
+                            quota_id = str(v["quotaId"])
+                            break
+                elif kind_t.endswith("RetryInfo"):
+                    retry_s = _parse_duration_s(item.get("retryDelay"))
+            text = str(exc)
+            if quota_id is None:
+                m = _QUOTA_ID_RE.search(text)
+                if m:
+                    quota_id = m.group(1)
+            if retry_s is None:
+                m = _RETRY_DELAY_RE.search(text)
+                if m:
+                    retry_s = float(m.group(1))
+            scope = "unknown"
+            if quota_id:
+                if "perday" in quota_id.lower():
+                    scope = "day"
+                elif "perminute" in quota_id.lower():
+                    scope = "minute"
+            out: dict = {"kind": "rate_limited", "status": 429, "scope": scope}
+            if quota_id:
+                out["quotaId"] = quota_id[:120]
+            if retry_s is not None:
+                out["retryAfterMs"] = int(retry_s * 1000)
+            return out
+        if code == 404:
+            return {"kind": "not_found", "status": 404}
+        return {"kind": "client_error", "status": code}
+    if names & {"TimeoutException", "ReadTimeout", "ConnectTimeout"}:
+        return {"kind": "timeout"}
+    if names & {"TransportError", "ConnectError", "RemoteProtocolError", "ReadError"}:
+        return {"kind": "transport"}
+    return {"kind": "error"}
+
+
+class SynthPool:
+    """Pool mínimo de threads DAEMON (ThreadPoolExecutor usa threads não-daemon). Fila ilimitada, N workers fixos.
+    O worker encerra com os._exit(0) quando o stdin fecha, então nada aqui segura o processo."""
+
+    def __init__(self, workers: int) -> None:
+        self._q: "queue.Queue[tuple]" = queue.Queue()
+        for i in range(workers):
+            threading.Thread(target=self._loop, name=f"synth-{i}", daemon=True).start()
+
+    def submit(self, fn: Any, *args: Any) -> None:
+        self._q.put((fn, args))
+
+    def _loop(self) -> None:
+        while True:
+            fn, args = self._q.get()
+            try:
+                fn(*args)
+            except BaseException as exc:  # noqa: BLE001 — a thread nunca morre; o chamador já emite o resultado
+                log_diag(f"Erro não tratado numa síntese: {safe_exc(exc)}")
 
 
 # --- Segmentador de frases PT-BR (Achado v2-3: não fragmentar decimais/abreviações) ---
@@ -599,6 +775,10 @@ class Worker:
         self.work_queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=1)
         self._current: Optional[GenerationHandle] = None
         self._current_lock = threading.Lock()
+        # Fase 13a: sínteses de TTS em curso, por reqId (cancelamento próprio, distinto de `_current` — a geração).
+        self._syntheses: dict[str, dict[str, Any]] = {}
+        self._synth_lock = threading.Lock()
+        self._synth_pool = SynthPool(TTS_POOL_WORKERS)
         self._llm = None
         self._llm_tokenizer = None
         self._stt = None
@@ -645,7 +825,20 @@ class Worker:
             current = self._current
             if current is not None and current.turn_id == turn_id:
                 current.cancel_event.set()
+        with self._synth_lock:
+            for entry in self._syntheses.values():
+                if entry["turn_id"] == turn_id:
+                    entry["cancel"].set()
         emit({"event": "cancelled", "turnId": turn_id})
+
+    def handle_cancel_synth(self, msg: dict[str, Any]) -> None:
+        """Idempotente: reqId já terminado ou desconhecido é no-op com ack (o Node ignora o evento 'cancelled')."""
+        req_id = msg.get("reqId")
+        with self._synth_lock:
+            entry = self._syntheses.get(req_id)
+        if entry is not None:
+            entry["cancel"].set()
+        emit({"event": "cancelled", "reqId": req_id})
 
     def handle_transcribe(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
@@ -970,6 +1163,113 @@ class Worker:
             clients[timeout_ms] = build_gemini_client(genai, timeout_ms)
         return clients[timeout_ms]
 
+    # --- Fase 13a: TTS Gemini (pool próprio; ver o bloco de constantes acima) ---
+
+    def handle_synthesize(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        entry: dict[str, Any] = {"cancel": threading.Event(), "turn_id": msg.get("turnId")}
+        with self._synth_lock:
+            self._syntheses[req_id] = entry
+        try:
+            result = self._synthesize(msg, entry)
+        except BaseException as exc:  # noqa: BLE001
+            log_diag(f"Síntese falhou: {safe_exc(exc)}")
+            result = {"ok": False, **classify_tts_error(exc)}
+        finally:
+            with self._synth_lock:
+                self._syntheses.pop(req_id, None)
+        emit({"event": "synth_result", "reqId": req_id, **result})
+
+    def _synthesize(self, msg: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+        if os.environ.get("RODRIGO_CLOUD", "1") == "0" or os.environ.get("RODRIGO_CLOUD_TTS", "1") == "0":
+            return {"ok": False, "kind": "disabled"}  # defesa em profundidade: o mestre e o canal de TTS valem aqui também
+        if not os.environ.get("GEMINI_API_KEY"):
+            return {"ok": False, "kind": "client_error", "status": 401, "reason": "no_key"}
+        text = msg.get("text")
+        out_path = msg.get("outPath")
+        if not isinstance(text, str) or not text.strip() or not isinstance(out_path, str) or not os.path.isabs(out_path):
+            return {"ok": False, "kind": "client_error", "status": 400, "reason": "bad_request"}
+        model = msg.get("model") or TTS_DEFAULT_MODEL
+        voice = msg.get("voice") or TTS_DEFAULT_VOICE
+        deadline_s = max(1.0, min(30.0, float(msg.get("deadlineMs", 12_000)) / 1000.0))
+
+        # A chamada de rede roda numa thread interna (daemon): não dá para interromper uma leitura bloqueada, então o
+        # prazo LOCAL é imposto aqui (espera com prazo) e o HTTP tem o seu próprio teto (TTS_HTTP_TIMEOUT_MS >= 10 s).
+        box: "queue.Queue[tuple]" = queue.Queue(1)
+
+        def call() -> None:
+            try:
+                box.put(("ok", self._tts_call(model, voice, text, entry)))
+            except BaseException as exc:  # noqa: BLE001
+                box.put(("err", exc))
+
+        threading.Thread(target=call, name="synth-call", daemon=True).start()
+        end = time.monotonic() + deadline_s
+        while True:
+            if entry["cancel"].is_set():
+                return {"ok": False, "kind": "cancelled"}
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                entry["cancel"].set()  # a thread interna para no próximo trecho; o resultado dela é descartado
+                return {"ok": False, "kind": "timeout", "local": True}
+            try:
+                kind, payload = box.get(timeout=min(0.1, remaining))
+                break
+            except queue.Empty:
+                continue
+        if entry["cancel"].is_set():
+            return {"ok": False, "kind": "cancelled"}
+        if kind == "err":
+            return {"ok": False, **classify_tts_error(payload)}
+        pcm, rate, tokens = payload
+        if not pcm:
+            return {"ok": False, "kind": "empty"}
+        normalized, stats = normalize_pcm16(pcm)
+        write_wav_atomic(out_path, normalized, rate)
+        return {"ok": True, "seconds": round(len(normalized) / 2 / rate, 2), "tokensIn": tokens[0], "tokensOut": tokens[1],
+                "norm": stats}
+
+    def _tts_call(self, model: str, voice: str, text: str, entry: dict[str, Any]) -> tuple:
+        if self._gemini_client is None:
+            from google import genai
+
+            self._genai = genai
+        else:
+            genai = self._genai  # testes injetam cliente e módulo falsos
+        client = self._gemini_client_for(genai, TTS_HTTP_TIMEOUT_MS)
+        types = genai.types
+        config = types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice))
+            ),
+        )
+        chunks: list = []
+        rate = 24_000
+        tokens_in: Optional[int] = None
+        tokens_out: Optional[int] = None
+        # Só o texto da frase, SEM prefixo de estilo: os modelos 3.8 leem a instrução em voz alta e rejeitam system_instruction.
+        for chunk in client.models.generate_content_stream(model=model, contents=text, config=config):
+            if entry["cancel"].is_set():
+                break
+            usage = getattr(chunk, "usage_metadata", None)
+            if usage is not None:
+                tokens_in = getattr(usage, "prompt_token_count", tokens_in)
+                tokens_out = getattr(usage, "candidates_token_count", tokens_out)
+            for cand in getattr(chunk, "candidates", None) or []:
+                content = getattr(cand, "content", None)
+                for part in (getattr(content, "parts", None) or []) if content is not None else []:
+                    inline = getattr(part, "inline_data", None)
+                    if inline is not None and getattr(inline, "data", None):
+                        mime = (getattr(inline, "mime_type", "") or "").lower()
+                        if mime and "pcm" not in mime and "l16" not in mime:
+                            raise ValueError("formato de áudio inesperado do TTS")
+                        m = re.search(r"rate=([0-9]+)", mime)
+                        if m:
+                            rate = int(m.group(1))
+                        chunks.append(inline.data)
+        return b"".join(chunks), rate, (tokens_in, tokens_out)
+
     def handle_generate(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
         turn_id = msg["turnId"]
@@ -1006,6 +1306,8 @@ class Worker:
 
             gemini_call_started = time.monotonic()
             first_chunk_logged = False
+            last_finish: Any = None
+            last_usage: Any = None
             for attempt, (model, timeout_ms) in enumerate(GENERATION_MODELS):
                 try:
                     client = self._gemini_client_for(genai, timeout_ms)
@@ -1014,7 +1316,12 @@ class Worker:
                         contents=contents,
                         config=genai.types.GenerateContentConfig(
                             system_instruction=system_instruction,
-                            max_output_tokens=MAX_TURN_TOKENS,  # Achado ALTA novo (rodada 2) — ver abaixo
+                            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,  # inclui o raciocínio do modelo (ver a constante)
+                            **(
+                                {"thinking_config": genai.types.ThinkingConfig(thinking_budget=0)}
+                                if model in GENERATION_NO_THINKING
+                                else {}
+                            ),
                         ),
                     )
 
@@ -1028,6 +1335,12 @@ class Worker:
                             break  # achado 3 (rodada 1) — sem stream.close(), método inexistente no SDK
 
                         buffer += chunk.text or ""
+                        # Diagnóstico (nunca texto): por que o stream terminou e quantos tokens foram para resposta/raciocínio.
+                        _cands = getattr(chunk, "candidates", None) or []
+                        if _cands and getattr(_cands[0], "finish_reason", None) is not None:
+                            last_finish = _cands[0].finish_reason
+                        if getattr(chunk, "usage_metadata", None) is not None:
+                            last_usage = chunk.usage_metadata
 
                         # EXATAMENTE o mesmo laço de find_sentence_boundary/emit/dedupe já existente e
                         # testado — reaproveitado sem mudança, só a origem de `buffer` mudou:
@@ -1055,6 +1368,12 @@ class Worker:
                             boundary = find_sentence_boundary(buffer)
                         if loop_detected:
                             break
+                    log_diag(
+                        f"Gemini fim (modelo={model}, turnId={turn_id}): finish={getattr(last_finish, 'name', last_finish)} "
+                        f"sistema={len(system_instruction or '')}c mensagens={len(contents)} sem_raciocinio={model in GENERATION_NO_THINKING} "
+                        f"saida={getattr(last_usage, 'candidates_token_count', None)} "
+                        f"raciocinio={getattr(last_usage, 'thoughts_token_count', None)} frases={sentence_index}"
+                    )
                     break  # terminou (ou foi cancelado/loop): não há segunda tentativa
                 except Exception as exc:  # noqa: BLE001
                     # Plano B SÓ se nada foi dito ainda (sentence_index == 0): nunca recomeça nem duplica uma resposta que o
@@ -1148,6 +1467,12 @@ class Worker:
             cmd = msg.get("cmd")
             if cmd == "cancel":
                 self.handle_cancel(msg)
+            elif cmd == "cancel_synth":
+                self.handle_cancel_synth(msg)
+            elif cmd == "synthesize":
+                # Fase 13a: pool próprio — NUNCA a work_queue (fila de tamanho 1 que descartaria o pedido, e a geração
+                # ocupa o work_loop enquanto as frases precisam ser sintetizadas).
+                self._synth_pool.submit(self.handle_synthesize, msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
             elif cmd in ("transcribe", "classify", "generate", "detect_tool", "detect_mutation", "detect_confirmation", "detect_intent"):

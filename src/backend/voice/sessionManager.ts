@@ -3,7 +3,7 @@ import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, type PrivacyConfig } from '.
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
-import type { IVoiceProvider } from '../../shared/extensions/voice.js';
+import type { IVoiceProvider, SpeechKind } from '../../shared/extensions/voice.js';
 import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
 import {
   GENERATION_FAILURE_TEXT,
@@ -96,6 +96,22 @@ function cleanTextForSpeech(text: string): string {
   return cleaned;
 }
 
+/** Fase 13a (docs/phase-13a-v3.md §4.3): limites da coalescência de frases geradas (só para provedores que a pedem). */
+const MAX_GROUP_SENTENCES = 3;
+const MAX_GROUP_CHARS = 300;
+/** Espera máxima por mais frases antes de falar o grupo já acumulado (evita silêncio entre a frase 0 e o resto). */
+const COALESCE_MAX_WAIT_MS = 1_500;
+/** Um item de síntese que não resolve em 15 s é pulado e registrado; o seguinte não fica preso atrás dele. */
+const SENTENCE_READY_TIMEOUT_MS = 15_000;
+
+/** Ajustes de tempo e tamanho da emissão/coalescência; os padrões valem em produção (os testes encurtam os prazos). */
+export interface SessionTuning {
+  readyTimeoutMs?: number;
+  coalesceWaitMs?: number;
+  maxGroupSentences?: number;
+  maxGroupChars?: number;
+}
+
 interface ActiveTurn {
   turnId: string;
   epoch: number;
@@ -104,6 +120,14 @@ interface ActiveTurn {
   confirmedCount: number;
   /** Promessas de síntese TTS em andamento — o turno só finaliza (turn_done) após todas resolverem. */
   pendingSynthesis: Promise<void>[];
+  /** Fase 13a: itens de síntese numerados pela ordem de chamada; sentence_audio_ready sai ESTRITAMENTE nessa ordem. */
+  nextSeq: number;
+  nextToEmit: number;
+  /** null = resolvido sem áudio (falha, cancelamento ou prazo). */
+  synthResults: Map<number, { audioId: string; text: string; index: number } | null>;
+  /** Quantas frases GERADAS já chegaram neste turno (a primeira nunca é coalescida). */
+  generatedSeen: number;
+  coalesce: { texts: string[]; firstIndex: number; chars: number; timer: NodeJS.Timeout | null } | null;
 }
 
 interface Session {
@@ -157,6 +181,10 @@ export class SessionManager {
   private readonly memoriaStore: JsonStore<StoredItem> | null;
   /** Fase 12: o que pode sair para o Gemini (docs/phase-12-v2.md §2.1). */
   private readonly privacy: PrivacyConfig;
+  private readonly readyTimeoutMs: number;
+  private readonly coalesceWaitMs: number;
+  private readonly maxGroupSentences: number;
+  private readonly maxGroupChars: number;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -171,7 +199,8 @@ export class SessionManager {
     tools: readonly ITool[] = [],
     mutatingTools: readonly IMutatingTool[] = [],
     memoriaStore: JsonStore<StoredItem> | null = null,
-    privacy: PrivacyConfig = DEFAULT_PRIVACY
+    privacy: PrivacyConfig = DEFAULT_PRIVACY,
+    tuning: SessionTuning = {}
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
@@ -182,6 +211,10 @@ export class SessionManager {
     this.mutatingTools = mutatingTools;
     this.memoriaStore = memoriaStore;
     this.privacy = privacy;
+    this.readyTimeoutMs = tuning.readyTimeoutMs ?? SENTENCE_READY_TIMEOUT_MS;
+    this.coalesceWaitMs = tuning.coalesceWaitMs ?? COALESCE_MAX_WAIT_MS;
+    this.maxGroupSentences = tuning.maxGroupSentences ?? MAX_GROUP_SENTENCES;
+    this.maxGroupChars = tuning.maxGroupChars ?? MAX_GROUP_CHARS;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -305,7 +338,12 @@ export class SessionManager {
       abortController,
       expectedSentences: new Set(),
       confirmedCount: 0,
-      pendingSynthesis: []
+      pendingSynthesis: [],
+      nextSeq: 0,
+      nextToEmit: 0,
+      synthResults: new Map(),
+      generatedSeen: 0,
+      coalesce: null
     };
     session.activeTurn = activeTurn;
     session.lastTurnId = turnId;
@@ -315,7 +353,8 @@ export class SessionManager {
 
     this.emit(session, { type: 'state', state: 'processando' });
 
-    void this.runTurn(session, activeTurn, audioPath);
+    // Fase 13a: ao fim do turno (ou quando superado) o provedor libera o que reservou para ele (cota do TTS em nuvem).
+    void this.runTurn(session, activeTurn, audioPath).finally(() => this.ttsProvider.endTurn?.(turnId));
 
     return { turnId };
   }
@@ -369,7 +408,7 @@ export class SessionManager {
             this.emit(session, { type: 'state', state: 'falando' });
             const cleanQ = cleanTextForSpeech(question);
             turn.expectedSentences.add(0);
-            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanQ, 0));
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanQ, 0, 'local'));
             await Promise.allSettled(turn.pendingSynthesis);
             if (session.activeTurn === turn) {
               // Re-arma, nunca promove direto: só markPlayed() (pergunta realmente ouvida) volta a
@@ -422,7 +461,7 @@ export class SessionManager {
 
           const clean = cleanTextForSpeech(text);
           turn.expectedSentences.add(0);
-          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0));
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
           await Promise.allSettled(turn.pendingSynthesis);
 
           if (session.activeTurn === turn) {
@@ -494,7 +533,7 @@ export class SessionManager {
 
             const clean = cleanTextForSpeech(question);
             turn.expectedSentences.add(0);
-            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0));
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
             await Promise.allSettled(turn.pendingSynthesis);
 
             if (session.activeTurn === turn) {
@@ -552,7 +591,7 @@ export class SessionManager {
 
           const clean = cleanTextForSpeech(text);
           turn.expectedSentences.add(0);
-          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0));
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'local'));
           await Promise.allSettled(turn.pendingSynthesis);
 
           // Encerramento IDÊNTICO ao do caminho normal (sessionManager.ts:323-326).
@@ -656,7 +695,7 @@ export class SessionManager {
               text = NO_ACTION_CLAIM_TEXT;
             }
             turn.expectedSentences.add(index);
-            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, index));
+            this.enqueueGenerated(session, turn, text, index);
           }
         });
       } catch (err) {
@@ -665,7 +704,7 @@ export class SessionManager {
         if (turn.expectedSentences.size === 0) {
           const text = GENERATION_FAILURE_TEXT;
           turn.expectedSentences.add(0);
-          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, 0));
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, 0, 'local'));
         } else {
           console.error(
             `[generate] Gemini falhou no meio do streaming (turnId=${turn.turnId}) — encerrando com o que já foi dito.`,
@@ -678,6 +717,7 @@ export class SessionManager {
       // Só finaliza o turno (turn_done) depois que toda síntese de frase já disparada
       // realmente terminou — sem isso, turn_done podia chegar ao cliente antes do
       // último sentence_audio_ready (frases geradas rápido demais para o TTS acompanhar).
+      this.flushCoalesce(session, turn); // fim da geração: descarrega o resíduo abaixo do limite do grupo
       await Promise.allSettled(turn.pendingSynthesis);
 
       if (session.activeTurn === turn) {
@@ -710,34 +750,117 @@ export class SessionManager {
   ): Promise<void> {
     if (!this.privacy.cloud) {
       turn.expectedSentences.add(0);
-      turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, GENERATION_DISABLED_TEXT, 0));
+      turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, GENERATION_DISABLED_TEXT, 0, 'local'));
       return;
     }
     await this.engine.generate(turn.turnId, turn.epoch, messages, handlers);
   }
 
-  private async synthesizeSentence(session: Session, turn: ActiveTurn, text: string, index: number): Promise<void> {
+  /**
+   * Fase 13a: frases GERADAS. Provedor que pede coalescência (TTS em nuvem com cota limitada): a 1ª frase vai sozinha (menor
+   * tempo até a primeira fala) e as seguintes são agrupadas (até 3 frases / 300 caracteres, ou 1,5 s de espera). Os demais
+   * textos (pergunta de mutação, reprompt, ferramentas, falhas) NUNCA passam por aqui: vão sozinhos e idênticos ao que
+   * markPlayed() espera (igualdade exata de texto). Provedor que não pede (`say`): comportamento de sempre, uma frase por pedido.
+   */
+  private enqueueGenerated(session: Session, turn: ActiveTurn, text: string, index: number): void {
+    const first = turn.generatedSeen === 0;
+    turn.generatedSeen += 1;
+    if (!this.ttsProvider.prefersCoalescing || first) {
+      turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, index, 'generated'));
+      return;
+    }
+    const open = turn.coalesce;
+    if (open && (open.texts.length >= this.maxGroupSentences || open.chars + 1 + text.length > this.maxGroupChars)) {
+      this.flushCoalesce(session, turn);
+    }
+    const group = turn.coalesce ?? (turn.coalesce = { texts: [], firstIndex: index, chars: 0, timer: null });
+    group.chars += (group.texts.length > 0 ? 1 : 0) + text.length;
+    group.texts.push(text);
+    if (group.texts.length >= this.maxGroupSentences || group.chars >= this.maxGroupChars) {
+      this.flushCoalesce(session, turn);
+      return;
+    }
+    if (!group.timer) {
+      group.timer = setTimeout(() => this.flushCoalesce(session, turn), this.coalesceWaitMs);
+      group.timer.unref?.();
+    }
+  }
+
+  /** Fala o grupo acumulado. Turno superado/cancelado: DESCARTA (nada é sintetizado nem emitido). */
+  private flushCoalesce(session: Session, turn: ActiveTurn): void {
+    const group = turn.coalesce;
+    if (!group) return;
+    turn.coalesce = null;
+    if (group.timer) clearTimeout(group.timer);
+    if (session.activeTurn !== turn) return;
+    turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, group.texts.join(' '), group.firstIndex, 'generated'));
+  }
+
+  private async synthesizeSentence(
+    session: Session,
+    turn: ActiveTurn,
+    text: string,
+    index: number,
+    kind: SpeechKind = 'local'
+  ): Promise<void> {
+    const seq = turn.nextSeq;
+    turn.nextSeq += 1;
     const { audioId, filePath } = this.audioStore.newOutputPath(session.id);
+    // Um item travado não pode prender os seguintes: passado o prazo, é pulado (e o resultado tardio descartado).
+    const readyTimer = setTimeout(
+      () => this.resolveSynthesisItem(session, turn, seq, null, 'prazo de prontidão excedido'),
+      this.readyTimeoutMs
+    );
+    readyTimer.unref?.();
+    let produced = false;
     try {
-      await this.ttsProvider.synthesize(text, filePath, turn.abortController.signal);
+      await this.ttsProvider.synthesize(text, filePath, turn.abortController.signal, {
+        turnId: turn.turnId,
+        kind,
+        isFirstOfTurn: seq === 0
+      });
+      produced = true;
     } catch {
-      return; // cancelado ou falhou — não emite evento pra frase obsoleta
+      // cancelado ou falhou — não emite evento (item resolvido sem áudio)
     }
+    clearTimeout(readyTimer);
+    this.resolveSynthesisItem(session, turn, seq, produced ? { audioId, text, index } : null);
+  }
 
-    if (session.activeTurn !== turn) return; // turno superado enquanto sintetizava
+  /**
+   * Emissão ESTRITAMENTE em ordem de chamada (docs/phase-13a-v3.md §4.3, achado 9 da rodada 2): o cliente toca o que chega, só
+   * ordenando o que já está na fila; com sínteses de latência variável um item rápido tocaria antes do anterior. O item n+1 só
+   * é emitido depois de o item n resolver (sucesso, falha, cancelamento ou prazo).
+   */
+  private resolveSynthesisItem(
+    session: Session,
+    turn: ActiveTurn,
+    seq: number,
+    item: { audioId: string; text: string; index: number } | null,
+    skipReason?: string
+  ): void {
+    if (seq < turn.nextToEmit || turn.synthResults.has(seq)) return; // já resolvido (ex.: pulado por prazo)
+    if (skipReason) console.warn(`[voice] item ${seq} do turno ${turn.turnId} pulado: ${skipReason}.`);
+    turn.synthResults.set(seq, item);
+    while (turn.synthResults.has(turn.nextToEmit)) {
+      const ready = turn.synthResults.get(turn.nextToEmit) ?? null;
+      turn.synthResults.delete(turn.nextToEmit);
+      turn.nextToEmit += 1;
+      if (!ready || session.activeTurn !== turn) continue; // sem áudio, ou turno superado enquanto sintetizava
 
-    if (!session.emittedSentences || session.emittedSentences.turnId !== turn.turnId) {
-      session.emittedSentences = { turnId: turn.turnId, items: [] };
+      if (!session.emittedSentences || session.emittedSentences.turnId !== turn.turnId) {
+        session.emittedSentences = { turnId: turn.turnId, items: [] };
+      }
+      session.emittedSentences.items.push({ text: ready.text, consumed: false });
+
+      this.emit(session, {
+        type: 'sentence_audio_ready',
+        turnId: turn.turnId,
+        sentenceIndex: ready.index,
+        audioId: ready.audioId,
+        text: ready.text
+      });
     }
-    session.emittedSentences.items.push({ text, consumed: false });
-
-    this.emit(session, {
-      type: 'sentence_audio_ready',
-      turnId: turn.turnId,
-      sentenceIndex: index,
-      audioId,
-      text
-    });
   }
 
   /** Confirma que uma frase foi reproduzida até o fim — só então entra no histórico (Refinamento 1). */

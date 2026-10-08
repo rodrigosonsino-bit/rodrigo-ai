@@ -85,7 +85,7 @@ class Client:
         self.models = SimpleNamespace(generate_content_stream=self._gen)
 
     def _gen(self, model, contents, config):
-        self.calls.append({"model": model, "contents": contents})
+        self.calls.append({"model": model, "contents": contents, "config": config})
         b = self.behavior[model]
         if isinstance(b, BaseException):
             raise b
@@ -102,7 +102,7 @@ def run(behavior):
     os.environ.pop("RODRIGO_CLOUD", None)
     client = Client(behavior)
     stub = SimpleNamespace(_current_lock=threading.Lock(), _current=None, _gemini_client=client,
-                           _genai=SimpleNamespace(types=SimpleNamespace(GenerateContentConfig=lambda **kw: kw)),
+                           _genai=SimpleNamespace(types=SimpleNamespace(GenerateContentConfig=lambda **kw: kw, ThinkingConfig=lambda **kw: kw)),
                            _gemini_client_for=lambda genai, t: client)
     STUB["stub"] = stub
     # histórico de VÁRIAS mensagens (usuário, assistente, usuário): o plano B tem de receber TODAS, não só a última
@@ -171,6 +171,17 @@ check("o plano B recebe o histórico COMPLETO (3 mensagens), não só a última"
 # 7) sucesso no principal: o plano B nunca é tocado
 ev, cl = run({P: GOOD, F: ServerError(500)})
 check("sucesso no principal: 1 chamada, só o principal", [c["model"] for c in cl.calls] == [P] and ev[-1]["event"] == "done")
+
+# 7) Raciocínio desligado SÓ no modelo que "pensa" (2026-10-08): o flash-latest gastava 150 dos 160 tokens pensando e a resposta
+#    saía cortada; o reserva rejeita thinking_budget=0 (HTTP 400), então NÃO pode receber o parâmetro.
+ev, cl = run({P: ServerError(503), F: GOOD})
+check("principal: thinking_budget=0 (resposta não é comida pelo raciocínio)",
+      cl.calls[0]["config"].get("thinking_config") == {"thinking_budget": 0}, str(cl.calls[0]["config"]))
+check("plano B: SEM thinking_config (o modelo reserva o rejeita com 400)", "thinking_config" not in cl.calls[1]["config"], str(cl.calls[1]["config"]))
+check("teto de saída da geração = 512 (cabe o raciocínio do modelo + a resposta; com 160 a fala saía cortada)",
+      cl.calls[0]["config"].get("max_output_tokens") == worker.GEMINI_MAX_OUTPUT_TOKENS == 512 and cl.calls[1]["config"].get("max_output_tokens") == 512)
+check("a constante MAX_TURN_TOKENS (160) não foi alterada: só o teto da geração em nuvem mudou", worker.MAX_TURN_TOKENS == 160)
+check("a lista de modelos sem raciocínio é exatamente o principal", worker.GENERATION_NO_THINKING == frozenset({P}))
 
 print(f"\n{ok} ok, {fail} falhas")
 sys.exit(1 if fail else 0)

@@ -1,4 +1,4 @@
-import type { PrivacyStatus } from './types.js';
+import type { PrivacyStatus, TtsStatus } from './types.js';
 
 /**
  * Fase 12 (docs/phase-12-v2.md §2.3): texto do cartão de privacidade, em PT-BR simples, derivado de
@@ -69,6 +69,21 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
       : 'Os seus textos de pesquisa (Teologia e Virtologia) não são enviados ao Gemini.'
   );
 
+  if (status.tts.cloud) {
+    goes.push(
+      'O texto de cada frase que o assistente vai falar vai ao Gemini para virar voz (o seu áudio nunca vai). Isso inclui frases que você interromper antes de ouvir até o fim.'
+    );
+    goes.push(
+      status.tts.dictatedViaCloud
+        ? 'Confirmações que repetem o que você ditou (notas, lembretes, memórias) também são enviadas ao Gemini para virar voz.'
+        : 'Confirmações que repetem o que você ditou (notas, lembretes, memórias) são faladas com a voz do sistema, sem sair deste computador.'
+    );
+  } else if (status.tts.reason === 'history-off') {
+    stays.push('As respostas são faladas com a voz do sistema, neste computador, porque o histórico da conversa não é enviado (RODRIGO_SEND_HISTORY=0).');
+  } else if (status.tts.reason === 'channel-off') {
+    stays.push('As respostas são faladas com a voz do sistema, neste computador (RODRIGO_CLOUD_TTS=0).');
+  }
+
   warnings.push(FREE_TIER_NOTICE);
   if (!status.keyPresent) {
     warnings.push('Não há chave do Gemini configurada (GEMINI_API_KEY): as respostas geradas em nuvem não vão funcionar.');
@@ -81,4 +96,22 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
     warnings,
     footnote: PRIVACY_FOOTNOTE
   };
+}
+
+/**
+ * Fase 13a: uma linha, em PT-BR simples, sobre a voz que está falando e a cota do dia. Função pura (a tela e os testes
+ * usam a mesma). Nunca promete que o texto fica neste computador: quando a voz é a do Gemini, o texto das frases vai a ele
+ * (isso está no cartão de privacidade acima).
+ */
+export function describeTtsStatus(status: TtsStatus | null): string | null {
+  if (!status) return null;
+  const b = status.budget;
+  if (status.engine !== 'gemini' || !b) return 'Voz do sistema (macOS) falando as respostas.';
+  if (b.exhausted) {
+    return `Voz natural (Gemini) esgotada por hoje (${b.used} de ${b.limit} pedidos). As respostas saem com a voz do sistema até a cota renovar.`;
+  }
+  if (b.blockedForMs > 0) {
+    return `Voz natural (Gemini) em pausa por cerca de ${Math.ceil(b.blockedForMs / 1000)} s. Enquanto isso, a voz do sistema fala as respostas.`;
+  }
+  return `Voz natural (Gemini): ${b.used} de ${b.limit} pedidos usados hoje.`;
 }

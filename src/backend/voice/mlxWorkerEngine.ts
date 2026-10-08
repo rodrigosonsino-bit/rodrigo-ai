@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import readline from 'node:readline';
 import type { ConversationMessage, IntentDetection, IntentName, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import { isMutationName, isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
-import type { GenerateCallbacks, VoiceEngine } from './engine.js';
+import type { GenerateCallbacks, SynthesizeFailureKind, SynthesizeRequest, SynthesizeResult, VoiceEngine } from './engine.js';
 import { VoiceEngineError } from './engine.js';
 
 export interface MlxWorkerEngineOptions {
@@ -78,6 +78,56 @@ interface PendingDetectConfirmation {
   spawnGeneration: number;
 }
 
+interface PendingSynthesize {
+  kind: 'synthesize';
+  turnId: string;
+  /** Nunca rejeita: falha do serviço é um resultado { ok: false, ... } (o provedor decide o fallback). */
+  resolve: (res: SynthesizeResult) => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
+const SYNTH_FAILURE_KINDS = new Set<SynthesizeFailureKind>([
+  'rate_limited', 'timeout', 'server', 'transport', 'not_found', 'client_error', 'empty', 'disabled', 'cancelled', 'error'
+]);
+
+/** Valida o evento `synth_result` do worker; qualquer formato inesperado vira falha 'error' (nunca confia no worker às cegas). */
+function parseSynthResult(msg: Record<string, unknown>): SynthesizeResult {
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  if (msg.ok === true) {
+    const seconds = num(msg.seconds);
+    if (seconds === null) return { ok: false, kind: 'error', reason: 'resultado sem duração' };
+    const n = msg.norm as Record<string, unknown> | undefined;
+    return {
+      ok: true,
+      seconds,
+      tokensIn: num(msg.tokensIn),
+      tokensOut: num(msg.tokensOut),
+      norm: n
+        ? {
+            gainDb: num(n.gainDb) ?? 0,
+            saturated: n.saturated === true,
+            limited: n.limited === true,
+            rmsInDb: num(n.rmsInDb),
+            rmsOutDb: num(n.rmsOutDb)
+          }
+        : undefined
+    };
+  }
+  const kind = SYNTH_FAILURE_KINDS.has(msg.kind as SynthesizeFailureKind) ? (msg.kind as SynthesizeFailureKind) : 'error';
+  const out: Extract<SynthesizeResult, { ok: false }> = { ok: false, kind };
+  const status = num(msg.status);
+  if (status !== null) out.status = status;
+  if (msg.scope === 'minute' || msg.scope === 'day' || msg.scope === 'unknown') out.scope = msg.scope;
+  const retry = num(msg.retryAfterMs);
+  if (retry !== null) out.retryAfterMs = retry;
+  if (typeof msg.quotaId === 'string') out.quotaId = msg.quotaId.slice(0, 120);
+  if (msg.local === true) out.local = true;
+  if (typeof msg.reason === 'string') out.reason = msg.reason.slice(0, 40);
+  return out;
+}
+
 type Pending =
   | PendingTranscribe
   | PendingGenerate
@@ -85,7 +135,8 @@ type Pending =
   | PendingDetectTool
   | PendingDetectMutation
   | PendingDetectIntent
-  | PendingDetectConfirmation;
+  | PendingDetectConfirmation
+  | PendingSynthesize;
 
 let reqCounter = 0;
 function nextReqId(): string {
@@ -181,11 +232,13 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'detect_tool' ||
         pending.kind === 'detect_mutation' ||
         pending.kind === 'detect_intent' ||
-        pending.kind === 'detect_confirmation'
+        pending.kind === 'detect_confirmation' ||
+        pending.kind === 'synthesize'
       ) {
         clearTimeout(pending.timeout);
       }
       if (pending.kind === 'detect_intent') pending.resolve(null);
+      else if (pending.kind === 'synthesize') pending.resolve({ ok: false, kind: 'transport' });
       else pending.reject(err);
     }
     this.pending.clear();
@@ -297,6 +350,13 @@ export class MlxWorkerEngine implements VoiceEngine {
       return;
     }
 
+    if (event === 'synth_result' && pending.kind === 'synthesize') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      pending.resolve(parseSynthResult(msg));
+      return;
+    }
+
     if (event === 'error') {
       this.pending.delete(reqId);
       if (
@@ -305,12 +365,17 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'detect_tool' ||
         pending.kind === 'detect_mutation' ||
         pending.kind === 'detect_intent' ||
-        pending.kind === 'detect_confirmation'
+        pending.kind === 'detect_confirmation' ||
+        pending.kind === 'synthesize'
       ) {
         clearTimeout(pending.timeout);
       }
       if (pending.kind === 'detect_intent') {
         pending.resolve(null);
+        return;
+      }
+      if (pending.kind === 'synthesize') {
+        pending.resolve({ ok: false, kind: 'error' });
         return;
       }
       pending.reject(new VoiceEngineError((msg.message as string) || 'Erro desconhecido no worker de voz.'));
@@ -445,6 +510,64 @@ export class MlxWorkerEngine implements VoiceEngine {
     });
   }
 
+  /**
+   * Fase 13a: sintetiza uma frase pelo TTS do Gemini via worker (pool próprio, fora do laço único). NUNCA rejeita: devolve
+   * { ok: false, kind } para o provedor decidir o fallback. O Node ainda impõe um teto (prazo local + 3 s) caso o worker
+   * não responda, sem matar o worker.
+   */
+  async synthesize(request: SynthesizeRequest, signal?: AbortSignal): Promise<SynthesizeResult> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (res: SynthesizeResult): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', onAbort);
+        this.pending.delete(reqId);
+        resolve(res);
+      };
+      const timeout = setTimeout(() => finish({ ok: false, kind: 'timeout', local: true }), request.deadlineMs + 3_000);
+      const onAbort = (): void => {
+        try {
+          this.writeCommand({ cmd: 'cancel_synth', reqId });
+        } catch {
+          // worker já pode estar morto/reiniciando
+        }
+        finish({ ok: false, kind: 'cancelled' });
+      };
+      if (signal?.aborted) {
+        finish({ ok: false, kind: 'cancelled' });
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      this.pending.set(reqId, {
+        kind: 'synthesize',
+        turnId: request.turnId,
+        resolve: finish,
+        reject: () => finish({ ok: false, kind: 'error' }),
+        timeout,
+        spawnGeneration
+      });
+      try {
+        this.writeCommand({
+          cmd: 'synthesize',
+          reqId,
+          turnId: request.turnId,
+          text: request.text,
+          outPath: request.outPath,
+          model: request.model,
+          voice: request.voice,
+          deadlineMs: request.deadlineMs
+        });
+      } catch {
+        finish({ ok: false, kind: 'transport' });
+      }
+    });
+  }
+
   async detectMutation(
     turnId: string,
     epoch: number,
@@ -565,6 +688,8 @@ export class MlxWorkerEngine implements VoiceEngine {
 
       if (pending.kind === 'detect_intent') {
         pending.resolve(null);
+      } else if (pending.kind === 'synthesize') {
+        pending.resolve({ ok: false, kind: 'cancelled' });
       } else if (
         pending.kind === 'classify' ||
         pending.kind === 'detect_tool' ||

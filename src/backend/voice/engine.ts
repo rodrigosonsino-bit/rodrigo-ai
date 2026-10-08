@@ -1,5 +1,48 @@
 import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 
+/** Fase 13a: pedido de síntese ao worker (o TEXTO da frase é a única coisa que vai ao Google). */
+export interface SynthesizeRequest {
+  turnId: string;
+  text: string;
+  /** Caminho absoluto do WAV final (o worker grava `<outPath>.part` e renomeia). */
+  outPath: string;
+  model: string;
+  voice: string;
+  /** Prazo LOCAL em ms (8 s na 1ª frase do turno, 12 s nas demais). O HTTP tem o próprio teto (>= 10 s). */
+  deadlineMs: number;
+}
+
+export type SynthesizeFailureKind =
+  | 'rate_limited'
+  | 'timeout'
+  | 'server'
+  | 'transport'
+  | 'not_found'
+  | 'client_error'
+  | 'empty'
+  | 'disabled'
+  | 'cancelled'
+  | 'error';
+
+export type SynthesizeResult =
+  | {
+      ok: true;
+      seconds: number;
+      tokensIn: number | null;
+      tokensOut: number | null;
+      norm?: { gainDb: number; saturated: boolean; limited: boolean; rmsInDb: number | null; rmsOutDb: number | null };
+    }
+  | {
+      ok: false;
+      kind: SynthesizeFailureKind;
+      status?: number;
+      scope?: 'minute' | 'day' | 'unknown';
+      retryAfterMs?: number;
+      quotaId?: string;
+      local?: boolean;
+      reason?: string;
+    };
+
 export interface GenerateCallbacks {
   onSentence: (text: string, index: number) => void;
 }
@@ -61,6 +104,11 @@ export interface VoiceEngine {
     messages: ConversationMessage[],
     callbacks: GenerateCallbacks
   ): Promise<void>;
+  /**
+   * Fase 13a: sintetiza uma frase com o TTS em nuvem (opcional — só o motor real e o fake implementam). NUNCA rejeita por
+   * falha do serviço: devolve `{ ok: false, kind, ... }` para o provedor decidir o fallback. `signal` aborta o pedido.
+   */
+  synthesize?(request: SynthesizeRequest, signal?: AbortSignal): Promise<SynthesizeResult>;
   /** Cancela cooperativamente o turno em andamento, se o turnId corresponder. */
   cancel(turnId: string): void;
   shutdown(): Promise<void>;

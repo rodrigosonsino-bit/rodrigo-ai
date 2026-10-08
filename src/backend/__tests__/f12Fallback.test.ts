@@ -31,7 +31,18 @@ describe('geração com plano B (Fase 12 / pedido do usuário) — worker real, 
         assert.ok(!r.spoken.includes(GENERATION_FAILURE_TEXT), `não deve cair na fala de falha: ${JSON.stringify(r.spoken)}`);
         assert.equal(r.spoken.length, 2, JSON.stringify(r.spoken));
         const [a, b] = h.gemini.streamRequests();
-        assert.equal(a.body, b.body, 'o plano B recebe EXATAMENTE o mesmo corpo (mesma fronteira de dados)');
+        // Fronteira de dados: o plano B recebe EXATAMENTE as mesmas mensagens e o mesmo prompt. A ÚNICA diferença permitida entre as
+        // duas requisições é o raciocínio desligado no principal (thinking_budget 0): sem isso o flash-latest gasta 150 dos 160 tokens
+        // pensando e a resposta sai cortada (medido em 2026-10-08), e o reserva rejeita esse parâmetro com HTTP 400.
+        const pa = JSON.parse(a.body) as { contents: unknown; systemInstruction?: unknown; generationConfig?: Record<string, unknown> };
+        const pb = JSON.parse(b.body) as { contents: unknown; systemInstruction?: unknown; generationConfig?: Record<string, unknown> };
+        assert.deepEqual(pa.contents, pb.contents, 'as mesmas mensagens');
+        assert.deepEqual(pa.systemInstruction, pb.systemInstruction, 'o mesmo prompt de sistema');
+        assert.deepEqual(pa.generationConfig?.thinking_config ?? pa.generationConfig?.thinkingConfig, { thinking_budget: 0 }, 'principal: raciocínio desligado (o SDK serializa em snake_case, formato aceito pelo Google)');
+        assert.ok(pb.generationConfig?.thinking_config === undefined && pb.generationConfig?.thinkingConfig === undefined, 'plano B: sem thinking_config (o modelo reserva o rejeita)');
+        const { thinking_config: _ta, thinkingConfig: _ta2, ...restA } = pa.generationConfig ?? {};
+        const { thinking_config: _tb, thinkingConfig: _tb2, ...restB } = pb.generationConfig ?? {};
+        assert.deepEqual(restA, restB, 'o resto da configuração é idêntico');
         assert.ok(b.body.includes(MEM) && b.body.includes('MARCADOR-FALA-FB'));
         for (const req of h.gemini.requests) {
           assert.equal(req.headers['x-goog-api-key'], 'test-dummy-key');

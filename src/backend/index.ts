@@ -19,7 +19,7 @@ try {
     config,
     undefined,
     voiceRuntime.available
-      ? { config, sessionManager: voiceRuntime.sessionManager!, audioStore: voiceRuntime.audioStore! }
+      ? { config, sessionManager: voiceRuntime.sessionManager!, audioStore: voiceRuntime.audioStore!, ttsStatus: voiceRuntime.ttsStatus }
       : undefined
   );
 

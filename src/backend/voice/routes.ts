@@ -87,6 +87,8 @@ export interface VoiceRouteDeps {
   config: AppConfig;
   sessionManager: SessionManager;
   audioStore: AudioStore;
+  /** Fase 13a: estado da voz (GET /api/voice/tts-status). */
+  ttsStatus?: () => unknown;
 }
 
 /**
@@ -107,6 +109,12 @@ export async function handleVoiceRoute(
   }
 
   const url = new URL(req.url || '/', `http://127.0.0.1:${deps.config.port}`);
+
+  // Fase 13a: estado da voz (motor e orçamento do dia). Só números; nenhum texto de conversa. Sem token: não é dado da sessão.
+  if (req.method === 'GET' && url.pathname === '/api/voice/tts-status') {
+    sendJson(res, 200, deps.ttsStatus ? deps.ttsStatus() : { engine: 'say', name: 'macOS say', budget: null, counters: null });
+    return true;
+  }
 
   if (pathname === '/api/voice/session' && req.method === 'POST') {
     const { sessionId, token } = await deps.sessionManager.createSession();

@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
+import { type PrivacyConfig, TTS_DEFAULT_MODEL, TTS_DEFAULT_VOICE, ttsCloudEffective } from '../privacy.js';
+import type { VoiceEngine } from './engine.js';
+import { DEFAULT_GEMINI_VOICE_CONFIG, GeminiVoiceProvider } from './geminiVoiceProvider.js';
+import { TtsBudget } from './ttsBudget.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -115,4 +119,86 @@ export function selectVoiceProvider(env: NodeJS.ProcessEnv = process.env): IVoic
     console.error('[voice] TTS_ENGINE=kokoro solicitado, mas indisponível — usando "say" como padrão.');
   }
   return new SayVoiceProvider();
+}
+
+
+export interface TtsEnvConfig {
+  model: string;
+  voice: string;
+  rpm: number;
+  rpd: number;
+}
+
+function parseBoundedInt(env: NodeJS.ProcessEnv, name: string, def: number, max: number): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return def;
+  const v = raw.trim();
+  if (!/^[1-9][0-9]{0,3}$/.test(v) || parseInt(v, 10) > max) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre 1 e ${max}. Valor recebido: "${raw}"`);
+  }
+  return parseInt(v, 10);
+}
+
+function parseName(env: NodeJS.ProcessEnv, name: string, def: string): string {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return def;
+  const v = raw.trim();
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(v)) {
+    throw new Error(`Configuração inválida: ${name} aceita só letras, números, ponto, hífen e sublinhado (até 64). Valor recebido: "${raw}"`);
+  }
+  return v;
+}
+
+/** Fase 13a: modelo, voz e limites do TTS em nuvem; valor inválido LANÇA no startup (como a privacidade da Fase 12). */
+export function parseTtsEnv(env: NodeJS.ProcessEnv): TtsEnvConfig {
+  return {
+    model: parseName(env, 'RODRIGO_TTS_MODEL', TTS_DEFAULT_MODEL),
+    voice: parseName(env, 'RODRIGO_TTS_VOICE', TTS_DEFAULT_VOICE),
+    // Margem sobre a cota do Google no Nível 1 (10/min e 100/dia por modelo): 8 e 90.
+    rpm: parseBoundedInt(env, 'RODRIGO_TTS_RPM', 8, 1000),
+    rpd: parseBoundedInt(env, 'RODRIGO_TTS_RPD', 90, 9000)
+  };
+}
+
+export interface VoiceProviderDeps {
+  engine: VoiceEngine;
+  privacy: PrivacyConfig;
+  rootDir: string;
+  env?: NodeJS.ProcessEnv;
+  log?: (msg: string) => void;
+}
+
+/**
+ * Fase 13a: escolhe a voz do app. TTS_ENGINE: `gemini` (padrão quando ausente) usa o TTS do Gemini com a voz do sistema de
+ * reserva; `say`/`kokoro` forçam uma voz local. O Gemini só é escolhido se o canal estiver EFETIVAMENTE ligado (mestre +
+ * RODRIGO_CLOUD_TTS + histórico enviado), houver chave e o motor suportar síntese; senão cai na voz local com um aviso.
+ */
+export function createVoiceProvider(deps: VoiceProviderDeps): IVoiceProvider {
+  const env = deps.env ?? process.env;
+  const log = deps.log ?? ((m: string) => console.warn(m));
+  const requested = (env.TTS_ENGINE || 'gemini').toLowerCase();
+  if (requested !== 'gemini') return selectVoiceProvider(env);
+
+  const local = new SayVoiceProvider();
+  const key = env.GEMINI_API_KEY;
+  if (!ttsCloudEffective(deps.privacy)) {
+    log('[voice] Voz do Gemini desligada pela configuração de privacidade — usando a voz do sistema.');
+    return local;
+  }
+  if (typeof key !== 'string' || key.trim().length === 0) {
+    log('[voice] GEMINI_API_KEY ausente — usando a voz do sistema.');
+    return local;
+  }
+  if (typeof deps.engine.synthesize !== 'function') {
+    log('[voice] O motor de voz não suporta TTS em nuvem — usando a voz do sistema.');
+    return local;
+  }
+  const cfg = parseTtsEnv(env);
+  const budget = new TtsBudget({
+    filePath: path.join(deps.rootDir, '.runtime', 'tts-budget.json'),
+    rpm: cfg.rpm,
+    rpd: cfg.rpd,
+    log
+  });
+  return new GeminiVoiceProvider(deps.engine, local, budget, deps.privacy, DEFAULT_GEMINI_VOICE_CONFIG(cfg.model, cfg.voice), () => Date.now(), log);
 }

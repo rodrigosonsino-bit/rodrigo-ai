@@ -1,5 +1,5 @@
-import type { HealthResponse, PrivacyStatus } from '../shared/types.ts';
-import { describePrivacy, PRIVACY_UNAVAILABLE_TEXT, PRIVACY_FOOTNOTE } from '../shared/privacyText.ts';
+import type { HealthResponse, PrivacyStatus, TtsStatus } from '../shared/types.ts';
+import { describePrivacy, describeTtsStatus, PRIVACY_UNAVAILABLE_TEXT, PRIVACY_FOOTNOTE } from '../shared/privacyText.ts';
 import { VoiceController } from './voice.ts';
 
 // Elementos da interface do usuário
@@ -125,7 +125,9 @@ function isPrivacyStatus(value: unknown): value is PrivacyStatus {
     (v.mode === 'cloud' || v.mode === 'local-only') &&
     typeof v.keyPresent === 'boolean' &&
     !!v.sends &&
-    typeof v.sends.history === 'boolean'
+    typeof v.sends.history === 'boolean' &&
+    !!v.tts &&
+    typeof v.tts.cloud === 'boolean'
   );
 }
 
@@ -170,10 +172,37 @@ async function loadPrivacy(): Promise<void> {
   }
 }
 
+// --- Estado da voz (Fase 13a): qual voz fala e quanto da cota do dia já foi usada ---
+function isTtsStatus(value: unknown): value is TtsStatus {
+  const v = value as Partial<TtsStatus> | null;
+  return !!v && typeof v.engine === 'string' && typeof v.name === 'string';
+}
+
+async function loadTtsStatus(): Promise<void> {
+  const el = document.getElementById('tts-status') as HTMLParagraphElement | null;
+  if (!el) return;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch('/api/voice/tts-status', { headers: { Accept: 'application/json' }, signal: controller.signal });
+    if (!response.ok) throw new Error(`código ${response.status}`);
+    const data: unknown = await response.json();
+    const text = isTtsStatus(data) ? describeTtsStatus(data) : null;
+    el.textContent = text ?? '';
+    el.hidden = text === null;
+  } catch {
+    el.hidden = true; // voz indisponível (503) ou sem resposta: some em vez de mostrar um número velho
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 // Verificação inicial ao carregar a página
 document.addEventListener('DOMContentLoaded', () => {
   checkHealth();
   void loadPrivacy();
+  void loadTtsStatus();
+  window.setInterval(() => void loadTtsStatus(), 15_000);
 });
 
 // --- Conversa por Voz (Fase 2) ---

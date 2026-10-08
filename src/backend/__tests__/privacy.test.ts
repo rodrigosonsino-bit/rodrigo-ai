@@ -5,10 +5,10 @@ import { parsePrivacyConfig, effectivePrivacy, workerPrivacyEnv, DEFAULT_PRIVACY
 import { windowHistory } from '../voice/sessionManager.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { startServer } from '../server.js';
-import { describePrivacy, PRIVACY_UNAVAILABLE_TEXT, FREE_TIER_NOTICE } from '../../shared/privacyText.js';
+import { describeTtsStatus, describePrivacy, PRIVACY_UNAVAILABLE_TEXT, FREE_TIER_NOTICE } from '../../shared/privacyText.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
+import type { AppConfig, PrivacyStatus, TtsStatus } from '../../shared/types.js';
 import { findViolations } from './privacyClaims.js';
-import type { AppConfig, PrivacyStatus } from '../../shared/types.js';
 import type { ConversationMessage } from '../../shared/voiceProtocol.js';
 
 describe('parsePrivacyConfig (Fase 12)', () => {
@@ -19,7 +19,9 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       sendHistory: true,
       historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS,
       sendMemories: true,
-      sendKnowledge: false
+      sendKnowledge: false,
+      cloudTts: true,
+      ttsDictated: true
     });
   });
 
@@ -40,9 +42,101 @@ describe('parsePrivacyConfig (Fase 12)', () => {
   });
 
   it('workerPrivacyEnv: mestre desligado força a intenção desligada no worker', () => {
-    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloud: false }), { RODRIGO_CLOUD: '0', RODRIGO_CLOUD_INTENT: '0' });
-    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloudIntent: false }), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '0' });
-    assert.deepEqual(workerPrivacyEnv(DEFAULT_PRIVACY), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '1' });
+    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloud: false }), { RODRIGO_CLOUD: '0', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '0' });
+    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloudIntent: false }), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '1' });
+    assert.deepEqual(workerPrivacyEnv(DEFAULT_PRIVACY), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '1', RODRIGO_CLOUD_TTS: '1' });
+  });
+});
+
+describe('TTS em nuvem (Fase 13a) — regra efetiva e canal', () => {
+  it('padrão: ligado, com o conteúdo ditado também indo à voz (D-b opção 1)', () => {
+    const st = effectivePrivacy({ GEMINI_API_KEY: 'x' });
+    assert.deepEqual(st.tts, { cloud: true, reason: null, dictatedViaCloud: true });
+    assert.equal(st.sends.ttsText, true);
+    assert.equal(st.models.tts, 'gemini-3.8-flash-lite-tts');
+  });
+
+  it('RODRIGO_CLOUD_TTS=0 desliga só o canal de voz; a geração segue em nuvem', () => {
+    const st = effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_CLOUD_TTS: '0' });
+    assert.equal(st.mode, 'cloud');
+    assert.deepEqual(st.tts, { cloud: false, reason: 'channel-off', dictatedViaCloud: false });
+    assert.equal(st.sends.ttsText, false);
+    assert.equal(st.models.tts, null);
+  });
+
+  it('regra conservadora: RODRIGO_SEND_HISTORY=0 desliga o TTS em nuvem mesmo com a flag ligada (motivo: history-off)', () => {
+    const st = effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_HISTORY: '0', RODRIGO_CLOUD_TTS: '1' });
+    assert.deepEqual(st.tts, { cloud: false, reason: 'history-off', dictatedViaCloud: false });
+    assert.equal(st.sends.ttsText, false);
+  });
+
+  it('D-b: confirmações com conteúdo ditado ficam locais com RODRIGO_SEND_MEMORIES=0 ou RODRIGO_TTS_DICTATED=0 (o resto segue na nuvem)', () => {
+    for (const env of [{ RODRIGO_SEND_MEMORIES: '0' }, { RODRIGO_TTS_DICTATED: '0' }]) {
+      const st = effectivePrivacy({ GEMINI_API_KEY: 'x', ...env });
+      assert.equal(st.tts.cloud, true, JSON.stringify(env));
+      assert.equal(st.tts.dictatedViaCloud, false, JSON.stringify(env));
+    }
+  });
+
+  it('o mestre desligado vence tudo (voz também fica local)', () => {
+    assert.deepEqual(effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_CLOUD_TTS: '1' }).tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });
+  });
+
+  it('valor inválido das novas flags aborta o startup (falha alto)', () => {
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_CLOUD_TTS: 'sim' }), /RODRIGO_CLOUD_TTS/);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_TTS_DICTATED: '2' }), /RODRIGO_TTS_DICTATED/);
+  });
+
+  it('o worker recebe o estado EFETIVO do canal (não a flag crua)', () => {
+    assert.equal(workerPrivacyEnv(parsePrivacyConfig({})).RODRIGO_CLOUD_TTS, '1');
+    assert.equal(workerPrivacyEnv(parsePrivacyConfig({ RODRIGO_CLOUD_TTS: '0' })).RODRIGO_CLOUD_TTS, '0');
+    assert.equal(workerPrivacyEnv(parsePrivacyConfig({ RODRIGO_SEND_HISTORY: '0' })).RODRIGO_CLOUD_TTS, '0');
+    assert.equal(workerPrivacyEnv(parsePrivacyConfig({ RODRIGO_CLOUD: '0' })).RODRIGO_CLOUD_TTS, '0');
+  });
+
+  it('o cartão diz o que vai e o que fica, sem prometer localidade', () => {
+    const on = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x' }));
+    assert.ok(on.goes.some((l) => /vai ao Gemini para virar voz/.test(l)));
+    assert.ok(on.goes.some((l) => /interromper antes de ouvir/.test(l)));
+    const hist = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_HISTORY: '0' }));
+    assert.ok(hist.stays.some((l) => /voz do sistema/.test(l) && /RODRIGO_SEND_HISTORY=0/.test(l)));
+    assert.ok(!hist.goes.some((l) => /virar voz/.test(l)));
+    const dictLocal = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_TTS_DICTATED: '0' }));
+    assert.ok(dictLocal.goes.some((l) => /faladas com a voz do sistema/.test(l)));
+  });
+});
+
+describe('Linha de estado da voz (Fase 13a)', () => {
+  const g = (budget: Partial<NonNullable<TtsStatus['budget']>> = {}): TtsStatus => ({
+    engine: 'gemini',
+    name: 'Gemini TTS',
+    budget: { used: 12, limit: 90, minuteUsed: 2, rpm: 8, exhausted: false, blockedForMs: 0, ...budget },
+    counters: { gemini: 12, fallback: 0, failures: 0 }
+  });
+
+  it('mostra quantos pedidos do dia foram usados', () => {
+    assert.equal(describeTtsStatus(g()), 'Voz natural (Gemini): 12 de 90 pedidos usados hoje.');
+  });
+
+  it('esgotada: diz que a voz do sistema assume até a cota renovar', () => {
+    const t = describeTtsStatus(g({ used: 90, exhausted: true }));
+    assert.match(t ?? '', /esgotada por hoje \(90 de 90 pedidos\)/);
+    assert.match(t ?? '', /voz do sistema/);
+  });
+
+  it('em pausa (429/disjuntor): mostra os segundos arredondados para cima', () => {
+    assert.match(describeTtsStatus(g({ blockedForMs: 11_200 })) ?? '', /em pausa por cerca de 12 s/);
+  });
+
+  it('voz do sistema (ou motor sem orçamento): mensagem simples; sem estado: nada', () => {
+    assert.equal(describeTtsStatus({ engine: 'say', name: 'macOS say', budget: null, counters: null }), 'Voz do sistema (macOS) falando as respostas.');
+    assert.equal(describeTtsStatus(null), null);
+  });
+
+  it('o texto nunca promete localidade nem ausência de custo (regras da Fase 12)', () => {
+    for (const t of [describeTtsStatus(g()), describeTtsStatus(g({ exhausted: true })), describeTtsStatus(g({ blockedForMs: 5000 }))]) {
+      assert.deepEqual(findViolations(t ?? ''), []);
+    }
   });
 });
 
@@ -53,8 +147,9 @@ describe('effectivePrivacy (Fase 12)', () => {
       mode: 'cloud',
       intent: 'gemini',
       keyPresent: true,
-      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true },
-      models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite' },
+      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true },
+      models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
+      tts: { cloud: true, reason: null, dictatedViaCloud: true },
       neverSends: ['audio']
     };
     assert.deepEqual(st, gabarito);
@@ -64,8 +159,9 @@ describe('effectivePrivacy (Fase 12)', () => {
     const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1' });
     assert.equal(st.mode, 'local-only');
     assert.equal(st.intent, 'local');
-    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false });
-    assert.deepEqual(st.models, { generation: null, intent: null });
+    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false });
+    assert.deepEqual(st.models, { generation: null, intent: null, tts: null });
+    assert.deepEqual(st.tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });
   });
 
   it('nunca expõe o valor da chave (nem tamanho): só keyPresent', () => {

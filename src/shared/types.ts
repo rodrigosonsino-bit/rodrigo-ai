@@ -42,7 +42,27 @@ export interface PrivacyStatus {
     historyTurns: number | null;
     memories: boolean;
     knowledgeSnippet: boolean;
+    /** Fase 13a: o texto de cada frase falada vai ao Gemini para virar voz. */
+    ttsText: boolean;
   };
-  models: { generation: string | null; intent: string | null };
+  models: { generation: string | null; intent: string | null; tts: string | null };
+  /** Fase 13a: estado EFETIVO do TTS em nuvem (a flag sozinha não basta; ver ttsCloudEffective). */
+  tts: {
+    cloud: boolean;
+    reason: 'master-off' | 'channel-off' | 'history-off' | null;
+    dictatedViaCloud: boolean;
+  };
   neverSends: readonly ['audio'];
+}
+
+/**
+ * Fase 13a — GET /api/voice/tts-status: qual voz fala e quanto da cota do dia já foi usada. Só números e o nome da voz;
+ * nunca texto de conversa.
+ */
+export interface TtsStatus {
+  engine: string;
+  name: string;
+  /** null quando a voz é a do sistema (não há orçamento a mostrar). */
+  budget: { used: number; limit: number; minuteUsed: number; rpm: number; exhausted: boolean; blockedForMs: number } | null;
+  counters: { gemini: number; fallback: number; failures: number } | null;
 }

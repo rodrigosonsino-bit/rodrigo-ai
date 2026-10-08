@@ -3,17 +3,21 @@ import { parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
 import { workerGeminiEnv } from '../geminiTestEndpoint.js';
 import { prepareProcessTmpDir } from './tmpSweeper.js';
 import path from 'node:path';
+import type { TtsStatus } from '../../shared/types.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { SessionManager } from './sessionManager.js';
-import { selectVoiceProvider } from './ttsProviders.js';
+import { createVoiceProvider } from './ttsProviders.js';
+import { GeminiVoiceProvider } from './geminiVoiceProvider.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
 import { createSystemTools } from '../tools/systemTools.js';
 import { createMutatingTools } from '../tools/mutatingTools.js';
 import { ReminderScheduler } from '../tools/reminderScheduler.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
+
+export type TtsStatusResponse = TtsStatus;
 
 export interface VoiceRuntime {
   available: boolean;
@@ -21,6 +25,8 @@ export interface VoiceRuntime {
   sessionManager?: SessionManager;
   audioStore?: AudioStore;
   scheduler?: ReminderScheduler;
+  /** Fase 13a: estado da voz (qual motor, orçamento do dia). Nunca contém texto de frase. */
+  ttsStatus?: () => TtsStatusResponse;
   shutdown: () => Promise<void>;
 }
 
@@ -77,7 +83,8 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     hfCacheDir,
     env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) }
   });
-  const ttsProvider = selectVoiceProvider();
+  const ttsProvider = createVoiceProvider({ engine, privacy, rootDir });
+  console.log(`[Rodrigo AI] Voz das respostas: ${ttsProvider.name}`);
   ExtensionRegistry.getInstance().registerVoiceProvider(ttsProvider);
 
   const agents = createSpecialistAgents();
@@ -129,6 +136,19 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     sessionManager,
     audioStore,
     scheduler: reminderScheduler,
+    ttsStatus: () => {
+      if (ttsProvider instanceof GeminiVoiceProvider) {
+        const b = ttsProvider.budgetStatus();
+        const c = ttsProvider.counters;
+        return {
+          engine: ttsProvider.id,
+          name: ttsProvider.name,
+          budget: { used: b.used, limit: b.limit, minuteUsed: b.minuteUsed, rpm: b.rpm, exhausted: b.exhausted, blockedForMs: b.blockedForMs },
+          counters: { gemini: c.gemini, fallback: c.fallback, failures: c.failures }
+        };
+      }
+      return { engine: ttsProvider.id, name: ttsProvider.name, budget: null, counters: null };
+    },
     shutdown: async () => {
       reminderScheduler.shutdown(); // Cancela timers pendentes na finalização do runtime
       await sessionManager.shutdownAll();

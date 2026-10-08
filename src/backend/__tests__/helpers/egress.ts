@@ -43,7 +43,18 @@ export type GeminiMode =
   | { kind: 'hang' }
   | { kind: 'redirect'; to: string }
   /** Stream que entrega uma frase completa e uma parcial e então derruba a conexão (falha NO MEIO da resposta). */
-  | { kind: 'break-after-sentence' };
+  | { kind: 'break-after-sentence' }
+  /** Fase 13a: 429 de cota com o corpo estruturado do Google (QuotaFailure + RetryInfo). */
+  | { kind: 'quota'; quotaId: string; retryDelay: string };
+
+/** Fase 13a: PCM 16 bits mono 24 kHz de uma senoide (RMS em dBFS) — o "áudio" que o Gemini falso devolve ao TTS. */
+export function tonePcm(rmsDbfs: number, seconds = 0.4, rate = 24000): Buffer {
+  const n = Math.round(seconds * rate);
+  const amp = 10 ** (rmsDbfs / 20) * Math.SQRT2;
+  const b = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i += 1) b.writeInt16LE(Math.round(amp * Math.sin((2 * Math.PI * 220 * i) / rate) * 32767), i * 2);
+  return b;
+}
 
 /** Gemini falso: responde aos DOIS contratos (SSE de geração e JSON de intenção) e grava toda requisição recebida. */
 export class FakeGemini {
@@ -52,6 +63,9 @@ export class FakeGemini {
   /** Sobrescreve o modo para um modelo específico (ex.: só o gemini-flash-latest falha). */
   modelModes: Record<string, GeminiMode> = {};
   intent: IntentDetection | { intent: string; content: string | null } = { intent: 'NENHUMA', content: null };
+  /** Fase 13a: o áudio que o TTS falso devolve e o seu tipo MIME. */
+  ttsPcm: Buffer = tonePcm(-24);
+  ttsMime = 'audio/L16;codec=pcm;rate=24000';
   private server: http.Server;
   private hung: http.ServerResponse[] = [];
   url = '';
@@ -87,10 +101,39 @@ export class FakeGemini {
       res.end();
       return;
     }
+    if (m.kind === 'quota') {
+      const body = JSON.stringify({
+        error: {
+          code: 429,
+          message: `You exceeded your current quota. Please retry in ${m.retryDelay}.`,
+          status: 'RESOURCE_EXHAUSTED',
+          details: [
+            { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaMetric: 'generate_requests_per_model', quotaId: m.quotaId }] },
+            { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: m.retryDelay }
+          ]
+        }
+      });
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+      res.end(body);
+      return;
+    }
     if (m.kind === 'status') {
       const body = JSON.stringify({ error: { code: m.status, message: `falha simulada; eco: ${m.echo}`, status: 'INTERNAL' } });
       res.writeHead(m.status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
       res.end(body);
+      return;
+    }
+    if ((req.url ?? '').includes(':streamGenerateContent') && /tts/i.test(model)) {
+      // Fase 13a: resposta do TTS = trechos de áudio PCM em base64 (divididos em 2) e a contagem de tokens.
+      const half = Math.floor(this.ttsPcm.length / 2);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (const part of [this.ttsPcm.subarray(0, half), this.ttsPcm.subarray(half)]) {
+        res.write(
+          `data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: this.ttsMime, data: part.toString('base64') } }] } }] })}\r\n\r\n`
+        );
+      }
+      res.write(`data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 34 } })}\r\n\r\n`);
+      res.end();
       return;
     }
     if ((req.url ?? '').includes(':streamGenerateContent')) {
@@ -120,8 +163,13 @@ export class FakeGemini {
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
 
+  /** Requisições de GERAÇÃO (stream de texto). As de TTS ficam em ttsRequests() — a contagem da Fase 12 não muda. */
   streamRequests(): RecordedRequest[] {
-    return this.requests.filter((r) => r.url.includes(':streamGenerateContent'));
+    return this.requests.filter((r) => r.url.includes(':streamGenerateContent') && !/\/models\/[^:/]*tts[^:/]*:/i.test(r.url));
+  }
+  /** Fase 13a: requisições de TTS (modelo com "tts" no nome). */
+  ttsRequests(): RecordedRequest[] {
+    return this.requests.filter((r) => /\/models\/[^:/]*tts[^:/]*:streamGenerateContent/i.test(r.url));
   }
   streamModels(): string[] {
     return this.streamRequests().map((r) => /\/models\/([^:/]+):/.exec(r.url)?.[1] ?? '');
