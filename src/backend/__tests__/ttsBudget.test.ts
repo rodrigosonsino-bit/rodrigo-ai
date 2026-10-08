@@ -26,6 +26,18 @@ describe('TtsBudget (Fase 13a)', () => {
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
+  it('reserva feita antes da virada do dia e usada depois: o envio conta no dia NOVO (auditoria F13a, achado 9)', () => {
+    t = Date.UTC(2026, 9, 9, 6, 59, 50); // 23:59:50 de 2026-10-08 em LA
+    const b = make();
+    const r = b.reserve(2);
+    assert.ok(r);
+    assert.ok(r.take());
+    t = Date.UTC(2026, 9, 9, 7, 0, 30); // 00:00:30 de 2026-10-09 em LA
+    assert.ok(r.take());
+    assert.equal(b.status().used, 1, 'o envio de depois da meia-noite pertence ao dia novo');
+    assert.equal(make().status().used, 1, 'e o arquivo em disco é o do dia novo (outra instância lê o mesmo número)');
+  });
+
   it('o dia é o de America/Los_Angeles, não o do relógio local nem o UTC (virada às 07:00Z em outubro)', () => {
     assert.equal(laDay(Date.UTC(2026, 9, 8, 6, 59, 0)), '2026-10-07'); // 23:59 do dia 7 em LA, já é dia 8 em UTC
     assert.equal(laDay(Date.UTC(2026, 9, 8, 7, 0, 0)), '2026-10-08');

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, type PrivacyConfig } from '../privacy.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
@@ -833,6 +834,11 @@ export class SessionManager {
       // cancelado ou falhou — não emite evento (item resolvido sem áudio)
     }
     clearTimeout(readyTimer);
+    // Item já pulado por prazo (ou turno superado): o áudio tardio nunca será servido — apaga o WAV agora em vez de
+    // deixá-lo órfão até a limpeza da sessão (auditoria F13a, achado 4).
+    if (produced && (seq < turn.nextToEmit || turn.synthResults.has(seq))) {
+      fs.rm(filePath, { force: true }, () => {});
+    }
     this.resolveSynthesisItem(session, turn, seq, produced ? { audioId, text, index } : null);
   }
 

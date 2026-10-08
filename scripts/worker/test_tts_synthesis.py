@@ -315,8 +315,32 @@ with tempfile.TemporaryDirectory() as d:
     wd.handle_cancel_synth({"cmd": "cancel_synth", "reqId": "rB"})
     check("cancel_synth de reqId desconhecido ou já terminado: no-op com ack, sem erro",
           [e["event"] for e in EVENTS] == ["cancelled", "cancelled"])
+    # cancelar OUTRO turno não pode afetar uma síntese em curso (antes era uma asserção vazia, auditoria F13a achado 7)
+    gate.clear()
+    th = threading.Thread(target=lambda: holder.update(zip(("res", "p"), run(wd, d, reqId="rC", turnId="turno-C"))))
+    th.start()
+    time.sleep(0.3)
     wd.handle_cancel({"cmd": "cancel", "turnId": "outro-turno"})
-    check("cancelar OUTRO turno não afeta sínteses (nenhuma em curso)", True)
+    gate.set()
+    th.join(3)
+    check("cancelar OUTRO turno não afeta a síntese em curso", holder["res"] is not None and holder["res"].get("ok") is True, str(holder.get("res")))
+
+    # pedido ainda NA FILA do pool (registrado no despacho) é alcançado pelo cancelamento: nada vai à rede (achado 1)
+    calls_before = [0]
+    we = make_worker(chunks)
+    real_call = we._tts_call
+    def counting_call(*a, **k):
+        calls_before[0] += 1
+        return real_call(*a, **k)
+    we._tts_call = counting_call
+    queued = {"cmd": "synthesize", "reqId": "rQ", "turnId": "turno-Q", "text": "Olá.", "outPath": os.path.join(d, "q.wav"), "deadlineMs": 4000}
+    we.register_synth(queued)  # o que o despacho faz antes de enfileirar
+    we.handle_cancel({"cmd": "cancel", "turnId": "turno-Q"})
+    EVENTS.clear()
+    we.handle_synthesize(queued)  # a thread do pool pega o item depois do cancelamento
+    resq = next((e for e in EVENTS if e.get("event") == "synth_result"), None)
+    check("síntese enfileirada e cancelada: resultado 'cancelled', zero chamada de rede, sem WAV",
+          resq is not None and resq.get("kind") == "cancelled" and calls_before[0] == 0 and not os.path.exists(queued["outPath"]), str(resq))
 
 # --- H13a.13: synthesize NÃO passa por work_queue/work_loop ---
 with tempfile.TemporaryDirectory() as d:
@@ -342,7 +366,8 @@ with tempfile.TemporaryDirectory() as d:
 
 # --- H13a.16: duas sínteses simultâneas, pool de threads daemon ---
 check("pool: workers são daemon", all(t.daemon for t in threading.enumerate() if t.name.startswith("synth-")))
-check("pool tem 2 workers", worker.TTS_POOL_WORKERS == 2)
+check("pool tem 2 workers (threads reais, não só a constante)",
+      sum(1 for t in threading.enumerate() if t.name.startswith("synth-") and t.name != "synth-call") >= worker.TTS_POOL_WORKERS == 2)
 check("HTTP do TTS >= 10 s (piso do Google)", worker.TTS_HTTP_TIMEOUT_MS >= 10_000)
 
 print(f"{ok} ok, {fail} falhas")

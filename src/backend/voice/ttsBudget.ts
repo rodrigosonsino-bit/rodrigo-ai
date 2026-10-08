@@ -183,6 +183,9 @@ export class TtsBudget {
   }
 
   private commitOne(): void {
+    // Reserva feita antes da virada do dia (America/Los_Angeles) e usada depois: o envio conta no dia NOVO
+    // (auditoria F13a, achado 9 — sem isto, writeDisk gravava o dia antigo e a unidade sumia do contador de hoje).
+    this.loadDisk();
     this.sent.push(this.now());
     this.dayCount += 1;
     this.writeDisk();

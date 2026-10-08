@@ -145,14 +145,16 @@ export class GeminiVoiceProvider implements IVoiceProvider {
     const st = this.turnState(turnId);
     if (st.mode === 'say' || !this.engine.synthesize) return this.useFallback(text, outputPath, signal, options);
 
-    // Cada pedido ENVIADO desconta; sem reserva restante, tenta um pedido avulso; sem saldo, o resto do turno vai ao `say`.
+    // Só desconta DEPOIS de obter a vaga (auditoria F13a, achado 2): um pedido abortado enquanto espera na fila nunca é
+    // enviado ao Google e não pode consumir cota. Cada pedido ENVIADO desconta; sem reserva restante, tenta um pedido
+    // avulso; sem saldo, o resto do turno vai ao `say`.
+    await this.acquire(signal);
     if (!(st.reservation?.take() ?? false) && !this.budget.tryTake()) {
+      this.release();
       st.mode = 'say';
       st.reason = 'budget';
       return this.useFallback(text, outputPath, signal, options);
     }
-
-    await this.acquire(signal);
     let result: SynthesizeResult;
     try {
       result = await this.engine.synthesize(

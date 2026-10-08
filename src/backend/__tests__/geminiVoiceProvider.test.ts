@@ -273,6 +273,8 @@ describe('GeminiVoiceProvider (Fase 13a)', () => {
     gates.forEach((g) => g());
     await Promise.all([a, b]);
     assert.deepEqual(engine.synthCalls.map((r) => r.text), ['a', 'b']);
+    // auditoria F13a, achado 2: o pedido abortado na fila nunca foi enviado, então não pode ter descontado cota
+    assert.equal(budget.status().used, 2, 'só os 2 pedidos enviados descontam do dia');
   });
 
   it('endTurn desconhecido é inofensivo; o mapa de turnos não cresce sem limite', async () => {

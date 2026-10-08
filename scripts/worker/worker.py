@@ -1165,11 +1165,20 @@ class Worker:
 
     # --- Fase 13a: TTS Gemini (pool próprio; ver o bloco de constantes acima) ---
 
+    def register_synth(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """Registra a síntese já no DESPACHO (auditoria F13a, achado 1): um pedido ainda na fila do pool também precisa
+        ser alcançado por cancel/cancel_synth, senão roda inteiro (e chama o Google) depois do barge-in."""
+        req_id = msg["reqId"]
+        with self._synth_lock:
+            entry = self._syntheses.get(req_id)
+            if entry is None:
+                entry = {"cancel": threading.Event(), "turn_id": msg.get("turnId")}
+                self._syntheses[req_id] = entry
+        return entry
+
     def handle_synthesize(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
-        entry: dict[str, Any] = {"cancel": threading.Event(), "turn_id": msg.get("turnId")}
-        with self._synth_lock:
-            self._syntheses[req_id] = entry
+        entry = self.register_synth(msg)
         try:
             result = self._synthesize(msg, entry)
         except BaseException as exc:  # noqa: BLE001
@@ -1181,6 +1190,8 @@ class Worker:
         emit({"event": "synth_result", "reqId": req_id, **result})
 
     def _synthesize(self, msg: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+        if entry["cancel"].is_set():
+            return {"ok": False, "kind": "cancelled"}  # cancelado enquanto esperava na fila do pool: nada vai à rede
         if os.environ.get("RODRIGO_CLOUD", "1") == "0" or os.environ.get("RODRIGO_CLOUD_TTS", "1") == "0":
             return {"ok": False, "kind": "disabled"}  # defesa em profundidade: o mestre e o canal de TTS valem aqui também
         if not os.environ.get("GEMINI_API_KEY"):
@@ -1472,6 +1483,7 @@ class Worker:
             elif cmd == "synthesize":
                 # Fase 13a: pool próprio — NUNCA a work_queue (fila de tamanho 1 que descartaria o pedido, e a geração
                 # ocupa o work_loop enquanto as frases precisam ser sintetizadas).
+                self.register_synth(msg)
                 self._synth_pool.submit(self.handle_synthesize, msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
