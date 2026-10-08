@@ -7,7 +7,10 @@ import type {
 
 // --- Parâmetros de VAD (Fase 2 v2 + adendo) ---
 const PRE_ROLL_MS = 200;
-const SILENCE_THRESHOLD_MS = 700;
+// F13b (decisão do usuário, 2026-10-08: "1,0 s"): 700 ms cortava a pergunta em pausas naturais e cada pedaço virava um turno
+// com transcrição ruim. Custo: +0,3 s em toda resposta. A junção de fragmentos no servidor foi reprovada na auditoria
+// (docs/phase-13b-v1.md + docs/audits/f13b-plan-codex-2026-10-08.md).
+const SILENCE_THRESHOLD_MS = 1000;
 const MIN_VOICE_DURATION_MS = 220; // Achado v2-5: 200-250ms, não os 400ms originais (corta "Sim"/"Não"/"Oi")
 const MAX_SEGMENT_MS = 20_000;
 const BARGE_IN_HYSTERESIS_MS = 250; // sustentar fala acima do limiar por 250ms durante "falando"
