@@ -157,10 +157,10 @@ const done = (sse: { events: Array<Record<string, unknown>> }): boolean => sse.e
 
 describe('Fase V — mightBeScreenQuery (§3.1)', () => {
   for (const t of ['o que tem na minha tela?', 'Olha minha tela', 'o que é isso no monitor', 'me ajuda com essa janela',
-    'o que aparece no desktop?', 'tem um erro na área de trabalho', 'o que está aqui na frente?']) {
+    'o que aparece no desktop?', 'tem um erro na área de trabalho', 'o que está aqui na frente?', 'olha as telas', 'tenho dois monitores ligados', 'nas áreas de trabalho', 'essas janelas']) {
     it(`é tela: "${t}"`, () => assert.equal(mightBeScreenQuery(t), true));
   }
-  for (const t of ['o que é isso?', 'esse erro aqui', 'olha só', 'qual a capital da França?', 'telhado', 'estelar', 'janelas de oportunidade são raras'.replace('janelas', 'chances')]) {
+  for (const t of ['o que é isso?', 'esse erro aqui', 'olha só', 'qual a capital da França?', 'telhado', 'estelar', 'telão', 'monitoramento', 'telefone']) {
     it(`não é tela: "${t}"`, () => assert.equal(mightBeScreenQuery(t), false));
   }
   for (const t of ['cria um lembrete para comprar a tela nova', 'salva uma nota sobre a tela quebrada', 'guarda na memória que a tela deu problema', 'anota que a tela do celular quebrou']) {
@@ -188,6 +188,20 @@ describe('Fase V — windowHistory nunca deixa sair turno de tela (§5.3)', () =
     { role: 'assistant', content: 'TELA-RESPOSTA-MARCADOR', origin: 'screen' },
     { role: 'user', content: 'pergunta atual' }
   ];
+  it('histórico desligado + confirmação de reprodução atrasada (resposta gravada DEPOIS da fala atual): sai a fala atual', () => {
+    const late: ConversationMessage[] = [
+      { role: 'user', content: 'TELA-PERGUNTA', origin: 'screen' },
+      { role: 'user', content: 'pergunta atual' },
+      { role: 'assistant', content: 'TELA-RESPOSTA', origin: 'screen' }
+    ];
+    assert.deepEqual(windowHistory(late, { sendHistory: false, historyTurns: 8 }), [{ role: 'user', content: 'pergunta atual' }]);
+    const lateNormal: ConversationMessage[] = [
+      { role: 'user', content: 'pergunta atual' },
+      { role: 'assistant', content: 'resposta antiga atrasada' }
+    ];
+    assert.deepEqual(windowHistory(lateNormal, { sendHistory: false, historyTurns: 8 }), [{ role: 'user', content: 'pergunta atual' }]);
+  });
+
   it('histórico ligado: remove as mensagens de tela e nunca envia o campo origin', () => {
     const out = windowHistory(H, { sendHistory: true, historyTurns: 8 });
     assert.deepEqual(out, [
@@ -198,7 +212,8 @@ describe('Fase V — windowHistory nunca deixa sair turno de tela (§5.3)', () =
     assert.ok(out.every((m) => !('origin' in m)));
   });
   it('histórico desligado: a última mensagem de tela não sai; a normal sai sem origin', () => {
-    assert.deepEqual(windowHistory(H.slice(0, 4), { sendHistory: false, historyTurns: 8 }), []);
+    // sem fala normal depois da tela: sai a última fala NORMAL do usuário, nunca a de tela
+    assert.deepEqual(windowHistory(H.slice(0, 4), { sendHistory: false, historyTurns: 8 }), [{ role: 'user', content: 'pergunta normal' }]);
     assert.deepEqual(windowHistory(H, { sendHistory: false, historyTurns: 8 }), [{ role: 'user', content: 'pergunta atual' }]);
   });
 });
@@ -269,6 +284,7 @@ describe('Fase V — sessão: caminho de tela (fatia 2)', () => {
     await speak(h, s);
     await waitFor(() => done(s.sse), 'turn_done');
     assert.ok(!s.sse.events.some((e) => e.type === 'routing' && e.label === 'TELA'));
+    assert.equal(h.engine.classifyCalls.length, 1, 'seguiu o caminho normal (positivo, não só ausência de TELA)');
     s.sse.close();
   });
 

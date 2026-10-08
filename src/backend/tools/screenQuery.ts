@@ -12,7 +12,7 @@ function norm(transcript: string): string {
 
 /** Referência explícita à tela. Palavras soltas ("isso", "esse erro") não bastam. */
 const SCREEN_WORDS =
-  /(?:^|[^\p{L}])(tela|monitor|desktop|[aá]rea de trabalho|janela)(?=$|[^\p{L}])|o que (?:est[aá]|aparece) aqui na frente/u;
+  /(?:^|[^\p{L}])(telas?|monitor(?:es)?|desktops?|[aá]reas? de trabalho|janelas?)(?=$|[^\p{L}])|o que (?:est[aá]|aparece) aqui na frente/u;
 
 /**
  * A fala pede algo sobre a tela? O chamador precisa garantir antes que ela NÃO é um pedido de mutação

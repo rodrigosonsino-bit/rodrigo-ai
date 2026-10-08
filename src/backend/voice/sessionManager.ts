@@ -1033,8 +1033,14 @@ export function windowHistory(
   // Fase V (§5.3): mensagens de turno de tela nunca saem para o Gemini; e o campo `origin` nunca vai ao worker.
   const strip = (m: ConversationMessage): ConversationMessage => ({ role: m.role, content: m.content });
   if (!privacy.sendHistory) {
-    const last = history.length > 0 ? history[history.length - 1] : undefined;
-    return last && last.origin !== 'screen' ? [strip(last)] : [];
+    // A última fala do USUÁRIO que não é de tela (auditoria Kimi da fatia 2, achado 3): se a confirmação de reprodução de uma
+    // resposta chega depois da fala seguinte, a última mensagem do histórico é a do assistente — e antes desta correção ela ia
+    // no lugar da pergunta atual (defeito pré-existente) ou, sendo de tela, a pergunta sumia.
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const m = history[i];
+      if (m.role === 'user' && m.origin !== 'screen') return [strip(m)];
+    }
+    return [];
   }
   const windowed = history.filter((m) => m.origin !== 'screen').slice(-(privacy.historyTurns * 2));
   let start = 0;
