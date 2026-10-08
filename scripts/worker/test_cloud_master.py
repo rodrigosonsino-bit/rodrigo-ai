@@ -3,6 +3,7 @@ mesmo que o Node peça). Rodar: python3 scripts/worker/test_cloud_master.py"""
 import os
 import sys
 import threading
+from collections import OrderedDict
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -32,7 +33,9 @@ def run_generate(cloud: str) -> tuple[list[dict], bool]:
         _gemini_client=boom,
         _gemini_client_for=lambda genai, timeout_ms: boom,  # o cliente de geração agora vem por prazo (fallback)
         _genai=SimpleNamespace(types=SimpleNamespace(GenerateContentConfig=lambda **kw: kw)),
+        _cancelled_turns=OrderedDict(),
     )
+    stub._set_current = lambda h: worker.Worker._set_current(stub, h)
     msg = {"reqId": "r1", "turnId": "t1", "epoch": 1,
            "messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "oi"}]}
     worker.Worker.handle_generate(stub, msg)

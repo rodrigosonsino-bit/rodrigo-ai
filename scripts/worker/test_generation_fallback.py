@@ -4,6 +4,7 @@ gemini-3.5-flash-lite com as MESMAS mensagens; depois de uma frase dita nunca re
 import os
 import sys
 import threading
+from collections import OrderedDict
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -103,7 +104,8 @@ def run(behavior):
     client = Client(behavior)
     stub = SimpleNamespace(_current_lock=threading.Lock(), _current=None, _gemini_client=client,
                            _genai=SimpleNamespace(types=SimpleNamespace(GenerateContentConfig=lambda **kw: kw, ThinkingConfig=lambda **kw: kw)),
-                           _gemini_client_for=lambda genai, t: client)
+                           _gemini_client_for=lambda genai, t: client, _cancelled_turns=OrderedDict())
+    stub._set_current = lambda h: worker.Worker._set_current(stub, h)
     STUB["stub"] = stub
     # histórico de VÁRIAS mensagens (usuário, assistente, usuário): o plano B tem de receber TODAS, não só a última
     worker.Worker.handle_generate(stub, {"reqId": "r", "turnId": "t", "epoch": 1, "messages": [

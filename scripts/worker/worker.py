@@ -31,6 +31,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -775,6 +776,10 @@ class Worker:
         self.work_queue: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=1)
         self._current: Optional[GenerationHandle] = None
         self._current_lock = threading.Lock()
+        # Turnos cancelados (os 64 mais recentes): o cancelamento alcança também comandos AINDA NA FILA e o intervalo entre
+        # sair da fila e virar `_current` — sem isto, um comando de turno já cancelado ainda podia chamar o Gemini
+        # (auditoria do plano da Fase V, achado 10).
+        self._cancelled_turns: "OrderedDict[str, None]" = OrderedDict()
         # Fase 13a: sínteses de TTS em curso, por reqId (cancelamento próprio, distinto de `_current` — a geração).
         self._syntheses: dict[str, dict[str, Any]] = {}
         self._synth_lock = threading.Lock()
@@ -819,9 +824,23 @@ class Worker:
 
     # --- Comandos ---
 
+    def _set_current(self, handle: GenerationHandle) -> None:
+        with self._current_lock:
+            self._current = handle
+            if handle.turn_id in self._cancelled_turns:
+                handle.cancel_event.set()
+
+    def _turn_cancelled(self, turn_id: Any) -> bool:
+        with self._current_lock:
+            return turn_id is not None and turn_id in self._cancelled_turns
+
     def handle_cancel(self, msg: dict[str, Any]) -> None:
         turn_id = msg.get("turnId")
         with self._current_lock:
+            if turn_id is not None:
+                self._cancelled_turns[turn_id] = None
+                while len(self._cancelled_turns) > 64:
+                    self._cancelled_turns.popitem(last=False)
             current = self._current
             if current is not None and current.turn_id == turn_id:
                 current.cancel_event.set()
@@ -878,8 +897,7 @@ class Worker:
             return
 
         handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
-        with self._current_lock:
-            self._current = handle
+        self._set_current(handle)
 
         try:
             messages = [
@@ -934,8 +952,7 @@ class Worker:
             return
 
         handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
-        with self._current_lock:
-            self._current = handle
+        self._set_current(handle)
 
         try:
             messages = [
@@ -982,8 +999,7 @@ class Worker:
             return
 
         handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
-        with self._current_lock:
-            self._current = handle
+        self._set_current(handle)
 
         try:
             from mlx_lm.generate import stream_generate
@@ -1056,6 +1072,8 @@ class Worker:
             return unavailable("desligado por RODRIGO_CLOUD_INTENT=0")
         if not os.environ.get("GEMINI_API_KEY"):
             return unavailable("GEMINI_API_KEY ausente")
+        if self._turn_cancelled(turn_id):
+            return  # turno cancelado: o Node já resolveu este pedido localmente; nada sai para o Gemini
         try:
             if getattr(self, "_intent_client", None) is None:
                 from google import genai
@@ -1110,8 +1128,7 @@ class Worker:
             return
 
         handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
-        with self._current_lock:
-            self._current = handle
+        self._set_current(handle)
 
         try:
             messages = [
@@ -1288,8 +1305,7 @@ class Worker:
         messages = msg["messages"]
 
         handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
-        with self._current_lock:
-            self._current = handle
+        self._set_current(handle)
 
         try:
             if os.environ.get("RODRIGO_CLOUD", "1") == "0":
@@ -1320,6 +1336,8 @@ class Worker:
             last_finish: Any = None
             last_usage: Any = None
             for attempt, (model, timeout_ms) in enumerate(GENERATION_MODELS):
+                if handle.cancel_event.is_set():
+                    break  # cancelado antes de qualquer chamada: nada sai para o Gemini
                 try:
                     client = self._gemini_client_for(genai, timeout_ms)
                     stream = client.models.generate_content_stream(
@@ -1443,6 +1461,10 @@ class Worker:
         while True:
             msg = self.work_queue.get()
             cmd = msg.get("cmd")
+            if self._turn_cancelled(msg.get("turnId")):
+                # O Node já resolveu localmente o pedido deste turno (mlxWorkerEngine.cancel): descarta sem executar.
+                log_diag(f"Comando {cmd!r} descartado: turno já cancelado.")
+                continue
             try:
                 if cmd == "transcribe":
                     self.handle_transcribe(msg)
