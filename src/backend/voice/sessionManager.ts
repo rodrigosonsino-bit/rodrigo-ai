@@ -331,6 +331,17 @@ export class SessionManager {
       const transcript = await this.engine.transcribe(audioPath);
       if (session.activeTurn !== turn) return; // superado por cancelamento/preempção
 
+      // Transcrição sem nenhuma letra ou número = o detector de voz disparou com ruído, estalo, eco do alto-falante ou um
+      // fragmento: NÃO é erro nem pedido. Ignora em silêncio (sem bolha vermelha, sem histórico, sem classificação, sem
+      // consumir a repetição de uma confirmação pendente) e volta a ouvir.
+      if (!hasRecognizableSpeech(transcript)) {
+        console.log(`[turn] turno=${turn.turnId} sem fala reconhecível (ruído/eco/fragmento) — ignorado.`);
+        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+        this.emit(session, { type: 'state', state: 'ouvindo' });
+        session.activeTurn = null;
+        return;
+      }
+
       this.emit(session, { type: 'transcript', turnId: turn.turnId, text: transcript });
       session.history.push({ role: 'user', content: transcript });
       this.trimHistory(session);
@@ -839,4 +850,9 @@ export function windowHistory(
   let start = 0;
   while (start < windowed.length - 1 && windowed[start].role === 'assistant') start += 1;
   return windowed.slice(start);
+}
+
+/** Há pelo menos uma letra ou um número? "", "  ", "!", "...", "♪" não são fala. */
+export function hasRecognizableSpeech(transcript: string): boolean {
+  return /[\p{L}\p{N}]/u.test(transcript);
 }

@@ -41,12 +41,16 @@ export type GeminiMode =
   | { kind: 'ok' }
   | { kind: 'status'; status: number; echo: string }
   | { kind: 'hang' }
-  | { kind: 'redirect'; to: string };
+  | { kind: 'redirect'; to: string }
+  /** Stream que entrega uma frase completa e uma parcial e então derruba a conexão (falha NO MEIO da resposta). */
+  | { kind: 'break-after-sentence' };
 
 /** Gemini falso: responde aos DOIS contratos (SSE de geração e JSON de intenção) e grava toda requisição recebida. */
 export class FakeGemini {
   requests: RecordedRequest[] = [];
   mode: GeminiMode = { kind: 'ok' };
+  /** Sobrescreve o modo para um modelo específico (ex.: só o gemini-flash-latest falha). */
+  modelModes: Record<string, GeminiMode> = {};
   intent: IntentDetection | { intent: string; content: string | null } = { intent: 'NENHUMA', content: null };
   private server: http.Server;
   private hung: http.ServerResponse[] = [];
@@ -64,7 +68,16 @@ export class FakeGemini {
   }
 
   private respond(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const m = this.mode;
+    const model = /\/models\/([^:/]+):/.exec(req.url ?? '')?.[1] ?? '';
+    const m = this.modelModes[model] ?? this.mode;
+    if (m.kind === 'break-after-sentence') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (const t of ['Primeira frase completa. ', 'Segunda ainda não termi']) {
+        res.write(`data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: t }] } }] })}\r\n\r\n`);
+      }
+      setTimeout(() => res.destroy(), 50);
+      return;
+    }
     if (m.kind === 'hang') {
       this.hung.push(res);
       return;
@@ -109,6 +122,9 @@ export class FakeGemini {
 
   streamRequests(): RecordedRequest[] {
     return this.requests.filter((r) => r.url.includes(':streamGenerateContent'));
+  }
+  streamModels(): string[] {
+    return this.streamRequests().map((r) => /\/models\/([^:/]+):/.exec(r.url)?.[1] ?? '');
   }
   intentRequests(): RecordedRequest[] {
     return this.requests.filter((r) => r.url.includes(':generateContent') && !r.url.includes(':streamGenerateContent'));

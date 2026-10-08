@@ -25,10 +25,12 @@ def run_generate(cloud: str) -> tuple[list[dict], bool]:
     events: list[dict] = []
     worker.emit = lambda ev: events.append(ev)  # type: ignore[assignment]
     worker.log_diag = lambda *_a, **_k: None  # type: ignore[assignment]
+    boom = Boom()
     stub = SimpleNamespace(
         _current_lock=threading.Lock(),
         _current=None,
-        _gemini_client=Boom(),
+        _gemini_client=boom,
+        _gemini_client_for=lambda genai, timeout_ms: boom,  # o cliente de geração agora vem por prazo (fallback)
         _genai=SimpleNamespace(types=SimpleNamespace(GenerateContentConfig=lambda **kw: kw)),
     )
     msg = {"reqId": "r1", "turnId": "t1", "epoch": 1,

@@ -441,6 +441,27 @@ def resolve_gemini_endpoint(env: Any) -> tuple:
     return env["GEMINI_API_KEY"], None
 
 
+# --- Geração com plano B (decisão do usuário, 2026-10-07): o gemini-flash-latest passou a responder 503 "high demand"
+# e travar; sem plano B o app ficava mudo ("não consegui pensar numa resposta agora"). O MESMO provedor e a MESMA
+# fronteira de dados (as mesmas mensagens/prompt vão ao modelo reserva, que já é usado na classificação de intenção).
+# O primeiro modelo tem prazo curto (tempo até o 1º byte / entre blocos); o reserva tem o prazo longo de antes.
+# ATENÇÃO: o prazo HTTP vai ao Google como "deadline" e o MÍNIMO ACEITO É 10 s — abaixo disso a API responde 400
+# INVALID_ARGUMENT ("Manually set deadline 8s is too short") e a geração inteira para de funcionar. Nunca < 10_000.
+GENERATION_MODELS = (("gemini-flash-latest", 10_000), ("gemini-3.5-flash-lite", 20_000))
+
+
+def should_fallback(exc: BaseException) -> bool:
+    """Só falhas em que OUTRO modelo pode ajudar: 5xx (sobrecarga), timeout/transporte, 404 (alias sumiu) e 429 (cota do
+    modelo). Erro de requisição (400) ou de credencial (401/403) é igual em qualquer modelo — não tenta de novo."""
+    names = {c.__name__ for c in type(exc).__mro__}
+    code = getattr(exc, "code", None)
+    if "ServerError" in names:
+        return True
+    if "ClientError" in names and code in (404, 429):
+        return True
+    return bool(names & {"TimeoutException", "TransportError"})  # httpx.ReadTimeout, ConnectError...
+
+
 def build_gemini_client(genai: Any, timeout_ms: int) -> Any:
     """ÚNICO ponto que cria cliente Gemini (geração e intenção): mesma regra de endpoint e redirect desligado."""
     import httpx
@@ -938,6 +959,17 @@ class Worker:
             if self._mx is not None:
                 self._mx.clear_cache()
 
+    def _gemini_client_for(self, genai: Any, timeout_ms: int) -> Any:
+        """Cliente de geração por prazo (cache). Toda criação passa por build_gemini_client — único ponto (§2.5)."""
+        if self._gemini_client is not None:
+            return self._gemini_client  # ponto de injeção dos testes (nunca definido em produção)
+        clients = getattr(self, "_gemini_clients", None)
+        if clients is None:
+            clients = self._gemini_clients = {}
+        if timeout_ms not in clients:
+            clients[timeout_ms] = build_gemini_client(genai, timeout_ms)
+        return clients[timeout_ms]
+
     def handle_generate(self, msg: dict[str, Any]) -> None:
         req_id = msg["reqId"]
         turn_id = msg["turnId"]
@@ -955,20 +987,15 @@ class Worker:
             if not os.environ.get("GEMINI_API_KEY"):
                 raise RuntimeError("GEMINI_API_KEY ausente — configure a variável de ambiente.")
 
+            # Import tardio (nunca no __init__): o cliente nunca é construído com api_key vazia — o RuntimeError acima
+            # já interrompeu. Os prazos (8 s no 1º modelo, 20 s no reserva) ficam bem abaixo do timeout de 60 s do Node
+            # (VOICE_LIMITS.TURN_TIMEOUT_MS), para uma falha de rede emitir "error" NDJSON e liberar o turno em vez de
+            # o Node matar o worker inteiro com SIGKILL.
             if self._gemini_client is None:
-                # Achado CRÍTICA reaberto (rodada 2): import e construção tardios — nunca no
-                # __init__ nem no topo do módulo (o mesmo padrão de lazy import que mlx.core/mlx_lm
-                # já seguem hoje, achado novo BAIXA da rodada 2 também cobre isso). Se a chave
-                # estiver ausente, o RuntimeError acima já interrompeu antes de chegar aqui — o
-                # cliente nunca é construído com api_key vazia.
                 from google import genai
                 self._genai = genai
-                # 20s — bem abaixo do timeout de 60s do Node (VOICE_LIMITS.TURN_TIMEOUT_MS), pra que uma falha de
-                # rede emita "error" NDJSON e libere o turno, em vez de deixar o Node matar o worker inteiro
-                # com SIGKILL por uma causa que não é travamento de GPU.
-                self._gemini_client = build_gemini_client(genai, 20_000)
             else:
-                genai = self._genai
+                genai = self._genai  # testes injetam cliente e módulo falsos
 
             system_instruction, contents = to_gemini_contents(messages)
 
@@ -977,54 +1004,77 @@ class Worker:
             emitted_normalized: list[str] = []
             loop_detected = False
 
-            stream = self._gemini_client.models.generate_content_stream(
-                model="gemini-flash-latest",
-                contents=contents,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    max_output_tokens=MAX_TURN_TOKENS,  # Achado ALTA novo (rodada 2) — ver abaixo
-                ),
-            )
-
             gemini_call_started = time.monotonic()
             first_chunk_logged = False
-            for chunk in stream:
-                if not first_chunk_logged:
-                    log_diag(f"Gemini TTFC: {time.monotonic() - gemini_call_started:.2f}s (turnId={turn_id})")
-                    first_chunk_logged = True
+            for attempt, (model, timeout_ms) in enumerate(GENERATION_MODELS):
+                try:
+                    client = self._gemini_client_for(genai, timeout_ms)
+                    stream = client.models.generate_content_stream(
+                        model=model,
+                        contents=contents,
+                        config=genai.types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            max_output_tokens=MAX_TURN_TOKENS,  # Achado ALTA novo (rodada 2) — ver abaixo
+                        ),
+                    )
 
-                if handle.cancel_event.is_set():
-                    log_diag(f"Geração cancelada (turnId={turn_id}) — parando de consumir o stream do Gemini.")
-                    break  # achado 3 (rodada 1) — sem stream.close(), método inexistente no SDK
+                    for chunk in stream:
+                        if not first_chunk_logged:
+                            log_diag(f"Gemini TTFC: {time.monotonic() - gemini_call_started:.2f}s (modelo={model}, turnId={turn_id})")
+                            first_chunk_logged = True
 
-                buffer += chunk.text or ""
+                        if handle.cancel_event.is_set():
+                            log_diag(f"Geração cancelada (turnId={turn_id}) — parando de consumir o stream do Gemini.")
+                            break  # achado 3 (rodada 1) — sem stream.close(), método inexistente no SDK
 
-                # EXATAMENTE o mesmo laço de find_sentence_boundary/emit/dedupe já existente e
-                # testado — reaproveitado sem mudança, só a origem de `buffer` mudou:
-                boundary = find_sentence_boundary(buffer)
-                while boundary is not None:
-                    sentence = buffer[:boundary].strip()
-                    buffer = buffer[boundary:]
-                    if sentence:
-                        if _is_near_duplicate_sentence(sentence, emitted_normalized):
-                            log_diag(
-                                f"Loop de repetição detectado (turnId={turn_id}, "
-                                f"frase {sentence_index}) — encerrando geração aqui."
-                            )
-                            loop_detected = True
+                        buffer += chunk.text or ""
+
+                        # EXATAMENTE o mesmo laço de find_sentence_boundary/emit/dedupe já existente e
+                        # testado — reaproveitado sem mudança, só a origem de `buffer` mudou:
+                        boundary = find_sentence_boundary(buffer)
+                        while boundary is not None:
+                            sentence = buffer[:boundary].strip()
+                            buffer = buffer[boundary:]
+                            if sentence:
+                                if _is_near_duplicate_sentence(sentence, emitted_normalized):
+                                    log_diag(
+                                        f"Loop de repetição detectado (turnId={turn_id}, "
+                                        f"frase {sentence_index}) — encerrando geração aqui."
+                                    )
+                                    loop_detected = True
+                                    break
+                                emit({
+                                    "event": "sentence",
+                                    "reqId": req_id,
+                                    "turnId": turn_id,
+                                    "index": sentence_index,
+                                    "text": sentence,
+                                })
+                                emitted_normalized.append(_normalize_for_dedup(sentence))
+                                sentence_index += 1
+                            boundary = find_sentence_boundary(buffer)
+                        if loop_detected:
                             break
-                        emit({
-                            "event": "sentence",
-                            "reqId": req_id,
-                            "turnId": turn_id,
-                            "index": sentence_index,
-                            "text": sentence,
-                        })
-                        emitted_normalized.append(_normalize_for_dedup(sentence))
-                        sentence_index += 1
-                    boundary = find_sentence_boundary(buffer)
-                if loop_detected:
-                    break
+                    break  # terminou (ou foi cancelado/loop): não há segunda tentativa
+                except Exception as exc:  # noqa: BLE001
+                    # Plano B SÓ se nada foi dito ainda (sentence_index == 0): nunca recomeça nem duplica uma resposta que o
+                    # usuário já está ouvindo. Mensagens/prompt idênticos: a fronteira de dados não muda.
+                    if (
+                        attempt + 1 < len(GENERATION_MODELS)
+                        and sentence_index == 0
+                        and not handle.cancel_event.is_set()
+                        and should_fallback(exc)
+                    ):
+                        log_diag(
+                            f"Geração: {model} falhou ({safe_exc(exc)}); tentando {GENERATION_MODELS[attempt + 1][0]} "
+                            f"(turnId={turn_id})."
+                        )
+                        buffer = ""
+                        emitted_normalized = []
+                        first_chunk_logged = False
+                        gemini_call_started = time.monotonic()
+                        continue
+                    raise
 
             if not handle.cancel_event.is_set():
                 # Achado 2 (CRÍTICA, rodada 1): "done" é emitido INCONDICIONALMENTE aqui — um loop

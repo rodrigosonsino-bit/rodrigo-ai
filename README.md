@@ -209,6 +209,8 @@ rodrigo-ai/
 | Trecho de `docs/research/` (Teologia/Virtologia) | só se ligado; **desligado por padrão** | `RODRIGO_SEND_KNOWLEDGE=1` liga |
 | Texto da fala atual, para entender o pedido (hora, data, lembretes, notas) | falas que parecem esses pedidos | `RODRIGO_CLOUD_INTENT=0` |
 
+**Modelo de geração e plano B.** A resposta é gerada pelo `gemini-flash-latest` (prazo de 8 s até o primeiro dado). Se ele falhar **antes de qualquer frase ser dita** (erro 5xx de sobrecarga, timeout, 404 ou 429), o app tenta na hora o `gemini-3.5-flash-lite` com **exatamente as mesmas mensagens**, mesmo provedor e mesma conta, sem mudar o que sai da sua máquina. Erros 400/401/403 não tentam de novo (seriam iguais em qualquer modelo), e uma falha **depois** de a resposta já ter começado termina com o que já foi dito, sem recomeçar. A resposta do plano B tende a ser mais simples.
+
 **Atenção ao nível da sua chave do Gemini.** Pelos termos da API (ai.google.dev/gemini-api/terms, atualizados em 28/04/2026, conferidos em 07/10/2026), no **nível gratuito** o Google usa o conteúdo enviado para melhorar seus produtos e **pessoas podem revisá-lo**; no **nível pago**, o Google afirma que não usa os prompts nem as respostas para melhorar produtos. Um projeto sem faturamento configurado no Google AI Studio está no nível gratuito. Tudo o que a tabela acima lista como "vai ao Gemini" fica sujeito a isso.
 
 **Modo sem nuvem:** `RODRIGO_CLOUD=0` desliga **toda** chamada ao Gemini (geração e intenção). Hora, data, lembretes e notas continuam funcionando; o que exigir uma resposta gerada recebe, por voz, o aviso de que a geração está desligada. Não há fallback para outro provedor.

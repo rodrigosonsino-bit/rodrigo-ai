@@ -2340,3 +2340,66 @@ describe('Privacidade (Fase 12) — controles de saída', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Transcrição vazia = ruído/eco/fragmento: ignorada em silêncio (uso real, 2026-10-07: "Texto vazio para classificação"
+// aparecia como erro vermelho a cada estalo do microfone).
+// ---------------------------------------------------------------------------------------------
+describe('Transcrição sem fala reconhecível é ignorada em silêncio', () => {
+  it('hasRecognizableSpeech: só letras/números contam (inclui acentos e dígitos)', async () => {
+    const { hasRecognizableSpeech } = await import('../voice/sessionManager.js');
+    for (const nothing of ['', '   ', '\n', '!', '...', ' . ', '♪', '—', '?!']) assert.equal(hasRecognizableSpeech(nothing), false, JSON.stringify(nothing));
+    for (const speech of ['oi', 'Sim', 'ã', '7', 'que horas são?', ' ok ']) assert.equal(hasRecognizableSpeech(speech), true, JSON.stringify(speech));
+  });
+
+  it('turno com transcrição vazia: sem erro, sem bolha "transcript", sem classificação, sem histórico; volta a ouvir e o próximo turno funciona', async () => {
+    const h = await setupHarness();
+    try {
+      const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+      const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      await sse.waitFor(1);
+      const post = async (): Promise<void> => {
+        await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+      };
+      const types = (): string[] => (sse.events as Array<{ type: string }>).map((e) => e.type);
+      const until = async (pred: () => boolean): Promise<void> => {
+        const end = Date.now() + 4000;
+        while (Date.now() < end && !pred()) await new Promise((r) => setTimeout(r, 15));
+        assert.ok(pred(), `condição não atendida; eventos: ${types().join(',')}`);
+      };
+
+      for (const nothing of ['', '  ', '!', '...']) {
+        const before = types().length;
+        h.engine.fixedTranscript = nothing;
+        await post();
+        await until(() => types().slice(before).includes('turn_done'));
+        const fresh = types().slice(before);
+        assert.ok(!fresh.includes('error') && !fresh.includes('transcript') && !fresh.includes('routing'), `${JSON.stringify(nothing)}: ${fresh.join(',')}`);
+        assert.equal(fresh[fresh.length - 1], 'state', 'termina voltando a ouvir');
+        assert.equal((sse.events[sse.events.length - 1] as { state?: string }).state, 'ouvindo');
+      }
+      assert.equal(h.engine.classifyCalls.length, 0, 'nenhuma classificação para ruído');
+      assert.equal(h.engine.generateCalls.length, 0, 'nenhuma geração para ruído');
+
+      // CONTROLE POSITIVO: fala de verdade logo depois segue o fluxo normal inteiro
+      const before = types().length;
+      h.engine.fixedTranscript = 'oi, tudo bem';
+      await post();
+      await until(() => types().slice(before).includes('turn_done'));
+      assert.ok(types().slice(before).includes('transcript') && types().slice(before).includes('routing'));
+      assert.equal(h.engine.classifyCalls.length, 1);
+      assert.equal(h.engine.generateCalls.length, 1);
+      const history = h.engine.generateCalls[0].messages.filter((m) => m.role !== 'system');
+      assert.equal(history.length, 1, 'o ruído NÃO entrou no histórico');
+      assert.equal(history[0].content, 'oi, tudo bem');
+      sse.close();
+    } finally {
+      await teardownHarness(h);
+    }
+  });
+});
