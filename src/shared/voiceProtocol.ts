@@ -6,7 +6,8 @@
 export type VoiceState = 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | 'erro';
 
 /** Fase 3 — rótulo de classificação de intenção. Nenhum tem especialista real ainda (Fase 4). */
-export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'AMBIGUO';
+// 'TELA' (Fase V) nunca vem do classificador: só o caminho de tela do sessionManager o emite no `routing`.
+export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'AMBIGUO' | 'TELA';
 
 /** Fase 5b — nomes de ferramentas suportadas pelo sistema e detecção. */
 export const TOOL_NAMES = ['HORA', 'DATA', 'NENHUMA'] as const;
@@ -104,6 +105,11 @@ export interface AudioTurnResponse {
 export interface ConversationMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /**
+   * Fase V (docs/phase-vision-v3.md §5.3): 'screen' = pergunta ou resposta de um turno de tela. Nunca sai para o Gemini em
+   * turnos seguintes — `windowHistory` remove essas mensagens de todo envio.
+   */
+  origin?: 'screen';
 }
 
 export const VOICE_LIMITS = {
@@ -146,6 +152,9 @@ export const MUTATION_MAX_AGE_MS = 120_000;
 export const NO_ACTION_CLAIM_TEXT = 'Eu não fiz isso. Para eu anotar ou criar um lembrete, peça direto, por exemplo: anota que.';
 export const MUTATION_REPROMPT_TEXT = 'Não entendi. Posso confirmar? Diga só sim ou não.';
 export const GENERATION_FAILURE_TEXT = 'Não consegui pensar numa resposta agora.';
+
+/** Fase V, fatia 2: o caminho de tela existe, mas a captura e a visão chegam nas fatias 3 e 4. */
+export const SCREEN_NOT_READY_TEXT = 'Ainda estou aprendendo a enxergar a tela. Em breve consigo te ajudar com isso.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */
 export const KNOWLEDGE_LIMITS = {

@@ -8,6 +8,7 @@ import type { IVoiceProvider, SpeechKind } from '../../shared/extensions/voice.j
 import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
 import {
   GENERATION_FAILURE_TEXT,
+  SCREEN_NOT_READY_TEXT,
   isMutationName,
   MUTATION_CANCELLED_TEXT,
   MUTATION_REPROMPT_TEXT,
@@ -20,6 +21,7 @@ import {
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
+import { mightBeScreenQuery } from '../tools/screenQuery.js';
 import { AudioStore } from './audioStore.js';
 import { classifyConfirmation } from './confirmationClassifier.js';
 import type { VoiceEngine } from './engine.js';
@@ -132,6 +134,8 @@ interface ActiveTurn {
   /** F13b: diagnóstico de latência — só milissegundos por etapa desde a chegada do áudio, nunca texto. */
   t0: number;
   marks: [string, number][];
+  /** Fase V: decidida logo após a transcrição, ANTES de a fala entrar no histórico (§3). */
+  provenance: 'normal' | 'screen';
 }
 
 interface Session {
@@ -161,7 +165,7 @@ interface Session {
    */
   cancelledTurnIds: Set<string>;
   armedMutation: ArmedMutation | null;
-  emittedSentences?: { turnId: string; items: { text: string; consumed: boolean }[] };
+  emittedSentences?: { turnId: string; items: { text: string; consumed: boolean; origin?: 'screen' }[] };
   pendingMutation: PendingMutation | null;
 }
 
@@ -349,7 +353,8 @@ export class SessionManager {
       generatedSeen: 0,
       coalesce: null,
       t0: performance.now(),
-      marks: []
+      marks: [],
+      provenance: 'normal'
     };
     session.activeTurn = activeTurn;
     session.lastTurnId = turnId;
@@ -389,8 +394,39 @@ export class SessionManager {
       }
 
       this.emit(session, { type: 'transcript', turnId: turn.turnId, text: transcript });
-      session.history.push({ role: 'user', content: transcript });
+
+      // Fase V (§3, §10.2): proveniência decidida ANTES da primeira gravação no histórico. Com qualquer mutação pendente ou
+      // armada a fala nunca é "de tela" (a confirmação tem precedência; conservador: vale mesmo para pendência expirada), e
+      // pedido de mutação que cita a tela ("cria um lembrete para comprar a tela nova") continua sendo mutação.
+      if (
+        !session.pendingMutation &&
+        !session.armedMutation &&
+        !mightBeMutation(transcript) &&
+        mightBeScreenQuery(transcript)
+      ) {
+        turn.provenance = 'screen';
+      }
+      session.history.push(
+        turn.provenance === 'screen' ? { role: 'user', content: transcript, origin: 'screen' } : { role: 'user', content: transcript }
+      );
       this.trimHistory(session);
+
+      if (turn.provenance === 'screen') {
+        // Turno de tela: NUNCA passa por intenção em nuvem, detectores, classificação ou geração (§3). Fatia 2: frase fixa;
+        // captura e visão chegam nas fatias 3 e 4.
+        console.log(`[screen] turno=${turn.turnId} pergunta sobre a tela (visão ainda não implementada)`);
+        this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'TELA', handled: true });
+        this.emit(session, { type: 'state', state: 'falando' });
+        turn.expectedSentences.add(0);
+        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, SCREEN_NOT_READY_TEXT, 0, 'local'));
+        await Promise.allSettled(turn.pendingSynthesis);
+        if (session.activeTurn === turn) {
+          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+          this.emit(session, { type: 'state', state: 'ouvindo' });
+          session.activeTurn = null;
+        }
+        return;
+      }
 
       // Fase 5c: consumo de pendingMutation se houver
       if (session.pendingMutation) {
@@ -866,7 +902,9 @@ export class SessionManager {
       if (!session.emittedSentences || session.emittedSentences.turnId !== turn.turnId) {
         session.emittedSentences = { turnId: turn.turnId, items: [] };
       }
-      session.emittedSentences.items.push({ text: ready.text, consumed: false });
+      session.emittedSentences.items.push(
+        turn.provenance === 'screen' ? { text: ready.text, consumed: false, origin: 'screen' } : { text: ready.text, consumed: false }
+      );
       if (session.emittedSentences.items.length === 1) {
         this.mark(turn, 'primeiro_audio');
         console.log(`[timing] turno=${turn.turnId} ${turn.marks.map(([k, ms]) => `${k}=${ms}ms`).join(' ')}`);
@@ -913,7 +951,8 @@ export class SessionManager {
     if (!entry) return false;
     entry.consumed = true;
 
-    session.history.push({ role: 'assistant', content: text });
+    // Fase V: a origem vem do ITEM emitido (não do turno ativo, que pode já ser null quando a reprodução é confirmada).
+    session.history.push(entry.origin ? { role: 'assistant', content: text, origin: entry.origin } : { role: 'assistant', content: text });
     this.trimHistory(session);
 
     // Achado 1 (ALTA) da rodada 3 — só agora, com reprodução confirmada pelo cliente, uma
@@ -991,13 +1030,16 @@ export function windowHistory(
   history: readonly ConversationMessage[],
   privacy: Pick<PrivacyConfig, 'sendHistory' | 'historyTurns'>
 ): ConversationMessage[] {
+  // Fase V (§5.3): mensagens de turno de tela nunca saem para o Gemini; e o campo `origin` nunca vai ao worker.
+  const strip = (m: ConversationMessage): ConversationMessage => ({ role: m.role, content: m.content });
   if (!privacy.sendHistory) {
-    return history.length > 0 ? [history[history.length - 1]] : [];
+    const last = history.length > 0 ? history[history.length - 1] : undefined;
+    return last && last.origin !== 'screen' ? [strip(last)] : [];
   }
-  const windowed = history.slice(-(privacy.historyTurns * 2));
+  const windowed = history.filter((m) => m.origin !== 'screen').slice(-(privacy.historyTurns * 2));
   let start = 0;
   while (start < windowed.length - 1 && windowed[start].role === 'assistant') start += 1;
-  return windowed.slice(start);
+  return windowed.slice(start).map(strip);
 }
 
 /** Há pelo menos uma letra ou um número? "", "  ", "!", "...", "♪" não são fala. */

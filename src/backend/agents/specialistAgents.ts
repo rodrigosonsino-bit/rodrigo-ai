@@ -86,7 +86,8 @@ const LABEL_TO_AGENT_ID: Record<OrchestratorLabel, string> = {
   GERAL: 'geral',
   TEOLOGIA: 'teologia',
   VIRTOLOGIA: 'virtologia',
-  AMBIGUO: 'geral' // decisão de projeto: sem especialista para AMBIGUO, cai no Geral
+  AMBIGUO: 'geral', // decisão de projeto: sem especialista para AMBIGUO, cai no Geral
+  TELA: 'geral' // Fase V: o classificador nunca devolve TELA (o turno de tela não passa por agente); só fecha o tipo
 };
 
 /** Usado por SessionManager.runTurn() para escolher o agente do turno atual. */

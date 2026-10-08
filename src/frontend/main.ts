@@ -229,7 +229,8 @@ const ORCHESTRATOR_LABEL_NAMES: Record<string, string> = {
   GERAL: 'Geral',
   TEOLOGIA: 'Teologia',
   VIRTOLOGIA: 'Virtologia',
-  AMBIGUO: 'Ambiguidade'
+  AMBIGUO: 'Ambiguidade',
+  TELA: 'Tela'
 };
 
 let muted = false;
