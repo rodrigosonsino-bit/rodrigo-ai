@@ -108,7 +108,7 @@ Os 4 arquivos não rastreados acima (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `USE
 Estado do que está rodando (comandos agora): {ports}
 `GET /api/voice/tts-status` -> `{ttsstat}`
 
-Testes (rodados em 2026-10-08 após a última mudança de código; rodar de novo antes de confiar): `npm test` (compila com `tsc` e roda `node --test`) -> **594 de 594**; `npm run typecheck` limpo; testes Python do worker (`.runtime/.venv/bin/python scripts/worker/test_*.py`, são scripts, não `unittest`; imprimem "ok") todos passando.
+Testes (rodados em 2026-10-08 após a última mudança de código, commit `a1f12ab`; rodar de novo antes de confiar): `npm test` (compila com `tsc` e roda `node --test`) -> **646 de 646**. **Teste instável conhecido:** `f13Session` "ao fim do turno o provedor é avisado" falha raramente com `fetch failed / other side closed` em < 1 ms (2 falhas em ~10 rodadas da suíte em 2026-10-08; 0 em 13 rodadas seguidas); suspeita não confirmada: o harness reaproveita conexão keep-alive de um servidor anterior na mesma porta aleatória. Pendência pequena; `npm run typecheck` limpo; testes Python do worker (`.runtime/.venv/bin/python scripts/worker/test_*.py`, são scripts, não `unittest`; imprimem "ok") todos passando.
 
 Arquivos de teste Node:
 ```
@@ -133,6 +133,7 @@ Responsabilidades principais:
 - `scripts/worker/worker.py` — worker persistente: STT, LLM local (Qwen3-4B 4-bit), geração e intenção via Gemini, **TTS Gemini** (`synthesize`, pool próprio de threads), `redact()`/`safe_exc()` em toda saída de diagnóstico, único ponto de criação de cliente Gemini (`build_gemini_client`, redirecionamento desligado).
 - `src/backend/voice/ttsProviders.ts`, `geminiVoiceProvider.ts`, `ttsBudget.ts` — escolha da voz, provedor Gemini com reserva `say`, orçamento de cota.
 - `src/backend/voice/confirmationClassifier.ts` — classificador determinístico de confirmação (mundo fechado).
+- `src/backend/tools/screenQuery.ts` — Fase V: reconhece pergunta sobre a tela (`mightBeScreenQuery`) e a gramática que autoriza mandar a imagem ao Gemini (`screenCloudAuthorized`).
 - `src/backend/agents/` — agentes Geral/Teologia/Virtologia (prompts fixos, sem dependência externa). `src/backend/tools/` — hora/data e ferramentas que mudam estado (lembretes, notas, memórias) + agendador de lembretes. `src/backend/knowledge/` — recuperação BM25 de `docs/research/` (só carrega se `RODRIGO_SEND_KNOWLEDGE=1`). `src/backend/storage/` — armazenamento JSON em `data/`.
 - `src/frontend/` — `main.ts` (cartão de privacidade, estado da voz), `voice.ts` (captura, VAD, fila de reprodução, barge-in).
 - `src/shared/` — tipos e protocolo compartilhados; `extensions/` — pontos de extensão (`IVoiceProvider`, `IAgent`, `ITool`).
@@ -147,7 +148,7 @@ npm run setup:voice    # cria .runtime/.venv e baixa os modelos locais (uma vez)
 npm run build          # tsc (servidor) + vite (cliente) -> dist/
 npm start              # sobe o app em http://127.0.0.1:3000 (usa dist/)
 npm run dev            # modo desenvolvimento (backend + Vite, proxy /api)
-npm test               # tsc + node --test em dist/server/backend/__tests__/*.test.js (594 testes)
+npm test               # tsc + node --test em dist/server/backend/__tests__/*.test.js (646 testes)
 npm run typecheck
 .runtime/.venv/bin/python scripts/worker/test_tts_synthesis.py   # testes Python são scripts individuais
 ```
@@ -187,8 +188,10 @@ Estado local relevante (verificado): o `.env` do usuário usa `TTS_ENGINE=gemini
 | 10a | Geração de texto via Gemini (única nuvem de início) | feito |
 | 11 | Endurecimento da confirmação + intenção em nuvem | **fechada como dívida registrada, não como aprovada** (recall de intenção 63,0%/86,7% < alvo 95%; o alvo NÃO foi baixado); falta a medição com voz real (`docs/f11-roteiro-voz-real.md`, só o usuário faz) |
 | 12 | Privacidade condizente com a promessa (controle por canal, cartão, egresso medido) + plano B da geração | feito e comitado |
-| 13a | **Voz natural: TTS do Gemini com `say` de reserva** | **implementado e comitado (commit `e617497`); código SEM auditoria; critério de aceite H13a.10 (o usuário ouvir) PENDENTE** — ver §6 |
-| 13 (resto), 14–17 | Latência/interrupção/continuidade; ciclo completo de notas; orquestrador autônomo; conhecimento pessoal; qualificação 1.0 | não iniciadas (roteiro em `docs/prompt-proxima-sessao-2026-10-02.md` §7; ordem aprovada F12→F17) |
+| 13a | **Voz natural: TTS do Gemini com `say` de reserva** | implementado (`e617497`); **código auditado em 2026-10-08** (Kimi K3, 9 achados: 6 corrigidos em `fe7736e`, 1 falso positivo, 2 sem ação; `docs/audits/f13a-code-audit-kimi-k3-2026-10-08.md`); **H13a.10 (o usuário ouvir) ainda PENDENTE** — ver §6 |
+| 13b | Conversa natural (latência/escuta) | começada: log `[timing]` por etapa (`af05e1e`); fim de fala aos **1,0 s** de silêncio (era 0,7 s; `e9ef641`, decisão do usuário). Plano de juntar fragmentos no servidor (`docs/phase-13b-v1.md`) **reprovado** pelo Codex (REFAZER) e substituído por essa decisão. Latência ainda não atacada |
+| V | **Visão da tela** (inserida pelo usuário) | plano v3 aprovado com ajustes (`docs/phase-vision-v3.md`); **fatias 1 e 2 feitas**, 3–5 pendentes — ver §6b |
+| 14–17 | Ciclo completo de notas; orquestrador autônomo; conhecimento pessoal; qualificação 1.0 | não iniciadas; **nova prioridade do usuário (2026-10-08): 1. visão de tela, 2. consulta de notas por voz (F14), 3. falar com o OpenClaw (F15)** |
 
 ## 6. Fase 13a em detalhe (a mais recente — leia `docs/phase-13a-v3.md` e `docs/implementation-phase-13a.md`)
 
@@ -202,10 +205,27 @@ O que foi feito: ver o relatório. Resumo das peças: `synthesize` no worker em 
 
 **Pendências da 13a (por ordem):**
 1. **O usuário ouvir** e dizer se deixou de soar robotizada (H13a.10, só ele mede) e se alguma resposta ainda sai cortada.
-2. **Auditoria do código** (regra do projeto: toda fase que entrega código passa por auditoria de código antes de fechar). Quem audita código é, por rotação, o Hermes (`docker exec hermes hermes -z`, só enxerga `~/hermes-workspace`, **depende do Docker Desktop, que estava parado**); alternativas: `agy` ou Codex (caro). O plano foi auditado por `agy` (rodada 1) e Kimi K3 (rodada 2); a v3 **não foi reauditada** por um terceiro modelo.
+2. ~~Auditoria do código~~ **feita em 2026-10-08** pelo Kimi K3 (o Hermes falhou: cota anônima da Nous esgotada, "allowance for chatting without signing in"). Correções com prova de mutação em `fe7736e`; o achado 4 (WAV órfão) foi corrigido **sem teste dedicado**.
 3. Critérios não executados: bateria de 100 turnos simulados (H13a.1), 30 turnos reais com orçamento injetado (H13a.6), transcrição com Whisper de 20 frases (H13a.4), medição de perda de histórico no barge-in (H13a.11), captura do 429 diário (H13a.12, esgota a cota do dia), matriz de privacidade completa (H13a.14).
-4. **Latência**: do fim da fala ao primeiro áudio medi ~7,4 s no app completo (STT ~0,9 s, classificação ~1 s, primeiro texto do Gemini ~3 s por causa do raciocínio, TTS 1,3–2 s). Não foi atacada; é o item de latência da F13.
+4. **Latência**: do fim da fala ao primeiro áudio medi ~7,4 s no app completo (STT ~0,9 s, classificação ~1 s, primeiro texto do Gemini ~3 s por causa do raciocínio, TTS 1,3–2 s). Não foi atacada. Medição de 2026-10-08 (5 perguntas, máquina ociosa): tempo até o primeiro texto do `gemini-flash-latest` mediana **1,73 s** vs **0,70 s** do `gemini-3.5-flash-lite`; o Jev estimou 0,61 de chance de o usuário notar a perda de inteligência com o lite, então **não** se trocou. Os tempos reais por etapa aparecem agora no log como `[timing] turno=… stt=… intencao_nuvem=… classificacao=… primeira_frase=… primeiro_audio=…` (pedido ao usuário colá-los).
 5. Suposições a verificar: horário de virada da cota diária do Google (assumido meia-noite de Los Angeles); se o Google cobra os tokens gerados até um cancelamento; que o preço do `gemini-3.8-flash-lite-tts` sobe de US$ 6 para US$ 12 por milhão de tokens em 2027-01-01 (lido na página oficial de preços em 2026-10-07).
+
+## 6b. Sessão de 2026-10-08 (tarde/noite) — o que foi feito, em ordem
+
+Todos os commits abaixo estão em `main` e **ainda não foram empurrados** ao GitHub (contagem à frente de `origin/main` no §2). Não fazer push sem o usuário pedir. A pasta `.openclaw-cli-images/` (prints que o usuário mandou pelo OpenClaw) não é código: ignorar.
+- `af05e1e` log `[timing]` por etapa (trivial, sem mudança de comportamento).
+- `fe7736e` correções da auditoria de código da 13a (cancelamento de síntese enfileirada, cota só depois da vaga, virada do dia, WAV órfão, 2 testes vácuos).
+- `e9ef641` fim de fala aos 1,0 s. Motivo: no teste de voz real do usuário uma pergunta ("para quem Pedro escreveu suas duas cartas…") virou 3 turnos nas pausas e o fragmento curto saiu como lixo do Whisper ("Initially Nas Parad filling"). Medido: `whisper-large-v3-turbo` 0,44 s vs `whisper-small` 0,17 s por fala, qualidade igual em áudio limpo — não trocado.
+- `3ef5d64`, `f2170e0`, `07fee73` planos da **Fase V (visão da tela)** v1 (Codex: REFAZER, 17 achados, 1 crítico), v2, v3 (agy: APROVAR COM AJUSTES; 6 ajustes incorporados no §10). Codex sem cota na rodada 2; Kimi degenerou; DeepSeek deu erro de servidor.
+- `589322d` **fatia 1**: o cancelamento de turno alcança comandos AINDA NA FILA do worker (`_cancelled_turns`); corrige defeito pré-existente em que geração/intenção de turno cancelado ainda chamava o Gemini.
+- `a82922a` painel corrigido: o cartão dizia "Ferramentas e Ações — Indisponível", "sem especialistas ainda" e que a voz era sintetizada no computador (falso desde a 13a). Nova frase proibida no teste de privacidade.
+- `2404d61` + `a1f12ab` **fatia 2**: turno de tela reconhecido (só quando a fala cita a tela), proveniência decidida antes do histórico, rótulo `TELA`, frase fixa (ainda sem visão), mensagens `origin: 'screen'` nunca saem ao Gemini (`windowHistory`). Auditoria de código Kimi K3: 4 achados, todos corrigidos (inclui defeito pré-existente: com histórico desligado e `/played` atrasado, ia a resposta antiga no lugar da pergunta).
+
+**Decisões do usuário nesta sessão (literais, AskUserQuestion):** pausa → "1,0 s (Recomendado)"; visão → "Os dois, com escolha por voz" (padrão local; Gemini só com frase explícita); voz das respostas de tela → "Voz do Gemini mesmo" (o TEXTO da resposta vai ao TTS do Google; a imagem não); gatilho → "Só quando eu disser (Recomendado)"; prioridade → "1. visão de tela 2. consulta de notas por voz 3. falar com openclaw".
+
+**Medições da visão local** (spike fora do app): `Qwen3-VL-4B-Instruct-4bit` 3,3 s aquecido, pico 4,0 GB, leu certo um print real de erro do npm, não diagnosticou a causa; `Qwen2.5-VL-3B` 3,7 s e não respeitou o limite de frases. Gemini com imagem **não medido** (exigiria mandar captura).
+
+**Próximo passo (fatia 3):** botão "Compartilhar tela" (`getDisplayMedia`), `screen_request`/`captureId` de uso único, rota `POST .../screen` que autentica e consome ANTES de gravar, JPEG ≤ 3 MiB validado, limpeza em todas as saídas. Depois: fatia 4 (visão local no worker, `mlx-vlm` com revisão fixada no setup, carga/descarga, prazo de 90 s), fatia 5 (Gemini por autorização + `RODRIGO_CLOUD_VISION` + cartão). Critérios HV.1–HV.14 em `docs/phase-vision-v3.md` §7 e §10.
 
 ## 7. Como se trabalha neste projeto (regras do usuário)
 
@@ -222,7 +242,8 @@ Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a audit
 ## 8. O que ainda precisa de decisão do usuário
 
 - D-b (§6): manter a voz do Gemini nas confirmações que repetem o que ele ditou, ou deixá-las na voz do sistema.
-- Quem audita o código da 13a e quando.
+- Ouvir a voz nova (H13a.10) e colar as linhas `[timing]`.
+- Ponte com o OpenClaw (F15): saída nova de dados, precisa de plano e aprovação.
 - Se vale pagar o Nível 2 do Google (US$ 100 + 3 dias) para sair do limite de 100 pedidos/dia; ele disse "nivel 1" e achou o custo mensal "caro" (estimativa: ~US$ 5 a 11/mês a 20 min de fala por dia com o modelo escolhido).
 - Os 4 arquivos de agente na raiz: apagar ou ignorar no git.
 - Dívidas 5b/5c e F11 (alvos de cobertura abertos) e a medição com voz real da F11.
@@ -234,15 +255,15 @@ Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a audit
 3. Memória do agente (decisões do usuário e regras de auditoria).
 4. `rodrigo-ai-architecture-digest-2026-09-28` — resumo extenso da arquitetura até a Fase 10 (**anterior à Fase 12/13a; use o `CLAUDE.md` para o estado atual**).
 5. Handoffs e prompt de continuação (2026-09-15 a 2026-10-06) — história; o do 2026-10-06 descreve a F11 e o roteiro F12–F17.
-6. Planos e relatórios de implementação por fase; planos finais; auditorias da 13a.
-7. Código: backend de voz, núcleo do backend, worker Python, frontend e shared, scripts e configuração, testes da Fase 13a, lista de todos os testes.
+6. Planos e relatórios de implementação por fase; planos finais; auditorias da 13a; **Fase V (visão da tela) e 13b com auditorias** (fonte 14).
+7. Código: backend de voz, núcleo do backend, worker Python, frontend e shared, scripts e configuração, testes da Fase 13a, testes da Fase V (fonte 28), lista de todos os testes.
 
 Para o estado de cada decisão, o `CLAUDE.md` e `docs/implementation-phase-13a.md` valem mais que um plano antigo; planos `vN` antigos de uma fase são história (as rodadas de auditoria que os derrubaram estão nos relatórios).
 """
 (OUT / "00-LEIA-PRIMEIRO-handoff.md").write_text(handoff, encoding="utf-8")
 
 # ---------------------------------------------------------------- 01..03 documentos centrais
-(OUT / "01-CLAUDE-md-do-projeto.md").write_text("# CLAUDE.md do projeto Rodrigo AI (instruções e arquitetura densas, atualizado até a Fase 13a)\n\n" + read("CLAUDE.md"), encoding="utf-8")
+(OUT / "01-CLAUDE-md-do-projeto.md").write_text("# CLAUDE.md do projeto Rodrigo AI (instruções e arquitetura densas; texto até a Fase 13a — o que veio depois está no handoff 00, §6b)\n\n" + read("CLAUDE.md"), encoding="utf-8")
 (OUT / "02-README-do-projeto.md").write_text("# README do projeto Rodrigo AI\n\n" + read("README.md"), encoding="utf-8")
 
 mem_parts = ["# Memória do agente (notas persistentes de sessões anteriores)\n\nDecisões e regras que o usuário deu ao longo do trabalho. São a memória de projeto mantida pelo agente anterior.\n"]
@@ -277,6 +298,11 @@ docs_bundle("13-correcoes-e-consultas.md", "Correções de defeitos e consultas 
     "Correção do 'loop de repetição' do LLM local (que se mostrou em grande parte artefato do harness de teste), consulta ao Codex sobre o fim fixo e correções de revisão.",
     ["docs/fix-generation-repetition-loop-v2.md", "docs/fix-generation-repetition-loop-v1.md", "docs/codex-consulta-fim-fixo-2026-09-29.md", "docs/review-corrections-1.md"])
 
+docs_bundle("14-fase-V-visao-e-13b.md", "Fase V (visão da tela) e Fase 13b — planos e auditorias de 2026-10-08",
+    "Plano v3 da visão (vale; §10 prevalece), v2 e v1 com as auditorias que os derrubaram; plano 13b de juntar fragmentos (REPROVADO) e sua auditoria; auditorias de código da 13a e da fatia 2 da visão.",
+    ["docs/phase-vision-v3.md", "docs/audits/vision-plan-agy-r2-2026-10-08.md", "docs/phase-vision-v2.md", "docs/audits/vision-plan-codex-r1-2026-10-08.md", "docs/phase-vision-v1.md",
+     "docs/phase-13b-v1.md", "docs/audits/f13b-plan-codex-2026-10-08.md", "docs/audits/f13a-code-audit-kimi-k3-2026-10-08.md", "docs/audits/fv2-code-kimi-k3-2026-10-08.md"])
+
 # ---------------------------------------------------------------- código
 def listing(patterns):
     out = []
@@ -298,6 +324,9 @@ bundle("25-configuracao-do-projeto.md", "Configuração do projeto", "package.js
        ["package.json", "tsconfig.json", "tsconfig.server.json", "vite.config.ts", ".gitignore", ".env.example"])
 bundle("26-testes-da-fase-13a.md", "Testes da Fase 13a (TTS)", "Orçamento, provedor Gemini, sessão (ordem/coalescência), egresso contra o worker real e Gemini falso, privacidade.",
        ["src/backend/__tests__/ttsBudget.test.ts", "src/backend/__tests__/geminiVoiceProvider.test.ts", "src/backend/__tests__/f13Session.test.ts", "src/backend/__tests__/f13EgressTts.test.ts", "src/backend/__tests__/privacy.test.ts", "src/backend/__tests__/helpers/egress.ts", "src/backend/__tests__/f12Fallback.test.ts"])
+
+bundle("28-testes-da-fase-V.md", "Testes da Fase V (visão da tela), fatias 1 e 2", "Cancelamento de comandos na fila do worker (Python) e turno de tela isolado do Gemini (Node).",
+       ["src/backend/__tests__/fvScreen.test.ts", "scripts/worker/test_cancel_queue.py"])
 
 # lista de todos os títulos de teste (para o agente saber o que já está coberto)
 titles = ["# Lista de todos os testes Node (títulos)\n\nGerada por `grep` nos arquivos `*.test.ts`. Serve para saber o que já está coberto antes de escrever um teste novo.\n"]
