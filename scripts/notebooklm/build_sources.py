@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Gera as fontes do notebook do Rodrigo AI. Fatos do handoff vêm de COMANDOS rodados aqui, não de memória.
+Nunca inclui: docs/research/, .env, chaves, .runtime, dist, node_modules, data/."""
+import os, re, subprocess, sys, datetime, pathlib
+
+ROOT = pathlib.Path(os.environ["REPO"])
+OUT = pathlib.Path(os.environ["OUT"])
+MEM = pathlib.Path(os.path.expanduser("~/.claude/projects/-Users-rodrigosonsino-Documents-Codex-2026-09-11-referenced-chatgpt-conversation-this-is-an-outputs-rodrigo-ai/memory"))
+OUT.mkdir(parents=True, exist_ok=True)
+for f in OUT.glob("*"):
+    f.unlink()
+
+def sh(cmd, timeout=120):
+    r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+    return (r.stdout + (("\n" + r.stderr) if r.returncode and r.stderr else "")).strip()
+
+def read(p):
+    return (ROOT / p).read_text(encoding="utf-8")
+
+BLOCKED = ("docs/research", ".env", ".runtime", "node_modules", "dist/", "data/")
+def safe(p):
+    s = str(p)
+    return not any(b in s for b in BLOCKED) or s.endswith(".env.example")
+
+LANG = {".ts": "ts", ".py": "python", ".mjs": "js", ".js": "js", ".html": "html", ".css": "css", ".json": "json", ".md": "md", ".sh": "bash"}
+
+def bundle(name, title, intro, files):
+    parts = [f"# {title}\n\n{intro}\n\nGerado em {datetime.date.today()} a partir do repositório (commit {sh('git rev-parse --short HEAD')}). Cada seção é um arquivo, com o caminho no título.\n"]
+    n = 0
+    for f in files:
+        p = ROOT / f
+        if not p.is_file() or not safe(f):
+            continue
+        txt = p.read_text(encoding="utf-8", errors="replace")
+        parts.append(f"\n\n---\n\n## Arquivo: `{f}` ({len(txt.splitlines())} linhas)\n\n```{LANG.get(p.suffix, '')}\n{txt}\n```\n")
+        n += 1
+    (OUT / name).write_text("".join(parts), encoding="utf-8")
+    return n
+
+def docs_bundle(name, title, intro, files):
+    parts = [f"# {title}\n\n{intro}\n"]
+    n = 0
+    for f in files:
+        p = ROOT / f
+        if p.is_file() and safe(f):
+            parts.append(f"\n\n---\n\n# [{f}]\n\n{p.read_text(encoding='utf-8', errors='replace')}\n")
+            n += 1
+    (OUT / name).write_text("".join(parts), encoding="utf-8")
+    return n
+
+# ---------------------------------------------------------------- 00 handoff (fatos por comando)
+tree_backend = sh("find src scripts -type f \\( -name '*.ts' -o -name '*.py' -o -name '*.mjs' -o -name '*.html' -o -name '*.css' \\) ! -path '*__tests__*' | sort")
+tests_node = sh("ls src/backend/__tests__/*.test.ts | xargs -n1 basename | sort")
+tests_py = sh("ls scripts/worker/test_*.py | xargs -n1 basename | sort")
+git_log = sh("git log --oneline -25")
+git_status = sh("git status --short") or "(limpo)"
+git_branch = sh("git branch --show-current")
+git_ahead = sh("git rev-list --count origin/main..HEAD")
+git_remote = sh("git remote -v | head -1")
+n_commits = sh("git log --oneline | wc -l")
+env_names = sh("grep -E '^[A-Z_]+=' .env.example | sed -E 's/=.*//' | tr '\\n' ' '")
+env_example = read(".env.example")
+node_v = sh("node -v")
+py_v = sh(".runtime/.venv/bin/python --version")
+pkgs = sh(".runtime/.venv/bin/python -c \"import importlib.metadata as m; print(', '.join(p+' '+m.version(p) for p in ['google-genai','mlx','mlx-lm','mlx-whisper','numpy','httpx']))\"")
+models = sh("python3 -c \"import json; d=json.load(open('.runtime/models-manifest.json')); print('LLM local:', d['llm']['repo'], '| STT:', d['stt']['repo'])\"")
+loc = sh("echo \"backend TS: $(find src/backend -name '*.ts' ! -path '*__tests__*' | xargs cat | wc -l | tr -d ' ') linhas | worker.py: $(wc -l < scripts/worker/worker.py | tr -d ' ') linhas | testes Node: $(ls src/backend/__tests__/*.test.ts | wc -l | tr -d ' ') arquivos\"")
+ports = sh("lsof -iTCP:3000 -sTCP:LISTEN -n -P | awk 'NR>1{print \"app na porta 3000, pid \" $2}'") or "(nada escutando na 3000 agora)"
+ttsstat = sh("curl -s -m 4 http://127.0.0.1:3000/api/voice/tts-status") or "(app fora do ar)"
+now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+handoff = f"""# LEIA PRIMEIRO — Rodrigo AI: passagem de bastão para outro agente ({now})
+
+Escrito para ser lido por inteiro antes da primeira ação. Todas as afirmações factuais abaixo foram geradas por comando no momento da escrita (o comando aparece junto) ou estão marcadas como **suposição herdada** ou **combinado com o usuário** (citado literalmente). O que o leitor não puder conferir por comando está na terceira classe.
+
+Este notebook contém o contexto do projeto. **Não contém**: `docs/research/` (perfil teológico e material de Virtologia pessoais do usuário — nunca foi versionado nem enviado a terceiros), o arquivo `.env` e qualquer chave de API, nem as instruções globais privadas do usuário. Se precisar desse material, peça ao usuário.
+
+## 1. O que é o app
+
+Rodrigo AI é um **orquestrador de voz pessoal**, local-first, construído por fases (cada fase entrega algo funcional e testável antes da próxima; não construir adiante do plano aprovado). Servidor Node (sem framework) + worker Python persistente (MLX) falando NDJSON por stdio + frontend TypeScript/Vite sem framework. Fala-se com ele no navegador em `http://127.0.0.1:3000`.
+
+Fluxo de um turno: microfone no navegador → VAD → WAV enviado ao backend → STT local (mlx-whisper) → classificação de intenção (Gemini `gemini-3.5-flash-lite`, com detector local de reserva) → ferramentas determinísticas (hora/data; lembretes/notas/memórias com confirmação falada) **ou** geração de resposta (Gemini `gemini-flash-latest`, plano B `gemini-3.5-flash-lite`) por um dos agentes (Geral/Teologia/Virtologia) → frases enviadas ao TTS (**Gemini TTS desde a Fase 13a**, voz do sistema `say` de reserva) → áudio tocado no navegador → o cliente confirma a reprodução (`/played`) → só então a frase entra no histórico.
+
+Restrições duras (valem para qualquer mudança): servidor só em loopback (`127.0.0.1`/`localhost`) com Host/Origin validados nas três camadas; áudio do usuário **nunca** sai da máquina; toda saída de dado para a nuvem tem controle explícito por canal em `src/backend/privacy.ts` e nenhuma tela/documento pode prometer localidade total ou ausência de custo/chave (teste `privacyConsistency.test.ts`); nada de mutação (criar/apagar lembrete/nota/memória) sem a pergunta ter sido **realmente reproduzida** (`markPlayed()`) e a resposta passar pelo classificador determinístico (zero falso "sim" é propriedade protegida); mudança de dependência externa exige plano, aprovação do usuário e auditoria adversarial.
+
+## 2. Estado do repositório — verificado agora
+
+```
+git branch --show-current  -> {git_branch}
+git remote -v | head -1    -> {git_remote}
+git rev-list --count origin/main..HEAD -> {git_ahead}   (0 = nada comitado deixou de ser empurrado)
+git log --oneline | wc -l  -> {n_commits}
+git status --short         -> {git_status.replace(chr(10), chr(10) + ' ' * 27)}
+node -v                    -> {node_v}
+worker Python              -> {py_v}
+pacotes do worker          -> {pkgs}
+modelos locais             -> {models}
+tamanho                    -> {loc}
+```
+
+Os 4 arquivos não rastreados acima (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `USER.md`) são modelos genéricos de outra ferramenta de agente (OpenClaw), criados na raiz por algo que não é este projeto; foram comitados por engano e retirados do controle de versão (commit `984a797`); **ignorar**, não são código do app.
+
+Últimos 25 commits (`git log --oneline -25`):
+```
+{git_log}
+```
+
+Estado do que está rodando (comandos agora): {ports}
+`GET /api/voice/tts-status` -> `{ttsstat}`
+
+Testes (rodados em 2026-10-08 após a última mudança de código; rodar de novo antes de confiar): `npm test` (compila com `tsc` e roda `node --test`) -> **594 de 594**; `npm run typecheck` limpo; testes Python do worker (`.runtime/.venv/bin/python scripts/worker/test_*.py`, são scripts, não `unittest`; imprimem "ok") todos passando.
+
+Arquivos de teste Node:
+```
+{tests_node}
+```
+Testes Python:
+```
+{tests_py}
+```
+
+## 3. Mapa do código (verificado: `find src scripts ...`)
+
+```
+{tree_backend}
+```
+
+Responsabilidades principais:
+- `src/backend/server.ts` — servidor HTTP próprio: valida Host, roteia API, serve estáticos com guarda contra path traversal. `index.ts` sobe tudo e faz o desligamento gracioso.
+- `src/backend/privacy.ts` — **fonte única** da configuração de saída de dados (`RODRIGO_*`); valores inválidos abortam o startup. `ttsCloudEffective()` e `ttsDictatedViaCloud()` decidem a voz em nuvem.
+- `src/backend/voice/sessionManager.ts` — o coração: uma sessão ativa por vez (preempção síncrona), turnos canceláveis, orquestração (classificação → ferramentas/geração), emissão **em ordem** das frases ao cliente, coalescência de frases, `markPlayed()`.
+- `src/backend/voice/mlxWorkerEngine.ts` — cliente do worker Python (NDJSON); `fakeEngine.ts` — motor falso dos testes.
+- `scripts/worker/worker.py` — worker persistente: STT, LLM local (Qwen3-4B 4-bit), geração e intenção via Gemini, **TTS Gemini** (`synthesize`, pool próprio de threads), `redact()`/`safe_exc()` em toda saída de diagnóstico, único ponto de criação de cliente Gemini (`build_gemini_client`, redirecionamento desligado).
+- `src/backend/voice/ttsProviders.ts`, `geminiVoiceProvider.ts`, `ttsBudget.ts` — escolha da voz, provedor Gemini com reserva `say`, orçamento de cota.
+- `src/backend/voice/confirmationClassifier.ts` — classificador determinístico de confirmação (mundo fechado).
+- `src/backend/agents/` — agentes Geral/Teologia/Virtologia (prompts fixos, sem dependência externa). `src/backend/tools/` — hora/data e ferramentas que mudam estado (lembretes, notas, memórias) + agendador de lembretes. `src/backend/knowledge/` — recuperação BM25 de `docs/research/` (só carrega se `RODRIGO_SEND_KNOWLEDGE=1`). `src/backend/storage/` — armazenamento JSON em `data/`.
+- `src/frontend/` — `main.ts` (cartão de privacidade, estado da voz), `voice.ts` (captura, VAD, fila de reprodução, barge-in).
+- `src/shared/` — tipos e protocolo compartilhados; `extensions/` — pontos de extensão (`IVoiceProvider`, `IAgent`, `ITool`).
+- `scripts/dev.mjs` — coordenador de processos do `npm run dev` (não deixa órfãos); `setup-voice.mjs` — cria `.runtime/.venv` e baixa os modelos; `bench-voice.mjs` — benchmark.
+
+## 4. Ambiente local — como rodar, testar, depurar
+
+Comandos (todos na raiz do projeto, `/Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai`):
+```bash
+npm ci                 # instala dependências a partir do lockfile
+npm run setup:voice    # cria .runtime/.venv e baixa os modelos locais (uma vez)
+npm run build          # tsc (servidor) + vite (cliente) -> dist/
+npm start              # sobe o app em http://127.0.0.1:3000 (usa dist/)
+npm run dev            # modo desenvolvimento (backend + Vite, proxy /api)
+npm test               # tsc + node --test em dist/server/backend/__tests__/*.test.js (594 testes)
+npm run typecheck
+.runtime/.venv/bin/python scripts/worker/test_tts_synthesis.py   # testes Python são scripts individuais
+```
+Para rodar um único teste Node: `npm run build:server` e depois `node --test dist/server/backend/__tests__/<nome>.test.js`.
+
+Variáveis de ambiente (nomes e padrões em `.env.example`, cujo conteúdo segue; **o `.env` real tem a chave `GEMINI_API_KEY` e nunca deve ser lido nem copiado**): {env_names}
+
+```
+{env_example}
+```
+
+Estado local relevante (verificado): o `.env` do usuário usa `TTS_ENGINE=gemini`; `.runtime/` (venv, modelos, orçamento do TTS) e `data/` (lembretes, notas, memórias) **não são versionados**; `docs/research/` existe só na máquina do usuário.
+
+**Armadilhas do ambiente (todas já custaram tempo real):**
+- O sandbox do Bash bloqueia MLX/Metal, bind de socket local, `ps`/`pgrep`, escrita em `~/.cache` (uv, Hugging Face) e `~/hermes-workspace`: rodar com a opção de desligar o sandbox. Um teste que "trava sem erro" com 0% de CPU é quase sempre isso.
+- `pgrep -f "VAR=valor cmd"` nunca casa (variável de ambiente não está no argv). Para matar o app: usar o PID capturado no spawn, nunca padrão de nome. Resultado vazio de `pgrep` não prova que o processo morreu.
+- `http.Server.close()` do Node pendura com SSE/keep-alive: usar `closeAllConnections()` + `closeIdleConnections()`. Teste que cria servidor precisa do teardown completo (o timer de 10 min da sessão segura o processo).
+- No zsh, glob sem match aborta a linha inteira. Não misturar caminho literal e glob na mesma linha.
+- `say` dentro do sandbox grava arquivo **vazio** sem erro (aconteceu: a primeira audição ficou com o Felipe mudo). Rodar fora do sandbox e conferir o tamanho do arquivo.
+- Validar o harness antes de acreditar na evidência: um bug no script de medição já foi tratado como bug do sistema (a "repetição do LLM local" da Fase 4 era um cursor de polling que não avançava).
+- Um teste que um atalho resolve não mede a capacidade que se quer medir (ex.: procurar uma agulha em 6000 linhas com `grep`).
+- Catálogo de modelos autenticado não é direito de uso: exercitar com uma chamada barata antes de planejar em cima.
+- Medidas cronometradas em testes que misturam HTTP e timers são frágeis nesta máquina (uma requisição local levou 170 ms): preferir chamada direta e folgas grandes.
+
+## 5. Fases — estado (fontes: `CLAUDE.md`, `docs/implementation-phase-*.md`)
+
+| Fase | O que entrega | Estado |
+|---|---|---|
+| 1 | Fundação: servidor loopback, health, extensões | feito |
+| 2 | Voz local: STT, TTS `say`, sessão, barge-in, preempção | feito, validado com voz humana |
+| 3 | Orquestrador: classificação de intenção + transparência de roteamento | feito |
+| 4 | Agentes reais Geral/Teologia/Virtologia | feito |
+| 5a | Recuperação de conhecimento (BM25 sobre `docs/research/`) | feito |
+| 5b | Ferramentas hora/data | feito; **dívida aberta**: H11 mediu 75% (alvo 80%) |
+| 5c | Lembretes e notas por voz (primeira capacidade que muda estado) | feito; **dívida aberta**: H-mutação 76,5%, H-confirmação 61,1% (zero falso "sim" mantido) |
+| 6–9 | Lembretes agendados, memória entre sessões, edição, recorrência | feito (planos em `docs/phase-6-v2.md`…`phase-9-v2.md`) |
+| 10a | Geração de texto via Gemini (única nuvem de início) | feito |
+| 11 | Endurecimento da confirmação + intenção em nuvem | **fechada como dívida registrada, não como aprovada** (recall de intenção 63,0%/86,7% < alvo 95%; o alvo NÃO foi baixado); falta a medição com voz real (`docs/f11-roteiro-voz-real.md`, só o usuário faz) |
+| 12 | Privacidade condizente com a promessa (controle por canal, cartão, egresso medido) + plano B da geração | feito e comitado |
+| 13a | **Voz natural: TTS do Gemini com `say` de reserva** | **implementado e comitado (commit `e617497`); código SEM auditoria; critério de aceite H13a.10 (o usuário ouvir) PENDENTE** — ver §6 |
+| 13 (resto), 14–17 | Latência/interrupção/continuidade; ciclo completo de notas; orquestrador autônomo; conhecimento pessoal; qualificação 1.0 | não iniciadas (roteiro em `docs/prompt-proxima-sessao-2026-10-02.md` §7; ordem aprovada F12→F17) |
+
+## 6. Fase 13a em detalhe (a mais recente — leia `docs/phase-13a-v3.md` e `docs/implementation-phase-13a.md`)
+
+Objetivo (pedido literal do usuário): **"preciso que essa voz seja a voz do app"** — a voz do Gemini TTS que ele escolheu numa audição às cegas, porque a voz anterior (`say` Felipe) soava "robotizada, sem expressão humana".
+
+Decisões do usuário nesta fase (citadas literalmente): "Gemini TTS, voz Charon"; "Ativa a cobrança e escreve o plano" (ele mesmo ativou o faturamento; o projeto Google "Rodrigo-AI" está no Nível 1); "pode pegar a mais barata das 4" (modelo `gemini-3.8-flash-lite-tts`); "nivel 1" (fica no Nível 1: 10 pedidos/min e 100/dia por modelo, em vez de pagar US$ 100 pelo Nível 2); "kimi" (auditor da rodada 2 do plano); "sem atalho" (plano completo, não protótipo); "pode reiniciar"; "commita e dá push". Decisão que **NÃO** foi dele: a D-b (confirmações que repetem conteúdo ditado vão à voz do Gemini por padrão) ficou na opção 1 por padrão, reversível por `RODRIGO_TTS_DICTATED=0`.
+
+O que foi feito: ver o relatório. Resumo das peças: `synthesize` no worker em pool próprio de 2 threads daemon (a fila de tamanho 1 do `work_loop` descartaria o pedido e a geração ocupa o laço); orçamento 8/min e 90/dia com reserva real por turno e dia em America/Los_Angeles; provedor com disjuntor e fallback `say` na hora; emissão das frases **em ordem estrita** (o cliente toca o que chega); coalescência (1ª frase sozinha, depois grupos de até 3 frases/300 caracteres/1,5 s); só o texto da frase vai ao Google (os modelos 3.8 leem uma instrução de estilo em voz alta e rejeitam `system_instruction`); normalização de volume para −17 dBFS; canal `RODRIGO_CLOUD_TTS` efetivo só com `RODRIGO_SEND_HISTORY=1`; linha de estado na tela (`GET /api/voice/tts-status`).
+
+**Defeito antigo descoberto e corrigido** no teste de ponta a ponta: o `gemini-flash-latest` passou a "pensar" e o raciocínio conta no teto de saída; com teto 160, ~150 tokens iam ao raciocínio e a fala saía cortada no meio da palavra. `thinking_budget=0` sozinho **não** resolveu com o prompt real do app (medido); o teto da geração em nuvem subiu para 512. Detalhes e a tabela de medições em `docs/implementation-phase-13a.md` §3.
+
+**Pendências da 13a (por ordem):**
+1. **O usuário ouvir** e dizer se deixou de soar robotizada (H13a.10, só ele mede) e se alguma resposta ainda sai cortada.
+2. **Auditoria do código** (regra do projeto: toda fase que entrega código passa por auditoria de código antes de fechar). Quem audita código é, por rotação, o Hermes (`docker exec hermes hermes -z`, só enxerga `~/hermes-workspace`, **depende do Docker Desktop, que estava parado**); alternativas: `agy` ou Codex (caro). O plano foi auditado por `agy` (rodada 1) e Kimi K3 (rodada 2); a v3 **não foi reauditada** por um terceiro modelo.
+3. Critérios não executados: bateria de 100 turnos simulados (H13a.1), 30 turnos reais com orçamento injetado (H13a.6), transcrição com Whisper de 20 frases (H13a.4), medição de perda de histórico no barge-in (H13a.11), captura do 429 diário (H13a.12, esgota a cota do dia), matriz de privacidade completa (H13a.14).
+4. **Latência**: do fim da fala ao primeiro áudio medi ~7,4 s no app completo (STT ~0,9 s, classificação ~1 s, primeiro texto do Gemini ~3 s por causa do raciocínio, TTS 1,3–2 s). Não foi atacada; é o item de latência da F13.
+5. Suposições a verificar: horário de virada da cota diária do Google (assumido meia-noite de Los Angeles); se o Google cobra os tokens gerados até um cancelamento; que o preço do `gemini-3.8-flash-lite-tts` sobe de US$ 6 para US$ 12 por milhão de tokens em 2027-01-01 (lido na página oficial de preços em 2026-10-07).
+
+## 7. Como se trabalha neste projeto (regras do usuário)
+
+Fluxo obrigatório para mudança não trivial: escrever `docs/phase-N-vX.md` → **auditoria adversarial do plano** (outro modelo, sempre só-leitura; ver skill `auditoria-plano-codex`) → implementar só sem achados altos pendentes → verificar contra a realidade (testes + app real) → **auditoria do código** → registrar relatório de implementação → só então "pronto". Aprovação para implementar não é "pronto". Registrar CLI **e modelo** de cada auditor; a rotação é por modelo (a partir da 3ª rodada troca-se de auditor); um auditor que viu tudo não fecha o plano.
+
+Delegação para economizar a assinatura Claude (pedido do usuário): trabalho bruto vai primeiro ao Hermes (`docker exec hermes hermes -z "<tarefa>"`, gratuito, 1M de contexto, ferramentas de arquivo, mas **só enxerga `~/hermes-workspace` e pode afirmar ter escrito arquivo que não escreveu**), depois a modelos gratuitos via `opencode run -m <provedor>/<modelo>` (nvidia kimi-k3/deepseek, google-aistudio gemini-flash). **Nunca aceitar a autodeclaração de subagente: abrir o artefato e conferir.** Saída de subagente é rascunho, não produto.
+
+Auditor Kimi K3 (`deepseek -m moonshotai/kimi-k3`): sem acesso a arquivos; entrada acima de ~20 KB já deu timeout/degenerou; 2ª tentativa enxuta funcionou. Codex é o mais caro ("full text no codex vai gastar muito"): não mandar arquivos inteiros. `agy` precisa de `--mode plan` (somente leitura) e `--print-timeout 40m`; trata o estouro do timeout como sucesso com exit 0, então conferir o conteúdo.
+
+Honestidade de relatório (regra do usuário): se um teste falha, dizer; se um passo foi pulado, dizer; **nunca baixar um alvo de aceite para passar** (a F11 foi fechada como dívida registrada exatamente por isso). Documento de passagem de bastão deve ter estado de entrega preenchido por comando (branch, não comitado, à frente de origin).
+
+Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a auditores; ao mandar código para um auditor, copiar só o código.
+
+## 8. O que ainda precisa de decisão do usuário
+
+- D-b (§6): manter a voz do Gemini nas confirmações que repetem o que ele ditou, ou deixá-las na voz do sistema.
+- Quem audita o código da 13a e quando.
+- Se vale pagar o Nível 2 do Google (US$ 100 + 3 dias) para sair do limite de 100 pedidos/dia; ele disse "nivel 1" e achou o custo mensal "caro" (estimativa: ~US$ 5 a 11/mês a 20 min de fala por dia com o modelo escolhido).
+- Os 4 arquivos de agente na raiz: apagar ou ignorar no git.
+- Dívidas 5b/5c e F11 (alvos de cobertura abertos) e a medição com voz real da F11.
+
+## 9. Mapa das fontes deste notebook
+
+1. Este documento.
+2. `CLAUDE.md` e `README.md` do projeto (o `CLAUDE.md` é a descrição densa de arquitetura e restrições, atualizada até a Fase 13a).
+3. Memória do agente (decisões do usuário e regras de auditoria).
+4. `rodrigo-ai-architecture-digest-2026-09-28` — resumo extenso da arquitetura até a Fase 10 (**anterior à Fase 12/13a; use o `CLAUDE.md` para o estado atual**).
+5. Handoffs e prompt de continuação (2026-09-15 a 2026-10-06) — história; o do 2026-10-06 descreve a F11 e o roteiro F12–F17.
+6. Planos e relatórios de implementação por fase; planos finais; auditorias da 13a.
+7. Código: backend de voz, núcleo do backend, worker Python, frontend e shared, scripts e configuração, testes da Fase 13a, lista de todos os testes.
+
+Para o estado de cada decisão, o `CLAUDE.md` e `docs/implementation-phase-13a.md` valem mais que um plano antigo; planos `vN` antigos de uma fase são história (as rodadas de auditoria que os derrubaram estão nos relatórios).
+"""
+(OUT / "00-LEIA-PRIMEIRO-handoff.md").write_text(handoff, encoding="utf-8")
+
+# ---------------------------------------------------------------- 01..03 documentos centrais
+(OUT / "01-CLAUDE-md-do-projeto.md").write_text("# CLAUDE.md do projeto Rodrigo AI (instruções e arquitetura densas, atualizado até a Fase 13a)\n\n" + read("CLAUDE.md"), encoding="utf-8")
+(OUT / "02-README-do-projeto.md").write_text("# README do projeto Rodrigo AI\n\n" + read("README.md"), encoding="utf-8")
+
+mem_parts = ["# Memória do agente (notas persistentes de sessões anteriores)\n\nDecisões e regras que o usuário deu ao longo do trabalho. São a memória de projeto mantida pelo agente anterior.\n"]
+for f in sorted(MEM.glob("*.md")):
+    mem_parts.append(f"\n\n---\n\n## {f.name}\n\n{f.read_text(encoding='utf-8')}")
+(OUT / "03-memoria-do-agente.md").write_text("".join(mem_parts), encoding="utf-8")
+
+# ---------------------------------------------------------------- documentos de fase
+shutil_copy = lambda src, dst: (OUT / dst).write_text(read(src), encoding="utf-8")
+shutil_copy("docs/rodrigo-ai-architecture-digest-2026-09-28.md", "04-resumo-de-arquitetura-2026-09-28.md")
+docs_bundle("05-handoffs-e-continuacao.md", "Handoffs e prompt de continuação (história do projeto)",
+    "Do mais recente ao mais antigo. O de 2026-10-06 descreve a Fase 11 e o roteiro F12–F17; os anteriores são o histórico das Fases 2 a 5c.",
+    ["docs/handoff-2026-10-06.md", "docs/prompt-proxima-sessao-2026-10-02.md", "docs/handoff-2026-09-23b.md", "docs/handoff-2026-09-23.md", "docs/handoff-2026-09-22.md", "docs/handoff-2026-09-15.md", "docs/phase-4-kickoff-prompt.md"])
+docs_bundle("06-fase-13a-plano-v3-e-implementacao.md", "Fase 13a — plano v3 e relatório de implementação",
+    "O plano v3 (corrigido pelas rodadas de auditoria agy e Kimi K3) e o relatório do que foi implementado, com desvios, medições e o que NÃO foi verificado.",
+    ["docs/phase-13a-v3.md", "docs/implementation-phase-13a.md"])
+docs_bundle("07-fase-13a-auditorias-e-versoes-anteriores.md", "Fase 13a — auditorias das rodadas 1 e 2 e versões anteriores do plano",
+    "Relatórios dos auditores (agy rodada 1: 21 achados; Kimi K3 rodada 2: 13 achados) e as v1/v2 do plano. Útil para entender por que a v3 é como é.",
+    ["docs/audits/f13a/plan-r1-agy.md", "docs/audits/f13a/plan-r2-kimi-k3.md", "docs/phase-13a-v1.md", "docs/phase-13a-v2.md"])
+docs_bundle("08-fase-12-privacidade.md", "Fase 12 — Privacidade condizente com a promessa", "Plano v2.2 (três rodadas de auditoria).", ["docs/phase-12-v2.md"])
+docs_bundle("09-fase-11-e-10a-nuvem.md", "Fases 10a e 11 — geração e intenção em nuvem",
+    "Plano da Fase 10a (v3), adendo da intenção em nuvem, relatório da Fase 11 e o roteiro de voz real que só o usuário executa.",
+    ["docs/phase-10-v3.md", "docs/phase-11-addendum-cloud-intent.md", "docs/implementation-phase-11.md", "docs/f11-roteiro-voz-real.md", "docs/phase-10-option-typesafe-jev.md"])
+docs_bundle("10-relatorios-de-implementacao-fases-1-a-5c.md", "Relatórios de implementação — Fases 1 a 5c",
+    "O que foi entregue em cada fase, com as medições reais e as dívidas declaradas.",
+    ["docs/implementation-phase-1.md", "docs/implementation-phase-2.md", "docs/implementation-phase-3.md", "docs/implementation-phase-4.md", "docs/implementation-phase-5a.md", "docs/implementation-phase-5b.md", "docs/implementation-phase-5c.md"])
+docs_bundle("11-planos-finais-fases-6-a-9.md", "Planos finais — Fases 6 a 9", "Lembretes agendados (6), memória entre sessões (7), edição (8), recorrência (9). Versões v2 (as aprovadas).",
+    ["docs/phase-6-v2.md", "docs/phase-7-v2.md", "docs/phase-8-v2.md", "docs/phase-9-v2.md"])
+docs_bundle("12-planos-finais-fases-1-a-5c.md", "Planos finais — Fases 1 a 5c", "Última versão de cada plano (as anteriores foram derrubadas pela auditoria; ver os relatórios de implementação).",
+    ["docs/phase-1-v1.md", "docs/phase-2-v2.md", "docs/phase-2-v2-addendum.md", "docs/phase-3-v2.md", "docs/phase-4-v2.md", "docs/phase-5a-v5.md", "docs/phase-5b-v6.md", "docs/phase-5c-v9.md"])
+docs_bundle("13-correcoes-e-consultas.md", "Correções de defeitos e consultas de decisão",
+    "Correção do 'loop de repetição' do LLM local (que se mostrou em grande parte artefato do harness de teste), consulta ao Codex sobre o fim fixo e correções de revisão.",
+    ["docs/fix-generation-repetition-loop-v2.md", "docs/fix-generation-repetition-loop-v1.md", "docs/codex-consulta-fim-fixo-2026-09-29.md", "docs/review-corrections-1.md"])
+
+# ---------------------------------------------------------------- código
+def listing(patterns):
+    out = []
+    for pat in patterns:
+        out += [str(p.relative_to(ROOT)) for p in sorted(ROOT.glob(pat)) if p.is_file()]
+    return out
+
+bundle("20-codigo-backend-voz.md", "Código — backend de voz (src/backend/voice)", "Sessão, orquestração, TTS, orçamento, motor do worker, rotas de voz.",
+       [f for f in listing(["src/backend/voice/*.ts"])])
+bundle("21-codigo-backend-nucleo.md", "Código — núcleo do backend (servidor, privacidade, agentes, ferramentas, conhecimento)", "Tudo de src/backend exceto voz e testes.",
+       [f for f in listing(["src/backend/*.ts", "src/backend/routes/*.ts", "src/backend/agents/*.ts", "src/backend/tools/*.ts", "src/backend/knowledge/*.ts", "src/backend/storage/*.ts"]) if "__tests__" not in f])
+bundle("22-codigo-worker-python.md", "Código — worker Python (worker.py)", "STT, LLM local, geração/intenção/TTS via Gemini, redação de segredos. 1500+ linhas.",
+       ["scripts/worker/worker.py"])
+bundle("23-codigo-scripts-worker-e-utilitarios.md", "Código — scripts auxiliares e testes Python do worker", "Síntese Kokoro, setup de voz, benchmark, coordenador de dev e os testes Python.",
+       [f for f in listing(["scripts/*.mjs", "scripts/worker/*.py"]) if not f.endswith("worker/worker.py")])
+bundle("24-codigo-frontend-e-shared.md", "Código — frontend e tipos compartilhados", "Cliente do navegador (captura, VAD, reprodução, cartão de privacidade) e contratos compartilhados.",
+       listing(["src/frontend/*", "src/shared/*.ts", "src/shared/extensions/*.ts"]))
+bundle("25-configuracao-do-projeto.md", "Configuração do projeto", "package.json, tsconfigs, Vite, .gitignore e o modelo .env.example (sem segredos).",
+       ["package.json", "tsconfig.json", "tsconfig.server.json", "vite.config.ts", ".gitignore", ".env.example"])
+bundle("26-testes-da-fase-13a.md", "Testes da Fase 13a (TTS)", "Orçamento, provedor Gemini, sessão (ordem/coalescência), egresso contra o worker real e Gemini falso, privacidade.",
+       ["src/backend/__tests__/ttsBudget.test.ts", "src/backend/__tests__/geminiVoiceProvider.test.ts", "src/backend/__tests__/f13Session.test.ts", "src/backend/__tests__/f13EgressTts.test.ts", "src/backend/__tests__/privacy.test.ts", "src/backend/__tests__/helpers/egress.ts", "src/backend/__tests__/f12Fallback.test.ts"])
+
+# lista de todos os títulos de teste (para o agente saber o que já está coberto)
+titles = ["# Lista de todos os testes Node (títulos)\n\nGerada por `grep` nos arquivos `*.test.ts`. Serve para saber o que já está coberto antes de escrever um teste novo.\n"]
+for f in sorted((ROOT / "src/backend/__tests__").glob("*.test.ts")):
+    t = f.read_text(encoding="utf-8")
+    its = re.findall(r"^\s*(?:describe|it)\(\s*[`'\"](.+?)[`'\"]", t, re.M)
+    titles.append(f"\n\n## {f.name}\n" + "\n".join(f"- {x}" for x in its))
+(OUT / "27-lista-de-testes.md").write_text("".join(titles), encoding="utf-8")
+
+# ---------------------------------------------------------------- verificação de segurança do pacote
+bad = []
+key = ""
+envp = ROOT / ".env"
+if envp.exists():
+    for l in envp.read_text().splitlines():
+        if l.startswith("GEMINI_API_KEY="):
+            key = l.split("=", 1)[1].strip().strip("\"'")
+tot = 0
+for f in sorted(OUT.glob("*")):
+    t = f.read_text(encoding="utf-8")
+    tot += len(t)
+    if key and key in t:
+        bad.append((f.name, "chave real"))
+    if re.search(r"nvapi-[A-Za-z0-9_\-]{20,}|gsk_[A-Za-z0-9]{20,}", t):
+        bad.append((f.name, "chave nvapi/gsk"))
+    if "docs/research/teologia-profile-source" in t and "Arquivo: `docs/research" in t:
+        bad.append((f.name, "conteudo de docs/research"))
+    print(f"{f.name:58s} {len(t)//1024:6d} KB  {len(t.split()):8d} palavras")
+print("TOTAL", tot // 1024, "KB;", "ARQUIVOS", len(list(OUT.glob('*'))))
+print("ACHADOS DE SEGURANCA:", bad if bad else "nenhum")
+sys.exit(1 if bad else 0)
