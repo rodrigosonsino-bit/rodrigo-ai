@@ -128,6 +128,9 @@ interface ActiveTurn {
   /** Quantas frases GERADAS já chegaram neste turno (a primeira nunca é coalescida). */
   generatedSeen: number;
   coalesce: { texts: string[]; firstIndex: number; chars: number; timer: NodeJS.Timeout | null } | null;
+  /** F13b: diagnóstico de latência — só milissegundos por etapa desde a chegada do áudio, nunca texto. */
+  t0: number;
+  marks: [string, number][];
 }
 
 interface Session {
@@ -343,7 +346,9 @@ export class SessionManager {
       nextToEmit: 0,
       synthResults: new Map(),
       generatedSeen: 0,
-      coalesce: null
+      coalesce: null,
+      t0: performance.now(),
+      marks: []
     };
     session.activeTurn = activeTurn;
     session.lastTurnId = turnId;
@@ -368,6 +373,7 @@ export class SessionManager {
       }
 
       const transcript = await this.engine.transcribe(audioPath);
+      this.mark(turn, 'stt');
       if (session.activeTurn !== turn) return; // superado por cancelamento/preempção
 
       // Transcrição sem nenhuma letra ou número = o detector de voz disparou com ruído, estalo, eco do alto-falante ou um
@@ -490,6 +496,7 @@ export class SessionManager {
           cloudIntent = null;
           console.error('[intent] classificação em nuvem falhou, usando detectores locais:', err);
         }
+        this.mark(turn, 'intencao_nuvem');
         if (session.activeTurn !== turn) return;
       }
 
@@ -616,6 +623,7 @@ export class SessionManager {
         if (session.activeTurn !== turn) return;
         throw err;
       }
+      this.mark(turn, 'classificacao');
       if (session.activeTurn !== turn) return;
 
       // Fase 4: resolve o agente ANTES de emitir routing/falando — se selectAgentForLabel
@@ -684,6 +692,7 @@ export class SessionManager {
         await this.generateOrDisabled(session, turn, messagesForEngine, {
           onSentence: (rawText, index) => {
             if (session.activeTurn !== turn) return;
+            if (index === 0) this.mark(turn, 'primeira_frase');
             let text = cleanTextForSpeech(rawText);
             if (!text) return; // fragmento não-falável (ex.: só emoji/markdown) — descarta silenciosamente
             // F11 H11.4: neste caminho nenhuma ferramenta executou nada. Se o modelo afirma ter
@@ -852,6 +861,10 @@ export class SessionManager {
         session.emittedSentences = { turnId: turn.turnId, items: [] };
       }
       session.emittedSentences.items.push({ text: ready.text, consumed: false });
+      if (session.emittedSentences.items.length === 1) {
+        this.mark(turn, 'primeiro_audio');
+        console.log(`[timing] turno=${turn.turnId} ${turn.marks.map(([k, ms]) => `${k}=${ms}ms`).join(' ')}`);
+      }
 
       this.emit(session, {
         type: 'sentence_audio_ready',
@@ -861,6 +874,12 @@ export class SessionManager {
         text: ready.text
       });
     }
+  }
+
+  /** F13b: registra o tempo decorrido desde a chegada do áudio (só a primeira vez de cada etapa). */
+  private mark(turn: ActiveTurn, stage: string): void {
+    if (turn.marks.some(([k]) => k === stage)) return;
+    turn.marks.push([stage, Math.round(performance.now() - turn.t0)]);
   }
 
   /** Confirma que uma frase foi reproduzida até o fim — só então entra no histórico (Refinamento 1). */
