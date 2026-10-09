@@ -37,6 +37,12 @@ export class VoiceController {
 
   private state: VoiceState = 'idle';
   private currentTurnId: string | null = null;
+  /** Fase V §6: só vale durante 'processando' do turno ATUAL — resetado a cada novo 'processando'/'erro'. */
+  private lastRoutingLabel: OrchestratorLabel | null = null;
+
+  // --- Compartilhamento de tela (Fase V) ---
+  private screenStream: MediaStream | null = null;
+  private screenVideo: HTMLVideoElement | null = null;
 
   // --- Captura/VAD ---
   private ringBuffer: Float32Array[] = [];
@@ -69,7 +75,8 @@ export class VoiceController {
     private readonly onTranscript: (text: string) => void,
     private readonly onAssistantText: (text: string) => void,
     private readonly onError: (message: string) => void,
-    private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void
+    private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void,
+    private readonly onScreenSharingChange: (sharing: boolean) => void = () => {}
   ) {}
 
   private setState(state: VoiceState): void {
@@ -123,13 +130,20 @@ export class VoiceController {
   private handleServerEvent(event: VoiceServerEvent): void {
     switch (event.type) {
       case 'state':
+        // Fase V §6: um rótulo de roteamento só vale até o próximo turno recomeçar (mesma lógica que
+        // ORCHESTRATOR_LABEL_NAMES em main.ts usa para resetar o indicador visual).
+        if (event.state === 'processando' || event.state === 'erro') this.lastRoutingLabel = null;
         this.setState(event.state);
         break;
       case 'transcript':
         this.onTranscript(event.text);
         break;
       case 'routing':
+        this.lastRoutingLabel = event.label;
         this.onRouting(event.turnId, event.label, event.handled);
+        break;
+      case 'screen_request':
+        void this.handleScreenRequest(event.captureId);
         break;
       case 'sentence_audio_ready':
         this.playbackQueue.push({
@@ -279,6 +293,81 @@ export class VoiceController {
     }
   }
 
+  // --- Compartilhamento de tela (Fase V §4, §6) ---
+
+  async shareScreen(): Promise<void> {
+    if (this.screenStream) return;
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    this.screenStream = stream;
+    const video = document.createElement('video');
+    video.muted = true;
+    video.srcObject = stream;
+    try {
+      await video.play();
+    } catch {
+      // alguns navegadores exigem gesto do usuário para tocar; o clique que chamou shareScreen() já é um.
+    }
+    this.screenVideo = video;
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => this.stopSharingScreen());
+    this.onScreenSharingChange(true);
+  }
+
+  stopSharingScreen(): void {
+    if (!this.screenStream) return;
+    this.screenStream.getTracks().forEach((t) => t.stop());
+    this.screenStream = null;
+    this.screenVideo = null;
+    this.onScreenSharingChange(false);
+  }
+
+  get isSharingScreen(): boolean {
+    return this.screenStream !== null;
+  }
+
+  /** Responde ao screen_request do servidor: um quadro atual, reduzido, ou "indisponível" dentro do prazo dele. */
+  private async handleScreenRequest(captureId: string): Promise<void> {
+    const video = this.screenVideo;
+    if (!video || !this.screenStream || video.videoWidth === 0 || video.videoHeight === 0) {
+      await this.postScreenUnavailable(captureId);
+      return;
+    }
+    try {
+      const maxSide = 1280;
+      const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+      const w = Math.max(1, Math.round(video.videoWidth * scale));
+      const h = Math.max(1, Math.round(video.videoHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        await this.postScreenUnavailable(captureId);
+        return;
+      }
+      ctx.drawImage(video, 0, 0, w, h);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+      if (!blob) {
+        await this.postScreenUnavailable(captureId);
+        return;
+      }
+      await fetch(`/api/voice/session/screen?captureId=${encodeURIComponent(captureId)}`, {
+        method: 'POST',
+        headers: { ...this.headers(), 'Content-Type': 'image/jpeg' },
+        body: blob
+      });
+    } catch {
+      await this.postScreenUnavailable(captureId).catch(() => {});
+    }
+  }
+
+  private async postScreenUnavailable(captureId: string): Promise<void> {
+    await fetch('/api/voice/session/screen', {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ captureId, unavailable: true })
+    }).catch(() => {});
+  }
+
   private triggerBargeIn(): void {
     this.bargeInCandidateMs = 0;
     this.playbackGeneration++;
@@ -376,6 +465,17 @@ export class VoiceController {
   interruptManually(): void {
     if (this.state === 'falando') {
       this.triggerBargeIn();
+      return;
+    }
+    // Fase V §6: turno de tela ainda em 'processando' (esperando a captura ou a visão) também pode ser
+    // interrompido — é o único rótulo em que "processando" tem uma espera potencialmente longa e sem áudio.
+    if (this.state === 'processando' && this.lastRoutingLabel === 'TELA' && this.currentTurnId) {
+      void fetch('/api/voice/session/cancel', {
+        method: 'POST',
+        headers: { ...this.headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId: this.currentTurnId })
+      });
+      this.setState('ouvindo');
     }
   }
 
@@ -386,6 +486,7 @@ export class VoiceController {
   }
 
   private teardown(): void {
+    this.stopSharingScreen();
     this.playbackGeneration++;
     this.stopPlaybackImmediately();
     this.eventSource?.close();

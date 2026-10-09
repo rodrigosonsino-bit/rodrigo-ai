@@ -75,6 +75,17 @@ export interface SessionPreemptedEvent {
   type: 'session_preempted';
 }
 
+/**
+ * Fase V (docs/phase-vision-v3.md §4): pedido de UM quadro da tela, de uso único. O cliente responde com
+ * `POST /api/voice/session/screen?captureId=...` (sucesso) ou `{ captureId, unavailable: true }` (sem
+ * compartilhamento ativo) dentro do prazo; depois disso o `captureId` deixa de valer.
+ */
+export interface ScreenRequestEvent {
+  type: 'screen_request';
+  turnId: string;
+  captureId: string;
+}
+
 export interface ErrorEvent {
   type: 'error';
   message: string;
@@ -88,6 +99,7 @@ export type VoiceServerEvent =
   | SentenceAudioReadyEvent
   | TurnDoneEvent
   | SessionPreemptedEvent
+  | ScreenRequestEvent
   | ErrorEvent;
 
 export interface CreateSessionResponse {
@@ -129,7 +141,12 @@ export const VOICE_LIMITS = {
   PENDING_MUTATION_TTL_MS: 60_000,
   WARMUP_TIMEOUT_MS: 120_000,
   IDLE_TIMEOUT_MS: 10 * 60_000,
-  WORKER_SHUTDOWN_GRACE_MS: 3_000
+  WORKER_SHUTDOWN_GRACE_MS: 3_000,
+  /** Fase V §4: do screen_request até o quadro chegar (ou a resposta vira "compartilhe a tela e pergunte de novo"). */
+  SCREEN_CAPTURE_TIMEOUT_MS: 5_000,
+  /** Fase V §4, achado 8 (PNG de alta entropia em 1280² mede ~4,9 MB): JPEG 0,8 cabe bem abaixo disto. */
+  MAX_SCREEN_IMAGE_BYTES: 3 * 1024 * 1024,
+  MAX_SCREEN_IMAGE_DIM: 1600
 } as const;
 
 export const MAX_MUTATION_CONTENT_CHARS = 200;
@@ -153,8 +170,10 @@ export const NO_ACTION_CLAIM_TEXT = 'Eu não fiz isso. Para eu anotar ou criar u
 export const MUTATION_REPROMPT_TEXT = 'Não entendi. Posso confirmar? Diga só sim ou não.';
 export const GENERATION_FAILURE_TEXT = 'Não consegui pensar numa resposta agora.';
 
-/** Fase V, fatia 2: o caminho de tela existe, mas a captura e a visão chegam nas fatias 3 e 4. */
+/** Fase V, fatia 2: o caminho de tela existe, mas a visão chega na fatia 4. Dito quando a CAPTURA deu certo. */
 export const SCREEN_NOT_READY_TEXT = 'Ainda estou aprendendo a enxergar a tela. Em breve consigo te ajudar com isso.';
+/** Fase V, fatia 3: sem compartilhamento ativo, captureId vencido/rejeitado, ou upload inválido. */
+export const SCREEN_SHARE_NEEDED_TEXT = 'Compartilhe a tela no botão da página e pergunte de novo.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */
 export const KNOWLEDGE_LIMITS = {

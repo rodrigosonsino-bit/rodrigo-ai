@@ -15,7 +15,9 @@ import { createMutatingTools } from '../tools/index.js';
 import { mightBeMutation } from '../tools/mutatingTools.js';
 import type { IMutatingTool } from '../../shared/extensions/tools.js';
 import { mightBeScreenQuery, screenCloudAuthorized } from '../tools/screenQuery.js';
-import { SCREEN_NOT_READY_TEXT, type ConversationMessage } from '../../shared/voiceProtocol.js';
+import { SCREEN_NOT_READY_TEXT, SCREEN_SHARE_NEEDED_TEXT, type ConversationMessage } from '../../shared/voiceProtocol.js';
+import type { SessionTuning } from '../voice/sessionManager.js';
+import { parseJpegHeader } from '../voice/image.js';
 
 /**
  * Fase V, fatia 2 (docs/phase-vision-v3.md §3, §5.3, §10.1–10.2): reconhecer a pergunta sobre a tela, decidir a proveniência
@@ -78,17 +80,76 @@ interface H {
   tmp: string;
 }
 
-async function setup(opts: { mutating?: readonly IMutatingTool[] } = {}): Promise<H> {
+async function setup(opts: { mutating?: readonly IMutatingTool[]; tuning?: SessionTuning } = {}): Promise<H> {
   const port = 25000 + Math.floor(Math.random() * 4000);
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'f13-session-'));
   const engine = new FakeVoiceEngine();
   const tts = new CtlProvider();
   const audioStore = new AudioStore(tmp);
-  const sm = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), null, [], opts.mutating ?? [], null);
+  const sm = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), null, [], opts.mutating ?? [], null, undefined, opts.tuning);
   const server = await startServer(config, undefined, { config, sessionManager: sm, audioStore });
   return { server, baseUrl: `http://127.0.0.1:${port}`, engine, tts, sm, tmp };
 }
+
+/** Fase V §4: um JPEG mínimo e VÁLIDO (SOI + SOF0 com altura/largura reais + EOI) — o parser não decodifica pixels. */
+function u16be(n: number): Buffer {
+  const b = Buffer.alloc(2);
+  b.writeUInt16BE(n, 0);
+  return b;
+}
+function makeJpeg(width: number, height: number): Buffer {
+  const sofContent = Buffer.concat([Buffer.from([8]), u16be(height), u16be(width), Buffer.from([1, 1, 0x11, 0])]);
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    Buffer.from([0xff, 0xc0]),
+    u16be(2 + sofContent.length),
+    sofContent,
+    Buffer.from([0xff, 0xd9])
+  ]);
+}
+
+function findScreenFiles(root: string): string[] {
+  const out: string[] = [];
+  for (const dirent of fs.readdirSync(root, { withFileTypes: true })) {
+    const p = path.join(root, dirent.name);
+    if (dirent.isDirectory()) out.push(...findScreenFiles(p));
+    else if (dirent.name.startsWith('screen-')) out.push(p);
+  }
+  return out;
+}
+
+async function postScreenJpeg(
+  h: H,
+  s: { sessionId: string; token: string },
+  captureId: string,
+  jpeg: Buffer
+): Promise<Response> {
+  return fetch(`${h.baseUrl}/api/voice/session/screen?captureId=${encodeURIComponent(captureId)}`, {
+    method: 'POST',
+    headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'image/jpeg' },
+    body: jpeg
+  });
+}
+
+async function postScreenUnavailable(
+  h: H,
+  s: { sessionId: string; token: string },
+  captureId: string
+): Promise<Response> {
+  return fetch(`${h.baseUrl}/api/voice/session/screen`, {
+    method: 'POST',
+    headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ captureId, unavailable: true })
+  });
+}
+
+const screenRequestCaptureId = async (s: { sse: ReturnType<typeof readSse> }): Promise<string> => {
+  await waitFor(() => s.sse.events.some((e) => e.type === 'screen_request'), 'screen_request');
+  const ev = s.sse.events.find((e) => e.type === 'screen_request') as { captureId?: string } | undefined;
+  if (!ev?.captureId) throw new Error('screen_request sem captureId');
+  return ev.captureId;
+};
 
 async function teardown(h: H): Promise<void> {
   await h.sm.shutdownAll();
@@ -224,15 +285,15 @@ describe('Fase V — sessão: caminho de tela (fatia 2)', () => {
     if (h) await teardown(h);
   });
 
-  it('pergunta sobre a tela: rótulo TELA, frase fixa local, e NENHUM detector, classificação ou geração', async () => {
-    h = await setup();
+  it('pergunta sobre a tela sem captura (ninguém compartilhou): rótulo TELA, pede para compartilhar, NENHUM detector/classificação/geração', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 80 } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
     await waitFor(() => done(s.sse), 'turn_done');
     const routing = s.sse.events.find((e) => e.type === 'routing') as { label?: string } | undefined;
     assert.equal(routing?.label, 'TELA');
-    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_NOT_READY_TEXT]);
+    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_SHARE_NEEDED_TEXT]);
     assert.equal(h.tts.calls[0].options?.kind, 'local');
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.detectMutationCalls.length + h.engine.detectToolCalls.length, 0);
@@ -241,7 +302,7 @@ describe('Fase V — sessão: caminho de tela (fatia 2)', () => {
   });
 
   it('o turno de tela (pergunta E resposta ouvida) não aparece na geração seguinte', async () => {
-    h = await setup();
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 80 } });
     const s = await startSession(h);
     const playedAll = async (turnId: string, texts: string[]): Promise<void> => {
       for (const text of texts) {
@@ -262,7 +323,7 @@ describe('Fase V — sessão: caminho de tela (fatia 2)', () => {
     const doneBefore = s.sse.events.filter((e) => e.type === 'turn_done').length;
     const t1 = await speak(h, s);
     await waitFor(() => s.sse.events.filter((e) => e.type === 'turn_done').length > doneBefore, 'turn_done 1');
-    await playedAll(t1, [SCREEN_NOT_READY_TEXT]);
+    await playedAll(t1, [SCREEN_SHARE_NEEDED_TEXT]);
     h.engine.fixedTranscript = 'qual a capital da França?';
     const before = s.sse.events.filter((e) => e.type === 'turn_done').length;
     await speak(h, s);
@@ -271,7 +332,7 @@ describe('Fase V — sessão: caminho de tela (fatia 2)', () => {
     const sent = JSON.stringify(h.engine.generateCalls[1].messages);
     assert.ok(sent.includes('oi, tudo bem?') && sent.includes('Olá!'), 'controle: a rodada normal anterior continua indo');
     assert.ok(!sent.includes('MARCADOR-TELA'), 'a pergunta de tela não sai');
-    assert.ok(!sent.includes(SCREEN_NOT_READY_TEXT), 'a resposta de tela não sai');
+    assert.ok(!sent.includes(SCREEN_SHARE_NEEDED_TEXT), 'a resposta de tela não sai');
     assert.ok(!sent.includes('"origin"'), 'o campo origin nunca vai ao motor');
     assert.ok(sent.includes('qual a capital da França?'));
     s.sse.close();
@@ -308,5 +369,250 @@ describe('Fase V — sessão: caminho de tela (fatia 2)', () => {
     } finally {
       fs.rmSync(dataDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Fase V — parseJpegHeader (fatia 3, §4)', () => {
+  it('JPEG válido: lê largura e altura do SOF0', () => {
+    assert.deepEqual(parseJpegHeader(makeJpeg(1280, 720)), { width: 1280, height: 720 });
+  });
+  it('rejeita assinatura errada (PNG)', () => {
+    assert.equal(parseJpegHeader(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0])), null);
+  });
+  it('rejeita buffer vazio ou curto demais', () => {
+    assert.equal(parseJpegHeader(Buffer.alloc(0)), null);
+    assert.equal(parseJpegHeader(Buffer.from([0xff, 0xd8])), null);
+  });
+  it('rejeita SOI seguido de EOI sem nenhum SOF (sem dimensão)', () => {
+    assert.equal(parseJpegHeader(Buffer.from([0xff, 0xd8, 0xff, 0xd9])), null);
+  });
+  it('rejeita SOF truncado (segLen aponta além do buffer)', () => {
+    const b = makeJpeg(100, 100);
+    assert.equal(parseJpegHeader(b.subarray(0, b.length - 5)), null);
+  });
+  it('rejeita dimensão zero (altura ou largura)', () => {
+    assert.equal(parseJpegHeader(makeJpeg(0, 100)), null);
+    assert.equal(parseJpegHeader(makeJpeg(100, 0)), null);
+  });
+  it('rejeita byte 0/1 que NÃO é a assinatura SOI, mesmo que o resto pareça um JPEG válido a partir do byte 2', () => {
+    // Pega um JPEG válido e troca só os 2 primeiros bytes — se o parser não checar a assinatura e só pular
+    // "offset = 2" cegamente, isto passaria (o conteúdo a partir do byte 2 é um SOF0 válido por acidente).
+    const valid = makeJpeg(640, 480);
+    const semAssinatura = Buffer.concat([Buffer.from([0x00, 0x00]), valid.subarray(2)]);
+    assert.equal(parseJpegHeader(semAssinatura), null);
+  });
+});
+
+describe('Fase V — SessionManager.receiveScreenCapture/rejectScreenCapture (chamados direto, sem a rota)', () => {
+  let h: H;
+  afterEach(async () => {
+    if (h) await teardown(h);
+  });
+
+  it('receiveScreenCapture rejeita captureId errado — a validação é da própria API, não só da rota', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const wrong = h.sm.receiveScreenCapture(s.sessionId, s.token, 'id-errado', '/tmp/x.jpg', 10);
+    assert.equal(wrong, false);
+    // o pedido real continua intacto: o captureId CERTO ainda funciona depois da tentativa errada
+    const right = h.sm.receiveScreenCapture(s.sessionId, s.token, captureId, '/tmp/x.jpg', 10);
+    assert.equal(right, true);
+    await waitFor(() => done(s.sse), 'turn_done');
+    s.sse.close();
+  });
+
+  it('receiveScreenCapture rejeita sessão/token errados', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    assert.equal(h.sm.receiveScreenCapture('sessao-errada', s.token, captureId, '/tmp/x.jpg', 10), false);
+    assert.equal(h.sm.receiveScreenCapture(s.sessionId, 'token-errado', captureId, '/tmp/x.jpg', 10), false);
+    assert.equal(h.sm.receiveScreenCapture(s.sessionId, s.token, captureId, '/tmp/x.jpg', 10), true);
+    await waitFor(() => done(s.sse), 'turn_done');
+    s.sse.close();
+  });
+
+  it('receiveScreenCapture rejeita um captureId cujo turno já foi cancelado (revalida identidade, não só existência)', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    const turnId = await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId })
+    });
+    assert.equal(h.sm.receiveScreenCapture(s.sessionId, s.token, captureId, '/tmp/x.jpg', 10), false);
+    s.sse.close();
+  });
+
+  it('rejectScreenCapture rejeita captureId errado sem tocar no pedido real', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    assert.equal(h.sm.rejectScreenCapture(s.sessionId, s.token, 'id-errado'), false);
+    assert.equal(h.sm.rejectScreenCapture(s.sessionId, s.token, captureId), true);
+    await waitFor(() => done(s.sse), 'turn_done');
+    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_SHARE_NEEDED_TEXT]);
+    s.sse.close();
+  });
+});
+
+describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
+  let h: H;
+  afterEach(async () => {
+    if (h) await teardown(h);
+  });
+
+  it('captura bem-sucedida: screen_request chega, JPEG válido é aceito, resposta é a frase de "ainda não sei ver", e o arquivo é apagado depois (HV.4)', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    const turnId = await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const postRes = await postScreenJpeg(h, s, captureId, makeJpeg(640, 480));
+    assert.equal(postRes.status, 200);
+    await waitFor(() => done(s.sse), 'turn_done');
+    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_NOT_READY_TEXT]);
+    assert.equal(findScreenFiles(h.tmp).length, 0, 'o JPEG não pode sobrar em disco depois do turno (HV.4)');
+    void turnId;
+    s.sse.close();
+  });
+
+  it('sem compartilhamento: {unavailable:true} → pede para compartilhar, nenhum arquivo é escrito', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const res = await postScreenUnavailable(h, s, captureId);
+    assert.equal(res.status, 200);
+    await waitFor(() => done(s.sse), 'turn_done');
+    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_SHARE_NEEDED_TEXT]);
+    assert.equal(findScreenFiles(h.tmp).length, 0);
+    s.sse.close();
+  });
+
+  it('HV.3: captureId errado é rejeitado com 409 e NUNCA escreve nada em disco', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    await screenRequestCaptureId(s); // garante que o pedido já existe
+    const res = await postScreenJpeg(h, s, 'captureId-que-nao-existe', makeJpeg(100, 100));
+    assert.equal(res.status, 409);
+    assert.equal(findScreenFiles(h.tmp).length, 0, 'captureId inválido nunca aloca armazenamento (achado 7)');
+    await waitFor(() => done(s.sse), 'turn_done'); // o pedido real ainda está pendente: espera o timeout
+    s.sse.close();
+  });
+
+  it('HV.3: captureId duplicado (reenvio depois de já consumido) é rejeitado com 409', async () => {
+    h = await setup();
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const first = await postScreenJpeg(h, s, captureId, makeJpeg(100, 100));
+    assert.equal(first.status, 200);
+    const dup = await postScreenJpeg(h, s, captureId, makeJpeg(100, 100));
+    assert.equal(dup.status, 409);
+    await waitFor(() => done(s.sse), 'turn_done');
+    assert.equal(findScreenFiles(h.tmp).length, 0);
+    s.sse.close();
+  });
+
+  it('HV.3: captureId de um pedido já superado (nova fala no meio da espera) é rejeitado com 409', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const staleId = await screenRequestCaptureId(s);
+    // nova fala preempta o turno de tela antes da captura chegar
+    h.engine.fixedTranscript = 'oi';
+    await speak(h, s);
+    const res = await postScreenJpeg(h, s, staleId, makeJpeg(100, 100));
+    assert.equal(res.status, 409);
+    assert.equal(findScreenFiles(h.tmp).length, 0, 'captureId de turno superado nunca escreve nada');
+    await waitFor(() => done(s.sse), 'turn_done');
+    s.sse.close();
+  });
+
+  it('HV.3: assinatura inválida (não é JPEG) é rejeitada com 400, sem escrever nada', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const res = await postScreenJpeg(h, s, captureId, Buffer.from('isto não é um jpeg'));
+    assert.equal(res.status, 400);
+    assert.equal(findScreenFiles(h.tmp).length, 0);
+    await waitFor(() => done(s.sse), 'turn_done'); // o pedido segue pendente: o teste espera o timeout dar frase fixa
+    s.sse.close();
+  });
+
+  it('HV.3: dimensão acima do limite é rejeitada com 400, sem escrever nada', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const res = await postScreenJpeg(h, s, captureId, makeJpeg(1601, 900));
+    assert.equal(res.status, 400);
+    assert.equal(findScreenFiles(h.tmp).length, 0);
+    await waitFor(() => done(s.sse), 'turn_done');
+    s.sse.close();
+  });
+
+  it('HV.3: corpo maior que o limite é rejeitado com 413, sem escrever nada', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const big = Buffer.concat([makeJpeg(100, 100), Buffer.alloc(3 * 1024 * 1024)]);
+    const res = await postScreenJpeg(h, s, captureId, big);
+    assert.equal(res.status, 413);
+    assert.equal(findScreenFiles(h.tmp).length, 0);
+    await waitFor(() => done(s.sse), 'turn_done');
+    s.sse.close();
+  });
+
+  it('timeout sem nenhum POST: pede para compartilhar (HV.3 — o prazo é o próprio protetor contra espera infinita)', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 60 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    await screenRequestCaptureId(s);
+    await waitFor(() => done(s.sse), 'turn_done');
+    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_SHARE_NEEDED_TEXT]);
+    assert.equal(findScreenFiles(h.tmp).length, 0);
+    s.sse.close();
+  });
+
+  it('cancelar o turno (interromper) durante a espera pela captura libera rápido, sem esperar o prazo inteiro', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 5000 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    const turnId = await speak(h, s);
+    await screenRequestCaptureId(s);
+    const t0 = Date.now();
+    const cancelRes = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId })
+    });
+    assert.equal(cancelRes.status, 200);
+    await waitFor(() => findScreenFiles(h.tmp).length === 0, 'sem resíduo', 2000); // nunca houve captura: nada a apagar
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed < 1000, `cancelamento não pode esperar o prazo de 5s da captura (levou ${elapsed}ms)`);
+    s.sse.close();
   });
 });

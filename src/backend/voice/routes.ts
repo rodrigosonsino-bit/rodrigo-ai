@@ -5,6 +5,7 @@ import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { AudioStore } from './audioStore.js';
 import type { SessionManager } from './sessionManager.js';
 import { parseWavHeader } from './wav.js';
+import { parseJpegHeader } from './image.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -177,6 +178,66 @@ export async function handleVoiceRoute(
       return true;
     }
     sendJson(res, 200, { turnId: result.turnId });
+    return true;
+  }
+
+  // Fase V (§4): captura de tela de uso único. Dois formatos de corpo: JSON {captureId, unavailable:true} quando o
+  // navegador não tem compartilhamento ativo, ou binário JPEG (?captureId=...) com o quadro capturado.
+  if (pathname === '/api/voice/session/screen' && req.method === 'POST') {
+    const captureId = url.searchParams.get('captureId') || '';
+    const contentType = String(req.headers['content-type'] || '');
+
+    if (contentType.includes('application/json')) {
+      let body: Record<string, unknown>;
+      try {
+        body = (await readJsonBody(req, 4096)) as Record<string, unknown>;
+      } catch {
+        sendJson(res, 400, { error: 'JSON inválido.' });
+        return true;
+      }
+      const cid = String(body.captureId || captureId || '');
+      const ok = deps.sessionManager.rejectScreenCapture(sessionId, token, cid);
+      sendJson(res, ok ? 200 : 409, ok ? { ok: true } : { error: 'Pedido de captura inválido, vencido ou já atendido.' });
+      return true;
+    }
+
+    // Corpo binário: valida sessão/captureId ANTES de alocar qualquer armazenamento em disco (achado 7 da auditoria
+    // da Fase V — nunca escrever a favor de uma sessão inválida/encerrada).
+    if (!captureId || !deps.sessionManager.screenCaptureExpected(sessionId, token, captureId)) {
+      sendJson(res, 409, { error: 'Pedido de captura inválido, vencido ou já atendido.' });
+      return true;
+    }
+
+    let bodyBuffer: Buffer;
+    try {
+      bodyBuffer = await readBinaryBody(req, VOICE_LIMITS.MAX_SCREEN_IMAGE_BYTES);
+    } catch {
+      sendJson(res, 413, { error: 'Imagem excede o limite de tamanho permitido.' });
+      res.once('finish', () => req.destroy());
+      return true;
+    }
+
+    const jpeg = parseJpegHeader(bodyBuffer);
+    if (!jpeg) {
+      sendJson(res, 400, { error: 'Imagem inválida: esperado JPEG válido.' });
+      return true;
+    }
+    if (jpeg.width > VOICE_LIMITS.MAX_SCREEN_IMAGE_DIM || jpeg.height > VOICE_LIMITS.MAX_SCREEN_IMAGE_DIM) {
+      sendJson(res, 400, { error: `Imagem excede ${VOICE_LIMITS.MAX_SCREEN_IMAGE_DIM}px no maior lado.` });
+      return true;
+    }
+
+    const filePath = deps.audioStore.newScreenCapturePath(sessionId);
+    await fs.promises.writeFile(filePath, bodyBuffer);
+
+    // Revalida DEPOIS de gravar (§4): o turno pode ter sido cancelado enquanto o corpo chegava pela rede.
+    const accepted = deps.sessionManager.receiveScreenCapture(sessionId, token, captureId, filePath, bodyBuffer.byteLength);
+    if (!accepted) {
+      await fs.promises.rm(filePath, { force: true }).catch(() => {});
+      sendJson(res, 409, { error: 'Pedido de captura inválido, vencido, de outro turno ou já atendido.' });
+      return true;
+    }
+    sendJson(res, 200, { ok: true });
     return true;
   }
 

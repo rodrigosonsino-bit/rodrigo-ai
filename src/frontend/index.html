@@ -44,7 +44,13 @@
             <button id="voice-end-btn" type="button" class="btn" disabled>Encerrar</button>
             <button id="voice-mute-btn" type="button" class="btn" disabled aria-pressed="false">Silenciar microfone</button>
             <button id="voice-interrupt-btn" type="button" class="btn" disabled>Interromper resposta</button>
+            <button id="voice-screen-btn" type="button" class="btn" disabled aria-pressed="false">Compartilhar tela</button>
           </div>
+          <p id="voice-screen-note" class="cost-note" hidden>
+            Compartilhando a tela: perguntas que citem "tela", "monitor" ou "janela" podem ver um quadro dela. Por
+            padrão a imagem é lida só neste computador; ela só vai ao Gemini se você disser isso na própria pergunta
+            (ex.: "com o Gemini").
+          </p>
 
           <p id="voice-agent-indicator" class="voice-agent-indicator" role="status" aria-live="polite"></p>
 

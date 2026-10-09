@@ -9,6 +9,7 @@ import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLa
 import {
   GENERATION_FAILURE_TEXT,
   SCREEN_NOT_READY_TEXT,
+  SCREEN_SHARE_NEEDED_TEXT,
   isMutationName,
   MUTATION_CANCELLED_TEXT,
   MUTATION_REPROMPT_TEXT,
@@ -113,6 +114,8 @@ export interface SessionTuning {
   coalesceWaitMs?: number;
   maxGroupSentences?: number;
   maxGroupChars?: number;
+  /** Fase V §4: testes não esperam o prazo real de 5s do screen_request. */
+  screenCaptureTimeoutMs?: number;
 }
 
 interface ActiveTurn {
@@ -167,7 +170,22 @@ interface Session {
   armedMutation: ArmedMutation | null;
   emittedSentences?: { turnId: string; items: { text: string; consumed: boolean; origin?: 'screen' }[] };
   pendingMutation: PendingMutation | null;
+  /**
+   * Fase V (§4): no máximo UM pedido de captura de tela pendente por sessão. A rota HTTP consome (resolve e
+   * zera este campo) de forma síncrona — sem `await` entre checar e marcar consumido — então um POST
+   * duplicado para o mesmo captureId nunca encontra o pedido pela segunda vez.
+   */
+  captureRequest: CaptureRequest | null;
 }
+
+interface CaptureRequest {
+  captureId: string;
+  turnId: string;
+  resolve: (result: CaptureResult) => void;
+}
+type CaptureResult =
+  | { ok: true; filePath: string; bytes: number }
+  | { ok: false; reason: 'unavailable' | 'timeout' | 'rejected' };
 
 /**
  * Gerencia a única sessão de voz ativa por vez, com preempção síncrona (Correção 2):
@@ -190,6 +208,7 @@ export class SessionManager {
   /** Fase 12: o que pode sair para o Gemini (docs/phase-12-v2.md §2.1). */
   private readonly privacy: PrivacyConfig;
   private readonly readyTimeoutMs: number;
+  private readonly screenCaptureTimeoutMs: number;
   private readonly coalesceWaitMs: number;
   private readonly maxGroupSentences: number;
   private readonly maxGroupChars: number;
@@ -220,6 +239,7 @@ export class SessionManager {
     this.memoriaStore = memoriaStore;
     this.privacy = privacy;
     this.readyTimeoutMs = tuning.readyTimeoutMs ?? SENTENCE_READY_TIMEOUT_MS;
+    this.screenCaptureTimeoutMs = tuning.screenCaptureTimeoutMs ?? VOICE_LIMITS.SCREEN_CAPTURE_TIMEOUT_MS;
     this.coalesceWaitMs = tuning.coalesceWaitMs ?? COALESCE_MAX_WAIT_MS;
     this.maxGroupSentences = tuning.maxGroupSentences ?? MAX_GROUP_SENTENCES;
     this.maxGroupChars = tuning.maxGroupChars ?? MAX_GROUP_CHARS;
@@ -245,8 +265,14 @@ export class SessionManager {
 
     if (session.activeTurn) {
       this.engine.cancel(session.activeTurn.turnId);
-      session.activeTurn.abortController.abort();
+      session.activeTurn.abortController.abort(); // já resolve requestScreenCapture em curso, se houver
       session.activeTurn = null;
+    }
+    // Defensivo (§4): um captureRequest sem activeTurn correspondente não deveria existir, mas um resolve
+    // pendente travaria a Promise do chamador para sempre se sobrevivesse — nunca deixar órfão.
+    if (session.captureRequest) {
+      session.captureRequest.resolve({ ok: false, reason: 'rejected' });
+      session.captureRequest = null;
     }
 
     if (notifyPreempted) {
@@ -283,6 +309,7 @@ export class SessionManager {
         lastTurnId: null,
         cancelledTurnIds: new Set(),
         armedMutation: null,
+      captureRequest: null,
         pendingMutation: null
       };
       clearTimeout(session.idleTimer);
@@ -412,13 +439,28 @@ export class SessionManager {
       this.trimHistory(session);
 
       if (turn.provenance === 'screen') {
-        // Turno de tela: NUNCA passa por intenção em nuvem, detectores, classificação ou geração (§3). Fatia 2: frase fixa;
-        // captura e visão chegam nas fatias 3 e 4.
-        console.log(`[screen] turno=${turn.turnId} pergunta sobre a tela (visão ainda não implementada)`);
+        // Turno de tela: NUNCA passa por intenção em nuvem, detectores, classificação ou geração (§3).
         this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'TELA', handled: true });
+
+        // Fatia 3: captura de uso único. A visão em si (ler o quadro) chega na fatia 4 — por ora, com captura bem
+        // sucedida, a resposta ainda é a frase fixa, mas o arquivo já passou por todo o protocolo real (pedido,
+        // validação, limpeza) para a fatia seguinte só precisar trocar "descarta" por "manda ao motor de visão".
+        const capture = await this.requestScreenCapture(session, turn);
+        if (session.activeTurn !== turn) return; // cancelado durante a espera pela captura
+
         this.emit(session, { type: 'state', state: 'falando' });
+        let text: string;
+        if (capture.ok) {
+          console.log(`[screen] turno=${turn.turnId} captura recebida bytes=${capture.bytes} (visão ainda não implementada — fatia 4)`);
+          await fs.promises.rm(capture.filePath, { force: true }).catch(() => {});
+          text = SCREEN_NOT_READY_TEXT;
+        } else {
+          console.log(`[screen] turno=${turn.turnId} sem captura (${capture.reason})`);
+          text = SCREEN_SHARE_NEEDED_TEXT;
+        }
+
         turn.expectedSentences.add(0);
-        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, SCREEN_NOT_READY_TEXT, 0, 'local'));
+        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, 0, 'local'));
         await Promise.allSettled(turn.pendingSynthesis);
         if (session.activeTurn === turn) {
           this.emit(session, { type: 'turn_done', turnId: turn.turnId });
@@ -975,6 +1017,80 @@ export class SessionManager {
       session.armedMutation = null;
     }
 
+    return true;
+  }
+
+  /**
+   * Fase V (§4): abre o pedido de captura (emite `screen_request`, SSE) e espera até `SCREEN_CAPTURE_TIMEOUT_MS`
+   * por uma resposta da rota HTTP (`receiveScreenCapture`/`rejectScreenCapture`) ou pelo cancelamento do turno
+   * (barge-in, nova fala, fim de sessão) — o que vier primeiro. Nunca lança: toda saída é um `CaptureResult`.
+   */
+  private requestScreenCapture(session: Session, turn: ActiveTurn): Promise<CaptureResult> {
+    return new Promise<CaptureResult>((resolve) => {
+      // No máximo um pedido pendente por sessão (§4): um anterior nunca deveria sobreviver (a sessão só roda um
+      // turno por vez), mas invalidar explicitamente evita um resolve órfão se algo mudar essa invariante.
+      if (session.captureRequest) session.captureRequest.resolve({ ok: false, reason: 'rejected' });
+
+      const captureId = crypto.randomUUID();
+      let settled = false;
+      const finish = (result: CaptureResult): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        turn.abortController.signal.removeEventListener('abort', onAbort);
+        if (session.captureRequest?.captureId === captureId) session.captureRequest = null;
+        resolve(result);
+      };
+      const onAbort = (): void => finish({ ok: false, reason: 'rejected' });
+      const timer = setTimeout(() => finish({ ok: false, reason: 'timeout' }), this.screenCaptureTimeoutMs);
+      timer.unref?.();
+      turn.abortController.signal.addEventListener('abort', onAbort, { once: true });
+
+      session.captureRequest = { captureId, turnId: turn.turnId, resolve: finish };
+      this.emit(session, { type: 'screen_request', turnId: turn.turnId, captureId });
+    });
+  }
+
+  /**
+   * Fase V (§4, achado 7 da auditoria): checagem BARATA, sem tocar disco — a rota chama isto ANTES de alocar
+   * armazenamento e ler o corpo (até 3 MiB), para nunca escrever em disco a favor de uma sessão inválida/encerrada
+   * nem de um captureId que não é o pendente.
+   */
+  screenCaptureExpected(sessionId: string, token: string, captureId: string): boolean {
+    const session = this.getAuthorized(sessionId, token);
+    return !!session && session.captureRequest?.captureId === captureId;
+  }
+
+  /**
+   * Fase V (§4): a rota HTTP chama isto já com o corpo validado (assinatura JPEG, dimensões, tamanho — a
+   * validação de CONTEÚDO fica na rota, que decide se vale a pena gravar em disco antes de chamar aqui).
+   * Consome o pedido de forma síncrona: a segunda chamada com o mesmo captureId encontra `null` e falha.
+   */
+  receiveScreenCapture(sessionId: string, token: string, captureId: string, filePath: string, bytes: number): boolean {
+    const session = this.getAuthorized(sessionId, token);
+    if (!session) return false;
+    const req = session.captureRequest;
+    if (!req || req.captureId !== captureId) return false;
+    // Defensivo (plano §4): nenhum teste consegue distinguir a remoção desta linha, porque toda transição de turno
+    // (preempção, cancelamento, fim de sessão) já aborta o turno antigo, e o `finish()` dentro de
+    // requestScreenCapture já limpa session.captureRequest de forma incondicional nesse abort — tornando este
+    // estado (captureRequest preenchido para um turno que não é mais o activeTurn) inalcançável HOJE. Mantido
+    // como salvaguarda contra uma mudança futura nesse acoplamento, não como propriedade provada por teste.
+    if (!session.activeTurn || session.activeTurn.turnId !== req.turnId) return false;
+    // Não precisa zerar session.captureRequest aqui: req.resolve() abaixo É o `finish()` fechado sobre esta
+    // mesma sessão (criado em requestScreenCapture) e já limpa o campo antes de resolver — uma linha repetindo
+    // isso aqui seria código morto, não uma segunda camada real (provado: removê-la não muda nenhum teste).
+    req.resolve({ ok: true, filePath, bytes });
+    return true;
+  }
+
+  /** Fase V (§4): `{ captureId, unavailable: true }` — sem compartilhamento ativo no navegador. */
+  rejectScreenCapture(sessionId: string, token: string, captureId: string): boolean {
+    const session = this.getAuthorized(sessionId, token);
+    if (!session) return false;
+    const req = session.captureRequest;
+    if (!req || req.captureId !== captureId) return false;
+    req.resolve({ ok: false, reason: 'unavailable' }); // limpa session.captureRequest via o finish() de requestScreenCapture
     return true;
   }
 

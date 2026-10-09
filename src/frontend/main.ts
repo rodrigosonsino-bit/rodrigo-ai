@@ -213,6 +213,8 @@ const voiceStartBtn = document.getElementById('voice-start-btn') as HTMLButtonEl
 const voiceEndBtn = document.getElementById('voice-end-btn') as HTMLButtonElement;
 const voiceMuteBtn = document.getElementById('voice-mute-btn') as HTMLButtonElement;
 const voiceInterruptBtn = document.getElementById('voice-interrupt-btn') as HTMLButtonElement;
+const voiceScreenBtn = document.getElementById('voice-screen-btn') as HTMLButtonElement;
+const voiceScreenNote = document.getElementById('voice-screen-note') as HTMLParagraphElement;
 const voiceTranscriptLog = document.getElementById('voice-transcript-log') as HTMLDivElement;
 const voiceAgentIndicator = document.getElementById('voice-agent-indicator') as HTMLSpanElement;
 
@@ -286,6 +288,11 @@ const voiceController = new VoiceController(
     const name = ORCHESTRATOR_LABEL_NAMES[label] || label;
     voiceAgentIndicator.textContent =
       label === 'AMBIGUO' ? 'Classificado como: AMBÍGUO (respondido pelo agente Geral)' : `Agente: ${name}`;
+  },
+  (sharing) => {
+    voiceScreenBtn.setAttribute('aria-pressed', String(sharing));
+    voiceScreenBtn.textContent = sharing ? 'Parar compartilhamento' : 'Compartilhar tela';
+    voiceScreenNote.hidden = !sharing;
   }
 );
 
@@ -296,6 +303,7 @@ voiceStartBtn.addEventListener('click', () => {
       await voiceController.start();
       voiceEndBtn.disabled = false;
       voiceMuteBtn.disabled = false;
+      voiceScreenBtn.disabled = false;
     } catch (error) {
       appendErrorEntry(formatPortugueseErrorMessage(error));
       voiceStartBtn.disabled = false;
@@ -310,6 +318,7 @@ voiceEndBtn.addEventListener('click', () => {
     voiceEndBtn.disabled = true;
     voiceMuteBtn.disabled = true;
     voiceInterruptBtn.disabled = true;
+    voiceScreenBtn.disabled = true;
     muted = false;
     voiceMuteBtn.setAttribute('aria-pressed', 'false');
     voiceMuteBtn.textContent = 'Silenciar microfone';
@@ -326,6 +335,20 @@ voiceMuteBtn.addEventListener('click', () => {
 
 voiceInterruptBtn.addEventListener('click', () => {
   voiceController.interruptManually();
+});
+
+voiceScreenBtn.addEventListener('click', () => {
+  void (async () => {
+    if (voiceController.isSharingScreen) {
+      voiceController.stopSharingScreen();
+      return;
+    }
+    try {
+      await voiceController.shareScreen();
+    } catch (error) {
+      appendErrorEntry(formatPortugueseErrorMessage(error));
+    }
+  })();
 });
 
 window.addEventListener('beforeunload', () => {

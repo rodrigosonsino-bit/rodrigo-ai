@@ -42,6 +42,11 @@ export class AudioStore {
     return { audioId, filePath: path.join(this.dirFor(sessionId), `out-${audioId}.wav`) };
   }
 
+  /** Fase V (§4): caminho de um quadro de tela capturado, de uso único (nunca reaproveitado por outro captureId). */
+  newScreenCapturePath(sessionId: string): string {
+    return path.join(this.dirFor(sessionId), `screen-${crypto.randomUUID()}.jpg`);
+  }
+
   resolveOutputPath(sessionId: string, audioId: string): string | null {
     if (!/^[0-9a-f-]{36}$/.test(audioId)) return null;
     const dir = this.sessionDirs.get(sessionId);
