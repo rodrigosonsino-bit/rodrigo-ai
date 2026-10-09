@@ -77,6 +77,7 @@ interface H {
   engine: FakeVoiceEngine;
   tts: CtlProvider;
   sm: SessionManager;
+  audioStore: AudioStore;
   tmp: string;
 }
 
@@ -89,7 +90,7 @@ async function setup(opts: { mutating?: readonly IMutatingTool[]; tuning?: Sessi
   const audioStore = new AudioStore(tmp);
   const sm = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), null, [], opts.mutating ?? [], null, undefined, opts.tuning);
   const server = await startServer(config, undefined, { config, sessionManager: sm, audioStore });
-  return { server, baseUrl: `http://127.0.0.1:${port}`, engine, tts, sm, tmp };
+  return { server, baseUrl: `http://127.0.0.1:${port}`, engine, tts, sm, audioStore, tmp };
 }
 
 /** Fase V §4: um JPEG mínimo e VÁLIDO (SOI + SOF0 com altura/largura reais + EOI) — o parser não decodifica pixels. */
@@ -487,6 +488,26 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     s.sse.close();
   });
 
+  it('auditoria Kimi K3 (achado 5): o JSON de unavailable usa SÓ o captureId do corpo, nunca cai para o da query', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    // corpo SEM captureId, mas com o captureId real na QUERY — antes do achado 5 isto consumia o pedido real.
+    const res = await fetch(`${h.baseUrl}/api/voice/session/screen?captureId=${encodeURIComponent(captureId)}`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': s.sessionId, 'X-Rodrigo-Token': s.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unavailable: true })
+    });
+    assert.equal(res.status, 409, 'o captureId da query não deve valer para o ramo JSON');
+    // o pedido real continua intacto: funciona com o captureId no CORPO, como deveria
+    const ok = await postScreenUnavailable(h, s, captureId);
+    assert.equal(ok.status, 200);
+    await waitFor(() => done(s.sse), 'turn_done');
+    s.sse.close();
+  });
+
   it('sem compartilhamento: {unavailable:true} → pede para compartilhar, nenhum arquivo é escrito', async () => {
     h = await setup();
     h.engine.fixedTranscript = 'o que tem na minha tela?';
@@ -594,6 +615,26 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     await waitFor(() => done(s.sse), 'turn_done');
     assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_SHARE_NEEDED_TEXT]);
     assert.equal(findScreenFiles(h.tmp).length, 0);
+    s.sse.close();
+  });
+
+  it('auditoria Kimi K3 (achado 1): writeFile falha (disco/permissão) → 500 honesto, nada em disco, pedido destravado na hora (não espera o timeout)', async () => {
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 5000 } });
+    h.engine.fixedTranscript = 'o que tem na minha tela?';
+    const s = await startSession(h);
+    await speak(h, s);
+    const captureId = await screenRequestCaptureId(s);
+    const real = h.audioStore.newScreenCapturePath.bind(h.audioStore);
+    h.audioStore.newScreenCapturePath = () => '/caminho/que-nao-existe-de-verdade/x.jpg'; // força ENOENT no writeFile
+    const t0 = Date.now();
+    const res = await postScreenJpeg(h, s, captureId, makeJpeg(100, 100));
+    assert.equal(res.status, 500);
+    h.audioStore.newScreenCapturePath = real;
+    await waitFor(() => done(s.sse), 'turn_done');
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed < 1000, `o pedido devia ser destravado na hora do erro, não esperar os 5s do timeout (levou ${elapsed}ms)`);
+    assert.deepEqual(ready(s.sse).map((e) => e.text), [SCREEN_SHARE_NEEDED_TEXT]);
+    assert.equal(findScreenFiles(h.tmp).length, 0, 'nada deve sobrar em disco mesmo com o writeFile falhando');
     s.sse.close();
   });
 

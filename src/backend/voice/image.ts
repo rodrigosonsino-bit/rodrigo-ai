@@ -7,6 +7,11 @@ export interface JpegInfo {
  * Fase V (docs/phase-vision-v3.md §4): parser mínimo de cabeçalho JPEG (JFIF/EXIF) — só o suficiente para
  * validar assinatura e dimensões antes de aceitar uma captura de tela do cliente, no mesmo espírito de
  * `wav.ts#parseWavHeader`. Nunca confia em metadado externo ao próprio arquivo; nunca decodifica a imagem.
+ *
+ * Limitação conhecida (auditoria Kimi K3, fatia 3, achado 4): valida só o ENVELOPE — um buffer que tem SOI + um
+ * SOF0 válido mas nenhum dado de imagem de verdade (sem SOS/EOI depois) passa aqui. Inofensivo nesta fatia (o
+ * arquivo é só descartado); a fatia 4, que vai de fato mandar o arquivo a um motor de visão, não pode tratar
+ * `parseJpegHeader() !== null` como "imagem decodificável" — o motor de visão precisa da sua própria checagem.
  */
 export function parseJpegHeader(buffer: Buffer): JpegInfo | null {
   if (buffer.length < 4) return null;

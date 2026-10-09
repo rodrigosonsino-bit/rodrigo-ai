@@ -446,13 +446,18 @@ export class SessionManager {
         // sucedida, a resposta ainda é a frase fixa, mas o arquivo já passou por todo o protocolo real (pedido,
         // validação, limpeza) para a fatia seguinte só precisar trocar "descarta" por "manda ao motor de visão".
         const capture = await this.requestScreenCapture(session, turn);
+        // Auditoria Kimi K3 (fatia 3, achado 2): apagar ANTES do early-return por turno superado — hoje
+        // inalcançável (nada pode se interpor entre o resolve de receiveScreenCapture e esta continuação, que
+        // roda na mesma microtask), mas a posse do arquivo não deve depender dessa garantia implícita.
+        if (capture.ok) {
+          await fs.promises.rm(capture.filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura', capture.filePath, e));
+        }
         if (session.activeTurn !== turn) return; // cancelado durante a espera pela captura
 
         this.emit(session, { type: 'state', state: 'falando' });
         let text: string;
         if (capture.ok) {
           console.log(`[screen] turno=${turn.turnId} captura recebida bytes=${capture.bytes} (visão ainda não implementada — fatia 4)`);
-          await fs.promises.rm(capture.filePath, { force: true }).catch(() => {});
           text = SCREEN_NOT_READY_TEXT;
         } else {
           console.log(`[screen] turno=${turn.turnId} sem captura (${capture.reason})`);

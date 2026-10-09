@@ -195,7 +195,9 @@ export async function handleVoiceRoute(
         sendJson(res, 400, { error: 'JSON inválido.' });
         return true;
       }
-      const cid = String(body.captureId || captureId || '');
+      // Auditoria Kimi K3 (fatia 3, achado 5): o captureId vem SÓ do corpo JSON aqui — nunca misturar com a query,
+      // que é a fonte do ramo binário; evita consumir um pedido diferente do que o cliente pretendia.
+      const cid = String(body.captureId || '');
       const ok = deps.sessionManager.rejectScreenCapture(sessionId, token, cid);
       sendJson(res, ok ? 200 : 409, ok ? { ok: true } : { error: 'Pedido de captura inválido, vencido ou já atendido.' });
       return true;
@@ -228,13 +230,26 @@ export async function handleVoiceRoute(
     }
 
     const filePath = deps.audioStore.newScreenCapturePath(sessionId);
-    await fs.promises.writeFile(filePath, bodyBuffer);
-
-    // Revalida DEPOIS de gravar (§4): o turno pode ter sido cancelado enquanto o corpo chegava pela rede.
-    const accepted = deps.sessionManager.receiveScreenCapture(sessionId, token, captureId, filePath, bodyBuffer.byteLength);
-    if (!accepted) {
-      await fs.promises.rm(filePath, { force: true }).catch(() => {});
-      sendJson(res, 409, { error: 'Pedido de captura inválido, vencido, de outro turno ou já atendido.' });
+    // Auditoria Kimi K3 (fatia 3, achado 1): gravar e consumir precisam de try/finally — sem isso, uma exceção aqui
+    // (disco cheio, permissão) deixava o JPEG em disco para sempre E o pedido de captura nunca resolvia (o turno
+    // só liberaria depois do prazo inteiro). Qualquer exceção agora apaga o arquivo, rejeita o pedido explicitamente
+    // (destrava o turno na hora, em vez de esperar o timeout) e sobe para o catch genérico do servidor.
+    try {
+      await fs.promises.writeFile(filePath, bodyBuffer);
+      // Revalida DEPOIS de gravar (§4): o turno pode ter sido cancelado enquanto o corpo chegava pela rede.
+      const accepted = deps.sessionManager.receiveScreenCapture(sessionId, token, captureId, filePath, bodyBuffer.byteLength);
+      if (!accepted) {
+        await fs.promises.rm(filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura rejeitada', filePath, e));
+        sendJson(res, 409, { error: 'Pedido de captura inválido, vencido, de outro turno ou já atendido.' });
+        return true;
+      }
+    } catch (err) {
+      // Nunca deixar a exceção subir sem resposta: o handler não tem um catch acima (server.ts chama
+      // handleVoiceRoute com `void`), e sem isto o cliente ficaria esperando o request para sempre.
+      await fs.promises.rm(filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura após erro', filePath, e));
+      deps.sessionManager.rejectScreenCapture(sessionId, token, captureId); // destrava o turno na hora, não espera o timeout
+      console.error('[screen] falha ao processar captura:', err);
+      if (!res.headersSent) sendJson(res, 500, { error: 'Falha ao processar a captura da tela.' });
       return true;
     }
     sendJson(res, 200, { ok: true });
