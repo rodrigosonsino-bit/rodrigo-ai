@@ -7,6 +7,9 @@ v2 se autodeclarar "Aprovado para implementação". Esta v3 resolve os dois, mai
 OpenClaw (especificação de protocolo), e acrescenta uma trava estrutural para o achado ALTO 3 da r1 (que a
 v2 resolveu só em prosa, sem garantia de tipo).
 
+> Atualização 2026-10-10 (r2): os achados da auditoria da rodada 2 (`docs/audits/phase-15-plan-audit-r2.md`)
+> foram incorporados — ver §12. Veredicto da r2: **APROVÁVEL COM RESSALVAS** (nenhum achado novo ALTO/CRÍTICO).
+
 ---
 
 ## 1. Contexto, Ancoragem no Código e Objetivos
@@ -51,6 +54,12 @@ export interface SubAgentTaskResult {
   success: boolean;
   output: string;
   error?: string;
+  /** NOVO (v3, achado r2 N2): discriminante estrutural do contrato síncrono-vs-assíncrono.
+   *  Substitui o parsing de string mágica "__ASYNC__:<taskId>" em `output` — este campo é o
+   *  contrato real, imune a refatorações que normalizem/trunquem `output` antes do TTS. */
+  kind?: 'final' | 'async_deferred';
+  /** NOVO (v3, achado r2 N2): presente (e só faz sentido) quando kind === 'async_deferred'. */
+  asyncTaskId?: string;
 }
 
 export interface ISubAgent {
@@ -75,12 +84,23 @@ sim.
 
 ```ts
 async runTask(req: SubAgentTaskRequest, signal: AbortSignal): Promise<SubAgentTaskResult> {
-  if (req.isMutation && !req.confirmationToken) {
-    return {
-      success: false,
-      output: '',
-      error: 'Mutação bloqueada: nenhum confirmationToken presente (achado 3 da auditoria r1 da F15).'
-    };
+  if (req.isMutation) {
+    if (!req.confirmationToken) {
+      return {
+        success: false,
+        output: '',
+        error: 'Mutação bloqueada: nenhum confirmationToken presente (achado 3 da auditoria r1 da F15).'
+      };
+    }
+    // NOVO (v3, achado r2 N4): frescor — exige que o token embuta o turnId atual. Sem isto, um
+    // token de turno anterior reusado por engano passaria pela checagem de presença sozinha.
+    if (!req.confirmationToken.startsWith(`${req.turnId}:`)) {
+      return {
+        success: false,
+        output: '',
+        error: 'Mutação bloqueada: confirmationToken não corresponde ao turno atual (achado r2 N4).'
+      };
+    }
   }
   // ... resto do runTask atual
 }
@@ -93,6 +113,12 @@ valor do token pode ser tão simples quanto `` `${turnId}:${pendingMutation.aske
 `SessionManager` no mesmo lugar onde hoje ele monta `confirmed === 'SIM'`
 (`sessionManager.ts`, bloco "Fase 5c: consumo de pendingMutation", em torno da linha 501) — o ponto não é
 o valor ser imprevisível, é ele só existir depois da confirmação real.
+
+**Frescor do token (novo — achado r2 N4):** a checagem de presença acima, sozinha, não garante que o token
+pertence à mutação *deste* turno. O contrato passa a exigir também que `req.confirmationToken` comece com
+`` `${req.turnId}:` `` — uma linha que fecha o caso de um token de turno anterior reusado por engano, sem
+custo e sem se promover a "segurança criptográfica" (continua sendo trava anti-esquecimento, não
+anti-atacante).
 
 ---
 
@@ -158,16 +184,17 @@ export class OpenClawSubAgent implements ISubAgent {
     const combined = /* AbortSignal.any([signal, timeoutController.signal]) — Node 20+ */;
     try {
       const result = await this.openClawClient.invokeShort(req.prompt, combined);
-      return { success: true, output: result };
+      return { success: true, output: result, kind: 'final' };
     } catch (err) {
       if (timeoutController.signal.aborted) {
         // Não tenta decidir "deu certo ou não" — dispara como tarefa longa e devolve
         // ao SessionManager um resultado que vira fala explícita: "isso vai levar mais
         // tempo, te aviso quando terminar" (nunca inventa sucesso).
         const handle = await this.openClawClient.invokeLongAsync(req.prompt);
-        return { success: true, output: `__ASYNC__:${handle.taskId}` };
+        // NOVO (achado r2 N2): nada de string mágica em `output`; o discriminante é estrutural.
+        return { success: true, output: '', kind: 'async_deferred', asyncTaskId: handle.taskId };
       }
-      return { success: false, output: '', error: this.describeFailure(err) };
+      return { success: false, output: '', error: this.describeFailure(err), kind: 'final' };
     } finally {
       clearTimeout(timer);
     }
@@ -180,8 +207,10 @@ export class OpenClawSubAgent implements ISubAgent {
 }
 ```
 
-O prefixo `__ASYNC__:<taskId>` é um contrato interno entre `OpenClawSubAgent` e `SessionManager`: ao
-recebê-lo, o orquestrador fala uma frase de progresso (ex.: "isso vai demorar um pouco, continuo
+O discriminante `kind === 'async_deferred'` (+ `asyncTaskId`) é um contrato interno **estrutural** entre
+`OpenClawSubAgent` e `SessionManager` (achado r2 N2 — antes era o prefixo de string `__ASYNC__:<taskId>` em
+`output`, frágil a qualquer sanitizador de texto antes do TTS): ao recebê-lo, o orquestrador fala uma frase
+de progresso (ex.: "isso vai demorar um pouco, continuo
 trabalhando nisso") em vez de tratar como resposta final, registra o `taskId` no `ExecutionTrace` com
 status `pending`, e liga um poller (`openClawClient.pollStatus(taskId)`, intervalo de 5-10s, teto de N
 minutos — número a definir junto com a resposta do usuário no §4.2) que, ao concluir, injeta o resultado
@@ -194,6 +223,18 @@ background própria morreu sem aviso quando o processo supervisor reiniciou). Mi
 Fatia 3: persistir tarefas assíncronas pendentes em `data/` (mesmo padrão de `JsonStore` já usado para
 lembretes) e, na subida do servidor, verificar o status de qualquer tarefa pendente salva antes de
 descartá-la. Mitigação completa (retomar o poller automaticamente) fica fora de escopo desta fase.
+
+**Comportamento exato na subida (novo — achado r2 N1):** o plano não pode deixar aberto o que acontece
+quando o processo volta. Especificação para a Fatia 3:
+1. Ao subir, ler as tarefas assíncronas pendentes persistidas; **descartar (sem falar nada) qualquer uma
+   com mais de 6h** de idade (a resposta já não é mais útil e o OpenClaw provavelmente já a purgou).
+2. Para as demais, verificar o status real no OpenClaw antes de qualquer fala.
+3. Se concluída, falar um resumo **datado e marcado como resultado de tarefa anterior** (nunca re-injetar
+   como se fosse a conclusão de uma pergunta nova nem como se o turno ainda estivesse ativo), e registrar
+   no `ExecutionTrace`.
+4. A pergunta original que motivou a tarefa **não é re-entregue ao LLM** — só o status é verificado. Se o
+   `taskId` não existir mais no OpenClaw, eis o caso de falha: falar honestamente que a tarefa se perdeu
+   num reinício, sem inventar resultado.
 
 ### 4.4 Escopo de capacidade — não é tudo-ou-nada
 
@@ -256,6 +297,11 @@ Estourar qualquer um destes limites encerra a orquestração do turno com uma fa
 terminar isso dentro do tempo/dos passos previstos; aqui está o que já fiz") e registra o estouro no
 `ExecutionTrace`, nunca falha em silêncio nem inventa conclusão.
 
+**Procedimento de recalibração (novo — achado r2 N3):** os tetos da tabela são ponto de partida, não
+verdade. Se H15.1 falhar por estouro de orçamento em >10% dos 40 cenários, recalibrar a tabela do §6 e
+re-rodar H15.5 — registrando os valores antigos e novos na reconciliação, para que o número final seja
+medido, não escolhido.
+
 **Critério de aceite novo:**
 
 | ID | Critério | Quem mede |
@@ -270,14 +316,17 @@ terminar isso dentro do tempo/dos passos previstos; aqui está o que já fiz") e
   `ExecutionTrace` + contador de orçamento (§6). *(Já existe código parcial — falta o campo
   `confirmationToken` e o contador.)*
 - **Fatia 2:** Adaptadores dos especialistas internos e ferramentas de estado — **corrigir primeiro** a
-  divergência de `adapters.ts` contra a `IAgent` real (§3, nota 1) antes de prosseguir.
+  divergência de `adapters.ts` contra a `IAgent` real (§3, nota 1) antes de prosseguir. **Pré-condição
+  verificável (achado r2 N5): `npx tsc -p tsconfig.server.json --noEmit` limpo** — o harness não roda com a
+  fronteira de tipos quebrada, então isto vira critério, não boa intenção.
 - **Fatia 3:** Ponte OpenClaw real — confirmar transporte (§4.2), implementar os dois modos de chamada
-  (§4.3), escopo por capacidade (§4.4), persistência mínima de tarefa assíncrona pendente.
-- **Fatia 4:** Integração no `SessionManager` — gatekeeper de mutação que gera o `confirmationToken`,
-  checagem de `webSearchEffective` antes de delegar leitura externa, contador de orçamento do turno,
-  barge-in em <= 350ms.
+  (§4.3, com o discriminante estrutural `kind`/`asyncTaskId`), escopo por capacidade (§4.4), persistência
+  mínima de tarefa assíncrona pendente e o comportamento exato de subida do §4.3 (achado r2 N1).
+- **Fatia 4:** Integração no `SessionManager` — gatekeeper de mutação que gera o `confirmationToken`
+  (com checagem de frescor por `turnId`, achado r2 N4), checagem de `webSearchEffective` antes de delegar
+  leitura externa, contador de orçamento do turno, barge-in em <= 350ms.
 - **Fatia 5:** Suíte de testes de estresse H15 (40 cenários multi-passo, 200 cenários de segurança/
-  orçamento, cancelamento).
+  orçamento, cancelamento), com o procedimento de recalibração do §6 (achado r2 N3).
 
 ---
 
@@ -329,3 +378,18 @@ terminar isso dentro do tempo/dos passos previstos; aqui está o que já fiz") e
 | 5. Ausência de ancoragem `file:line` | ALTO | Parcial | Esta v3 cita arquivo:linha em cada seção nova |
 | 6. Protocolo da ponte OpenClaw incompleto | MÉDIO | Não resolvido | Resolvido onde possível; transporte exato depende de decisão do usuário (§4.2, §9) |
 | 7. Rastreabilidade sem especificação | MÉDIO | Resolvido | Mantido, estendido para tarefas assíncronas |
+
+---
+
+## 12. Reconciliação contra `docs/audits/phase-15-plan-audit-r2.md` (incorporada em 2026-10-10)
+
+| Achado r2 | Gravidade | Onde foi tratado nesta v3 |
+|---|---|---|
+| N1. Persistência pós-restart sem comportamento definido na subida | MÉDIO | §4.3, "Comportamento exato na subida" (descartar >6h, resumo datado, nunca re-injetar, falha honesta se o `taskId` sumiu) + Fatia 3 |
+| N2. Contrato `__ASYNC__:<taskId>` frágil (string mágica em `output`) | MÉDIO | §2: `SubAgentTaskResult.kind`/`asyncTaskId`; §4.3 usa o campo, não o prefixo |
+| N3. Tetos de orçamento sem procedimento de recalibração | BAIXO | §6, "Procedimento de recalibração" + Fatia 5 |
+| N4. `confirmationToken` só checava presença, não frescor | BAIXO | §2.1: checagem de `` `${turnId}:` `` no contrato + Fatia 4 |
+| N5. Divergência de `IAgent` sem critério que trave | BAIXO | §7 Fatia 2: `tsc --noEmit` limpo como pré-condição verificável |
+
+Nenhum achado ALTO/CRÍTICO novo — veredicto r2 **APROVÁVEL COM RESSALVAS**, mantido. A única pendência
+externa (transporte da ponte, §4.2) continua dependente de decisão do usuário e não é tratável em plano.

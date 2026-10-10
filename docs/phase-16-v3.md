@@ -7,6 +7,9 @@ exatamente "função/pseudocódigo", "zero especificação de código" era a que
 (fixtures de teste) ainda sem especificação. O resto da v2 (achados 1, 3, 4, 5 parcial, 7, 8) está correto e
 é mantido sem mudança — ver §6.
 
+> Atualização 2026-10-10 (r2): os achados da auditoria da rodada 2 (`docs/audits/phase-16-plan-audit-r2.md`)
+> foram incorporados — ver §7. Veredicto da r2: **APROVÁVEL COM RESSALVAS** (nenhum achado novo ALTO/CRÍTICO).
+
 ---
 
 ## 1. Contexto, Ancoragem no Código e Objetivos
@@ -34,6 +37,12 @@ if (handledLabel === 'TEOLOGIA' || handledLabel === 'VIRTOLOGIA' || handledLabel
   }
 }
 ```
+
+O bloco injetado acima cobre os três rótulos (a condição testa `TEOLOGIA || VIRTOLOGIA || NEUROCIENCIA`), então
+H16.2 é atendido por ele. Quanto à trava nos prompts de sistema (frente 1 da r1): o `NEUROCIENCIA_PROMPT`
+completo está no §2.3; **os prompts de Teologia e Virtologia serão revisados na Fatia 2 para conter a mesma
+frase padronizada de limite** (declarar que não achou a posição registrada, sem adivinhar) — decisão explícita
+desta v3, para não deixar a frente 1 da r1 implicitamente delegada ao bloco dinâmico (achado r2 N2).
 
 Também atualiza `CLASSIFICATION_LABELS` em `mlxWorkerEngine.ts`, `createSpecialistAgents()` em
 `specialistAgents.ts` e `main.ts` (frontend) — os 4 arquivos que a r1 (achado 3) cobrou.
@@ -79,25 +88,32 @@ const TOPIC_STOPWORDS = new Set([
 ]);
 
 export function deriveTopicKey(text: string): string {
-  const words = text
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '') // remove acentos pra normalizar variação ortográfica
-    .replace(/[^a-z0-9\s]/g, '')
+  const normalize = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '');
+  const words = normalize(text)
     .split(/\s+/)
     .filter((w) => w.length > 0 && !TOPIC_STOPWORDS.has(w));
-  if (words.length === 0) return text.trim().toLowerCase(); // frase só de stopwords: usa o texto cru como chave
+  // Fallback (achado r2 N3): aplica a MESMA normalização no texto-cru — antes, frases só de
+  // stopwords com grafias acentuadas diferentes ("não é" vs "nao e") não colidiam por engano.
+  if (words.length === 0) return normalize(text).trim();
   return words.slice(0, 4).sort().join('_'); // ordenado: ordem de palavras na frase não deveria mudar o agrupamento
 }
 
 /** Agrupa por tópico derivado, mantém só a entrada mais recente (createdAt maior) de cada grupo.
- *  Determinístico: mesma entrada, mesmo resultado, sempre — sem chamada de rede nem de LLM. */
+ *  Determinístico: mesma entrada, mesmo resultado, sempre — sem chamada de rede nem de LLM.
+ *  REGISTRO OBRIGATÓRIO (achado r2 N1): toda entrada suprimida é logada em `ExecutionTrace` com a chave
+ *  e o `createdAt`, para auditoria e para responder "por que você esqueceu X?" — a supressão não é
+ *  silenciosa. Este log é o que torna o risco de falso-agrupamento observável em vez de invisível. */
 export function resolveConflicts(items: readonly StoredItem[]): StoredItem[] {
   const byKey = new Map<string, StoredItem>();
   for (const it of items) {
     const key = deriveTopicKey(it.text);
     const existing = byKey.get(key);
     if (!existing || it.createdAt > existing.createdAt) {
+      if (existing) logSuppression(key, existing, it); // suprimiu `existing` em favor de `it`
       byKey.set(key, it);
+    } else {
+      logSuppression(key, it, existing); // suprimiu `it` em favor de `existing`
     }
   }
   return Array.from(byKey.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -113,6 +129,13 @@ regressão (hoje nenhuma das duas colide também, então não piora nada). Memó
 diferentes que compartilham 4 palavras pouco comuns podem colidir por engano. A suíte de teste abaixo (§4)
 existe para medir a taxa real de cada erro antes de confiar no número "95%" do critério H16.3 — não assumir
 que o heurístico já está calibrado.
+
+**Limite que exige cuidado adicional (achado r2 N1):** "mais recente vence" **apaga a entrada antiga do bloco
+de memória**. Para preferências mutáveis ("café sem açúcar" → "café com adoçante") isso é correto; mas para
+fatos *cumulativos* sobre o mesmo tópico ("minha irmã Ana mora em SP" / "minha irmã Ana fez 40 anos") a
+colisão destruiria informação válida. Isto não é resolvido pelo heurístico lexical — é mitigado por dois
+gatilhos obrigatórios: (a) o `logSuppression` acima (toda supressão fica auditável), e (b) o fixture de
+fato-aditivo abaixo, que mede a taxa de falso-agrupamento em vez de assumir zero.
 
 ### 2.3 Prompt de Sistema para Neurociência (inalterado da v2)
 
@@ -150,6 +173,10 @@ interface MemoryFixtureCase {
   id: string;                 // ex. "H16.3-012"
   items: Array<{ text: string; createdAt: string }>; // histórico simulado, ordem de criação
   expectedSurvivorText: string; // qual entrada deveria sobreviver à resolução de conflito
+  // NOVO (achado r2 N1): casos de fato ADITIVO sobre o mesmo tópico, onde o esperado é que
+  // NENHUMA entrada seja suprimida. Ao menos 5 dos 60 cenários usam kind='cumulative' com
+  // expectedSurvivorText listando AMBAS as entradas — mede a taxa real de falso-agrupamento.
+  kind?: 'preference' | 'cumulative';
 }
 ```
 
@@ -166,7 +193,9 @@ LLM) para os casos de memória, e usa o motor de conhecimento real com um corpus
   `createSpecialistAgents()`, `corpus.ts`.
 - **Fatia 3:** Injeção de trava de limite em `sessionManager.ts` quando a busca retornar vazia.
 - **Fatia 4:** `src/backend/memory/conflictResolver.ts` (§2.2) + integração em `memoryBlock.ts`.
-- **Fatia 5:** Fixtures (§3) + `phase16.test.ts`.
+- **Fatia 5:** Fixtures (§3, incluindo os casos `kind='cumulative'`, achado r2 N1) + `phase16.test.ts`.
+  **Pré-condição verificável (achado r2 N4): `npx tsc -p tsconfig.server.json --noEmit` limpo** — a suíte não
+  roda com a duplicata de `NeurocienciaAgent` que o `tsc` acusa hoje.
 
 ---
 
@@ -195,3 +224,16 @@ LLM) para os casos de memória, e usa o motor de conhecimento real com um corpus
 | 6. Falta schema de fixture/harness de teste | MÉDIO | **Não resolvido** | Resolvido (§3) |
 | 7. Coluna "quem mede" ausente | MÉDIO | Resolvido | Mantido |
 | 8. Falta seção de Circuit Breaker | BAIXA | Resolvido | Mantido |
+
+---
+
+## 7. Reconciliação contra `docs/audits/phase-16-plan-audit-r2.md` (incorporada em 2026-10-10)
+
+| Achado r2 | Gravidade | Onde foi tratado nesta v3 |
+|---|---|---|
+| N1. `resolveConflicts` pode apagar silenciosamente fatos cumulativos | MÉDIO | §2.2 (`logSuppression` obrigatório + limite declarado) e §3 (`MemoryFixtureCase.kind='cumulative'`, >=5 cenários de fato aditivo) + Fatia 5 |
+| N2. Trava de limite por prompt só especificada para Neurociência | BAIXO | §2.1: declara explicitamente que Teologia/Virtologia recebem a frase padronizada na Fatia 2 |
+| N3. Fallback de `deriveTopicKey` sem normalização NFD | BAIXO | §2.2: `normalize()` aplicado também ao fallback |
+| N4. Duplicata de `NeurocienciaAgent` sem critério que trave | BAIXO | §4 Fatia 5: `tsc --noEmit` limpo como pré-condição verificável |
+
+Nenhum achado ALTO/CRÍTICO novo — veredicto r2 **APROVÁVEL COM RESSALVAS**, mantido.
