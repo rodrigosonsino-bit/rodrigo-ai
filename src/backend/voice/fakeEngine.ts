@@ -1,4 +1,4 @@
-import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, IntentName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import fs from 'node:fs';
 import type { GenerateCallbacks, SynthesizeRequest, SynthesizeResult, VoiceEngine } from './engine.js';
 
@@ -56,7 +56,7 @@ export class FakeVoiceEngine implements VoiceEngine {
   public detectToolSettleDelayMs = 0;
   private detectToolGates = new Map<string, DetectToolGate>();
 
-  public mutationToReturn: [MutationName, string | null] = ['NENHUMA', null];
+  public mutationToReturn: [IntentName, string | null] = ['NENHUMA', null];
   public detectMutationSettleDelayMs = 0;
   private detectMutationGates = new Map<string, DetectMutationGate>();
 
@@ -181,7 +181,7 @@ export class FakeVoiceEngine implements VoiceEngine {
     turnId: string,
     epoch: number,
     text: string
-  ): Promise<[MutationName, string | null]> {
+  ): Promise<[IntentName, string | null]> {
     this.detectMutationCalls.push({ turnId, text });
 
     await new Promise<void>((resolve) => {

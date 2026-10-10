@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { IMutatingTool } from '../../shared/extensions/tools.js';
-import type { MutationName } from '../../shared/voiceProtocol.js';
+import type { IntentName } from '../../shared/voiceProtocol.js';
 import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
 import { ReminderScheduler } from './reminderScheduler.js';
 import {
@@ -13,6 +13,49 @@ import {
 } from './relativeTimeParser.js';
 
 export { type IMutatingTool };
+
+
+export function findBestMatchingItemIndex(
+  items: readonly StoredItem[],
+  query: string
+): { index: number; ambiguous: boolean; matches?: [StoredItem, StoredItem] } {
+  if (items.length === 0) return { index: -1, ambiguous: false };
+  if (!query || !query.trim()) return { index: items.length - 1, ambiguous: false };
+
+  const normQuery = query.toLowerCase().trim();
+  const scored = items.map((item, idx) => {
+    const normText = item.text.toLowerCase().trim();
+    let score = 0;
+    if (normText === normQuery) {
+      score = 1.0;
+    } else if (normText.includes(normQuery) || normQuery.includes(normText)) {
+      score = 0.8;
+    } else {
+      const qWords = normQuery.split(/\s+/).filter((w) => w.length > 2);
+      const tWords = normText.split(/\s+/).filter((w) => w.length > 2);
+      let matchCount = 0;
+      for (const qw of qWords) {
+        if (tWords.some((tw) => tw.includes(qw) || qw.includes(tw))) matchCount += 1;
+      }
+      score = qWords.length > 0 ? matchCount / qWords.length : 0;
+    }
+    return { index: idx, item, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  const second = scored[1];
+
+  if (best.score < 0.2) {
+    return { index: items.length - 1, ambiguous: false };
+  }
+
+  if (second && best.score - second.score < 0.15 && second.score >= 0.4) {
+    return { index: -1, ambiguous: true, matches: [best.item, second.item] };
+  }
+
+  return { index: best.index, ambiguous: false };
+}
 
 export class LembreteTool implements IMutatingTool {
   readonly name = 'LEMBRETE';
@@ -29,7 +72,7 @@ export class LembreteTool implements IMutatingTool {
     return true;
   }
 
-  preview(kind: MutationName, content: string | null): string {
+  preview(kind: IntentName, content: string | null): string {
     if (kind === 'LEMBRETE_CRIAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de lembrete.');
@@ -53,6 +96,46 @@ export class LembreteTool implements IMutatingTool {
       }
       return `Posso criar o lembrete: ${finalText}?`;
     }
+    
+    if (kind === 'LEMBRETE_CONSULTAR') {
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Você não tem nenhum lembrete salvo.';
+      }
+      const filter = (content || '').toLowerCase().trim();
+      const matches = filter
+        ? store.items.filter((item) => item.text.toLowerCase().includes(filter))
+        : store.items;
+      if (matches.length === 0) {
+        return 'Não encontrei nenhum lembrete sobre isso.';
+      }
+      const top = matches.slice(-3);
+      const itemsStr = top.map((i) => i.text).join('; ');
+      return `Você tem ${matches.length} ${matches.length === 1 ? 'lembrete' : 'lembretes'}: ${itemsStr}.`;
+    }
+
+    if (kind === 'LEMBRETE_REAGENDAR') {
+      // Achado (auditoria desta rodada): preview() NUNCA muta — só pergunta. O reagendamento de
+      // verdade (store.write + scheduler.schedule) só pode acontecer em execute(), depois do "sim".
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para reagendar lembrete.');
+      }
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhum lembrete para reagendar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const current = store.items[matchResult.index];
+      const timeParsed = parseRelativeTime(content);
+      if (!timeParsed.dueAt) {
+        return 'Não entendi o novo horário do lembrete.';
+      }
+      return `Posso reagendar o lembrete "${current.text}" para ${formatHumanRelative(timeParsed.dueAt)}?`;
+    }
+
     if (kind === 'LEMBRETE_EDITAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar lembrete.');
@@ -65,7 +148,7 @@ export class LembreteTool implements IMutatingTool {
     throw new Error(`Ação inválida para LembreteTool: ${kind}`);
   }
 
-  execute(kind: MutationName, content: string | null): string {
+  execute(kind: IntentName, content: string | null): string {
     // Achado 8 (auditoria de código, Hermes, 2026-09-24): captura o cache e limpa
     // incondicionalmente aqui, independente do kind — um preview(LEMBRETE_CRIAR) seguido de um
     // execute(LEMBRETE_APAGAR) (usuário muda de ideia entre a pergunta e a confirmação) não pode
@@ -75,6 +158,34 @@ export class LembreteTool implements IMutatingTool {
     const cachedRecurrence = this.lastParsedRecurrence;
     this.lastParsed = null;
     this.lastParsedRecurrence = null;
+
+    if (kind === 'LEMBRETE_CONSULTAR') {
+      return this.preview(kind, content);
+    }
+
+    if (kind === 'LEMBRETE_REAGENDAR') {
+      if (!content || !content.trim()) {
+        throw new Error('Conteúdo ausente para reagendar lembrete.');
+      }
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhum lembrete para reagendar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const idx = matchResult.index;
+      const current = store.items[idx];
+      const timeParsed = parseRelativeTime(content);
+      if (!timeParsed.dueAt) {
+        return 'Não entendi o novo horário do lembrete.';
+      }
+      store.items[idx] = { ...current, dueAt: timeParsed.dueAt, notifiedAt: null };
+      this.store.write(store);
+      this.scheduler.schedule({ id: current.id, text: current.text, dueAt: timeParsed.dueAt });
+      return 'Lembrete reagendado com sucesso.';
+    }
 
     if (kind === 'LEMBRETE_EDITAR') {
       if (!content || !content.trim()) {
@@ -228,13 +339,31 @@ export class NotaTool implements IMutatingTool {
     return true;
   }
 
-  preview(kind: MutationName, content: string | null): string {
+  preview(kind: IntentName, content: string | null): string {
     if (kind === 'NOTA_CRIAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para criação de nota.');
       }
       return `Posso guardar a nota: ${content}?`;
     }
+    
+    if (kind === 'NOTA_CONSULTAR') {
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Você não tem nenhuma nota salva.';
+      }
+      const filter = (content || '').toLowerCase().trim();
+      const matches = filter
+        ? store.items.filter((item) => item.text.toLowerCase().includes(filter))
+        : store.items;
+      if (matches.length === 0) {
+        return 'Não encontrei nenhuma nota sobre isso.';
+      }
+      const top = matches.slice(-3);
+      const itemsStr = top.map((i) => i.text).join('; ');
+      return `Encontrei ${matches.length} ${matches.length === 1 ? 'nota' : 'notas'}: ${itemsStr}.`;
+    }
+
     if (kind === 'NOTA_EDITAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar nota.');
@@ -247,7 +376,10 @@ export class NotaTool implements IMutatingTool {
     throw new Error(`Ação inválida para NotaTool: ${kind}`);
   }
 
-  execute(kind: MutationName, content: string | null): string {
+  execute(kind: IntentName, content: string | null): string {
+    if (kind === 'NOTA_CONSULTAR') {
+      return this.preview(kind, content);
+    }
     if (kind === 'NOTA_EDITAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar nota.');
@@ -311,13 +443,31 @@ export class MemoriaTool implements IMutatingTool {
     return true;
   }
 
-  preview(kind: MutationName, content: string | null): string {
+  preview(kind: IntentName, content: string | null): string {
     if (kind === 'MEMORIA_GUARDAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para guardar memória.');
       }
       return `Posso guardar isso sobre você: ${content}?`;
     }
+    
+    if (kind === 'MEMORIA_CONSULTAR') {
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Você não tem nenhuma memória salva.';
+      }
+      const filter = (content || '').toLowerCase().trim();
+      const matches = filter
+        ? store.items.filter((item) => item.text.toLowerCase().includes(filter))
+        : store.items;
+      if (matches.length === 0) {
+        return 'Não encontrei nenhuma memória guardada sobre isso.';
+      }
+      const top = matches.slice(-3);
+      const itemsStr = top.map((i) => i.text).join('; ');
+      return `Lembro de ${matches.length} ${matches.length === 1 ? 'coisa' : 'coisas'}: ${itemsStr}.`;
+    }
+
     if (kind === 'MEMORIA_EDITAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar memória.');
@@ -335,7 +485,10 @@ export class MemoriaTool implements IMutatingTool {
     throw new Error(`Ação inválida para MemoriaTool: ${kind}`);
   }
 
-  execute(kind: MutationName, content: string | null): string {
+  execute(kind: IntentName, content: string | null): string {
+    if (kind === 'MEMORIA_CONSULTAR') {
+      return this.preview(kind, content);
+    }
     if (kind === 'MEMORIA_EDITAR') {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar memória.');
@@ -423,7 +576,6 @@ export function selectMutatingToolByAction(
   const prefix = kind.split('_')[0].toUpperCase();
   return tools.find((t) => t.name.toUpperCase() === prefix && t.isAvailable()) ?? null;
 }
-
 export interface MutatingToolsResult {
   tools: IMutatingTool[];
   scheduler: ReminderScheduler;

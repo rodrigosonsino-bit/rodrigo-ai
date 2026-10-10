@@ -5,12 +5,13 @@ import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IVoiceProvider, SpeechKind } from '../../shared/extensions/voice.js';
-import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, IntentName, MutationName, OrchestratorLabel, VoiceServerEvent } from '../../shared/voiceProtocol.js';
 import {
   GENERATION_FAILURE_TEXT,
   SCREEN_NOT_READY_TEXT,
   SCREEN_SHARE_NEEDED_TEXT,
   isMutationName,
+  isQueryName,
   MUTATION_CANCELLED_TEXT,
   MUTATION_REPROMPT_TEXT,
   MUTATION_MAX_AGE_MS,
@@ -22,7 +23,8 @@ import {
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
-import { mightBeScreenQuery } from '../tools/screenQuery.js';
+import { mightBeScreenQuery, screenCloudAuthorized } from '../tools/screenQuery.js';
+import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { AudioStore } from './audioStore.js';
 import { classifyConfirmation } from './confirmationClassifier.js';
 import type { VoiceEngine } from './engine.js';
@@ -446,19 +448,41 @@ export class SessionManager {
         // sucedida, a resposta ainda é a frase fixa, mas o arquivo já passou por todo o protocolo real (pedido,
         // validação, limpeza) para a fatia seguinte só precisar trocar "descarta" por "manda ao motor de visão".
         const capture = await this.requestScreenCapture(session, turn);
-        // Auditoria Kimi K3 (fatia 3, achado 2): apagar ANTES do early-return por turno superado — hoje
-        // inalcançável (nada pode se interpor entre o resolve de receiveScreenCapture e esta continuação, que
-        // roda na mesma microtask), mas a posse do arquivo não deve depender dessa garantia implícita.
-        if (capture.ok) {
-          await fs.promises.rm(capture.filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura', capture.filePath, e));
+        if (session.activeTurn !== turn) {
+          if (capture.ok) {
+            await fs.promises.rm(capture.filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura', capture.filePath, e));
+          }
+          return;
         }
-        if (session.activeTurn !== turn) return; // cancelado durante a espera pela captura
 
         this.emit(session, { type: 'state', state: 'falando' });
         let text: string;
         if (capture.ok) {
-          console.log(`[screen] turno=${turn.turnId} captura recebida bytes=${capture.bytes} (visão ainda não implementada — fatia 4)`);
-          text = SCREEN_NOT_READY_TEXT;
+          try {
+            let descriptionResult: { text?: string; kind?: string; error?: string };
+            if (this.engine instanceof MlxWorkerEngine) {
+              const cloudAuth = screenCloudAuthorized(transcript);
+descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePath, transcript, cloudAuth);
+            } else {
+              descriptionResult = { text: SCREEN_NOT_READY_TEXT };
+            }
+
+            if (session.activeTurn !== turn) {
+              await fs.promises.rm(capture.filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura', capture.filePath, e));
+              return;
+            }
+
+            if (descriptionResult.text) {
+              text = descriptionResult.text;
+            } else {
+              text = SCREEN_NOT_READY_TEXT;
+            }
+          } catch (err) {
+            console.error(`[screen] erro na visão de tela (turno=${turn.turnId}):`, err);
+            text = SCREEN_NOT_READY_TEXT;
+          } finally {
+            await fs.promises.rm(capture.filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura', capture.filePath, e));
+          }
         } else {
           console.log(`[screen] turno=${turn.turnId} sem captura (${capture.reason})`);
           text = SCREEN_SHARE_NEEDED_TEXT;
@@ -497,8 +521,7 @@ export class SessionManager {
             this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
             this.emit(session, { type: 'state', state: 'falando' });
             const cleanQ = cleanTextForSpeech(question);
-            turn.expectedSentences.add(0);
-            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanQ, 0, 'local'));
+            turn.expectedSentences.add(0);            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanQ, 0, 'local'));
             await Promise.allSettled(turn.pendingSynthesis);
             if (session.activeTurn === turn) {
               // Re-arma, nunca promove direto: só markPlayed() (pergunta realmente ouvida) volta a
@@ -587,9 +610,11 @@ export class SessionManager {
       // Fase 5c: filtro de mutação (só chega aqui sem pending, ou com pending expirado)
       if (
         this.mutatingTools.length > 0 &&
-        (cloudIntent ? isMutationName(cloudIntent.intent) && cloudIntent.intent !== 'NENHUMA' : mightBeMutation(transcript))
+        (cloudIntent
+          ? (isMutationName(cloudIntent.intent) || isQueryName(cloudIntent.intent)) && cloudIntent.intent !== 'NENHUMA'
+          : mightBeMutation(transcript))
       ) {
-        let detected: [string, string | null] = ['NENHUMA', null];
+        let detected: [IntentName, string | null] = ['NENHUMA', null];
         try {
           detected = cloudIntent
             ? [cloudIntent.intent, cloudIntent.content]
@@ -606,11 +631,36 @@ export class SessionManager {
           if (!tool) {
             // Ferramenta ausente/indisponível — problema de ambiente, não desta requisição.
             // Cai no caminho normal abaixo, como se não houvesse detecção (achado 4 da rodada 2).
+          } else if (isQueryName(action)) {
+            // Fase 14 (achado 1 da auditoria r1): *_CONSULTAR é LEITURA, nunca mutação — executa
+            // direto e fala o resultado, sem preview()/armedMutation/confirmação por voz.
+            let text: string;
+            try {
+              text = tool.execute(action, content);
+            } catch (err) {
+              text = MUTATION_FAILURE_TEXT;
+              console.error('[query] execução falhou:', err);
+            }
+
+            this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+            this.emit(session, { type: 'state', state: 'falando' });
+
+            const clean = cleanTextForSpeech(text);
+            turn.expectedSentences.add(0);
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
+            await Promise.allSettled(turn.pendingSynthesis);
+
+            if (session.activeTurn === turn) {
+              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+              this.emit(session, { type: 'state', state: 'ouvindo' });
+              session.activeTurn = null;
+            }
+            return;
           } else {
             let question: string;
             let previewFailed = false;
             try {
-              question = tool.preview(action as MutationName, content);
+              question = tool.preview(action, content);
             } catch (err) {
               // Achado 5 da rodada 4 (Hermes) — preview() sem try/catch deixava uma falha subir
               // até o catch externo de runTurn (state:'erro' cru).
@@ -720,7 +770,7 @@ export class SessionManager {
       // antes — nada é anunciado antes de estar decidido. Síncrono e em memória; nunca lança para
       // fora, porque perder a consulta não deve custar a resposta.
       let retrieved: RetrievedChunk[] = [];
-      if (this.privacy.sendKnowledge && this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA')) {
+      if (this.privacy.sendKnowledge && this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA' || label === 'NEUROCIENCIA')) {
         try {
           retrieved = this.retriever.retrieve(agent.id, transcript);
         } catch (err) {
@@ -976,8 +1026,7 @@ export class SessionManager {
   /** Confirma que uma frase foi reproduzida até o fim — só então entra no histórico (Refinamento 1). */
   markPlayed(sessionId: string, token: string, turnId: string, text: string): boolean {
     const session = this.getAuthorized(sessionId, token);
-    if (!session) return false;
-    this.touch(session);
+    if (!session) return false;    this.touch(session);
 
     // Rejeita confirmações de um turno que não é o mais recente desta sessão — evita que
     // uma reprodução de um turno já superado por barge-in injete texto obsoleto no histórico.
@@ -997,7 +1046,6 @@ export class SessionManager {
     const entry = emitted.items.find((e) => !e.consumed && e.text === text);
     if (!entry) return false;
     entry.consumed = true;
-
     // Fase V: a origem vem do ITEM emitido (não do turno ativo, que pode já ser null quando a reprodução é confirmada).
     session.history.push(entry.origin ? { role: 'assistant', content: text, origin: entry.origin } : { role: 'assistant', content: text });
     this.trimHistory(session);

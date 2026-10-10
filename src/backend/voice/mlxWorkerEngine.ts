@@ -3,7 +3,7 @@ import { createLineSink } from './lineSink.js';
 import { redact } from '../redact.js';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import type { ConversationMessage, IntentDetection, IntentName, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, IntentName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import { isMutationName, isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, SynthesizeFailureKind, SynthesizeRequest, SynthesizeResult, VoiceEngine } from './engine.js';
 import { VoiceEngineError } from './engine.js';
@@ -15,7 +15,7 @@ export interface MlxWorkerEngineOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-const CLASSIFICATION_LABELS = new Set<OrchestratorLabel>(['GERAL', 'TEOLOGIA', 'VIRTOLOGIA', 'AMBIGUO']);
+const CLASSIFICATION_LABELS = new Set<OrchestratorLabel>(['GERAL', 'TEOLOGIA', 'VIRTOLOGIA', 'NEUROCIENCIA', 'AMBIGUO']);
 
 interface PendingTranscribe {
   kind: 'transcribe';
@@ -54,7 +54,7 @@ interface PendingDetectTool {
 interface PendingDetectMutation {
   kind: 'detect_mutation';
   turnId: string;
-  resolve: (res: [MutationName, string | null]) => void;
+  resolve: (res: [IntentName, string | null]) => void;
   reject: (err: Error) => void;
   timeout: NodeJS.Timeout;
   spawnGeneration: number;
@@ -73,6 +73,16 @@ interface PendingDetectConfirmation {
   kind: 'detect_confirmation';
   turnId: string;
   resolve: (res: 'SIM' | 'NAO') => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
+
+interface PendingDescribeScreen {
+  kind: 'describe_screen';
+  turnId: string;
+  resolve: (res: { text?: string; kind?: string; error?: string }) => void;
   reject: (err: Error) => void;
   timeout: NodeJS.Timeout;
   spawnGeneration: number;
@@ -136,7 +146,8 @@ type Pending =
   | PendingDetectMutation
   | PendingDetectIntent
   | PendingDetectConfirmation
-  | PendingSynthesize;
+  | PendingSynthesize
+  | PendingDescribeScreen;
 
 let reqCounter = 0;
 function nextReqId(): string {
@@ -233,7 +244,8 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'detect_mutation' ||
         pending.kind === 'detect_intent' ||
         pending.kind === 'detect_confirmation' ||
-        pending.kind === 'synthesize'
+        pending.kind === 'synthesize' ||
+        pending.kind === 'describe_screen'
       ) {
         clearTimeout(pending.timeout);
       }
@@ -316,9 +328,21 @@ export class MlxWorkerEngine implements VoiceEngine {
     if (event === 'mutation_detection' && pending.kind === 'detect_mutation') {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
-      const action = isMutationName(msg.action) ? (msg.action as MutationName) : 'NENHUMA';
+      const action = isMutationName(msg.action) || isToolName(msg.action) ? (msg.action as IntentName) : 'NENHUMA';
       const content = typeof msg.content === 'string' ? msg.content : null;
       pending.resolve([action, content]);
+      return;
+    }
+
+    
+    if (event === 'screen_description' && pending.kind === 'describe_screen') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      if (msg.kind) {
+        pending.resolve({ kind: String(msg.kind), error: String(msg.error || '') });
+      } else {
+        pending.resolve({ text: String(msg.text || '') });
+      }
       return;
     }
 
@@ -474,10 +498,7 @@ export class MlxWorkerEngine implements VoiceEngine {
         // troca), o classify() seguinte vai, ele sim, estourar CLASSIFY_TIMEOUT_MS e disparar
         // o kill-e-reinício catastrófico já auditado — duplicá-lo aqui derrubaria o próprio
         // fallback que esta função existe para viabilizar.
-      }, VOICE_LIMITS.DETECT_TOOL_TIMEOUT_MS);
-
-      this.pending.set(reqId, { kind: 'detect_tool', turnId, resolve, reject, timeout, spawnGeneration });
-
+      }, VOICE_LIMITS.DETECT_TOOL_TIMEOUT_MS);      this.pending.set(reqId, { kind: 'detect_tool', turnId, resolve, reject, timeout, spawnGeneration });
       try {
         this.writeCommand({ cmd: 'detect_tool', reqId, turnId, epoch, text });
       } catch (err) {
@@ -497,7 +518,6 @@ export class MlxWorkerEngine implements VoiceEngine {
         // Indisponibilidade, não erro: o chamador cai nos detectores locais. NÃO mata o worker.
         resolve(null);
       }, VOICE_LIMITS.DETECT_INTENT_TIMEOUT_MS);
-
       this.pending.set(reqId, { kind: 'detect_intent', turnId, resolve, reject, timeout, spawnGeneration });
 
       try {
@@ -572,7 +592,7 @@ export class MlxWorkerEngine implements VoiceEngine {
     turnId: string,
     epoch: number,
     text: string
-  ): Promise<[MutationName, string | null]> {
+  ): Promise<[IntentName, string | null]> {
     const reqId = nextReqId();
     const spawnGeneration = this.spawnGeneration;
     return new Promise((resolve, reject) => {
@@ -694,7 +714,8 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'classify' ||
         pending.kind === 'detect_tool' ||
         pending.kind === 'detect_mutation' ||
-        pending.kind === 'detect_confirmation'
+        pending.kind === 'detect_confirmation' ||
+        pending.kind === 'describe_screen'
       ) {
         pending.reject(new VoiceEngineError(`Operação do turno ${turnId} cancelada.`));
       } else {
@@ -707,6 +728,41 @@ export class MlxWorkerEngine implements VoiceEngine {
     } catch {
       // worker já pode estar morto/reiniciando — sem problema, já resolvemos acima
     }
+  }
+
+
+  async describeScreen(
+    turnId: string,
+    imagePath: string,
+    question: string,
+    cloudAuthorized: boolean = false
+  ): Promise<{ text?: string; kind?: string; error?: string }> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(reqId);
+        const err = new VoiceEngineError(`Descrição de tela do turno ${turnId} excedeu o timeout.`);
+        reject(err);
+      }, 90_000);
+
+      this.pending.set(reqId, {
+        kind: 'describe_screen',
+        turnId,
+        resolve,
+        reject,
+        timeout,
+        spawnGeneration
+      });
+
+      try {
+        this.writeCommand({ cmd: 'describe_screen', reqId, turnId, imagePath, question, cloudAuthorized });
+      } catch (err) {
+        clearTimeout(timeout);
+        this.pending.delete(reqId);
+        reject(err as Error);
+      }
+    });
   }
 
   async shutdown(): Promise<void> {

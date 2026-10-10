@@ -1,4 +1,4 @@
-import type { ConversationMessage, IntentDetection, MutationName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
+import type { ConversationMessage, IntentDetection, IntentName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 
 /** Fase 13a: pedido de síntese ao worker (o TEXTO da frase é a única coisa que vai ao Google). */
 export interface SynthesizeRequest {
@@ -72,14 +72,16 @@ export interface VoiceEngine {
    */
   detectTool(turnId: string, epoch: number, text: string): Promise<ToolName>;
   /**
-   * Fase 5c: decide se o texto pede para CRIAR ou APAGAR um LEMBRETE ou uma NOTA.
-   * Formato inesperado ou não reconhecimento degrada para ['NENHUMA', null].
+   * Fase 5c: decide se o texto pede para CRIAR, EDITAR, APAGAR, REAGENDAR ou CONSULTAR um
+   * LEMBRETE, uma NOTA ou uma MEMÓRIA. Formato inesperado ou não reconhecimento degrada para
+   * ['NENHUMA', null]. Fase 14: inclui as 3 ações `*_CONSULTAR` (leitura, não mutação — por
+   * isso o retorno é `IntentName`, não `MutationName`; ver IMutatingTool em extensions/tools.ts).
    */
   detectMutation(
     turnId: string,
     epoch: number,
     text: string
-  ): Promise<[MutationName, string | null]>;
+  ): Promise<[IntentName, string | null]>;
   /**
    * F11 adendo: classificação de intenção (mutação/hora/data/nenhuma) em NUVEM (Gemini), só com o texto
    * da fala. Devolve null quando indisponível (desligada, sem chave, erro, timeout, saída inválida) —

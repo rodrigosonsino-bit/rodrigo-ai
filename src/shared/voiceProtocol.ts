@@ -7,10 +7,10 @@ export type VoiceState = 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | '
 
 /** Fase 3 — rótulo de classificação de intenção. Nenhum tem especialista real ainda (Fase 4). */
 // 'TELA' (Fase V) nunca vem do classificador: só o caminho de tela do sessionManager o emite no `routing`.
-export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'AMBIGUO' | 'TELA';
+export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'NEUROCIENCIA' | 'AMBIGUO' | 'TELA';
 
 /** Fase 5b — nomes de ferramentas suportadas pelo sistema e detecção. */
-export const TOOL_NAMES = ['HORA', 'DATA', 'NENHUMA'] as const;
+export const TOOL_NAMES = ['HORA', 'DATA', 'LEMBRETE_CONSULTAR', 'NOTA_CONSULTAR', 'MEMORIA_CONSULTAR', 'NENHUMA'] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 export function isToolName(v: unknown): v is ToolName {
   return typeof v === 'string' && (TOOL_NAMES as readonly string[]).includes(v);
@@ -21,6 +21,7 @@ export const MUTATION_NAMES = [
   'LEMBRETE_CRIAR',
   'LEMBRETE_EDITAR',
   'LEMBRETE_APAGAR',
+  'LEMBRETE_REAGENDAR',
   'NOTA_CRIAR',
   'NOTA_EDITAR',
   'NOTA_APAGAR',
@@ -32,6 +33,18 @@ export const MUTATION_NAMES = [
 export type MutationName = (typeof MUTATION_NAMES)[number];
 export function isMutationName(v: unknown): v is MutationName {
   return typeof v === 'string' && (MUTATION_NAMES as readonly string[]).includes(v);
+}
+
+/**
+ * Fase 14 — as 3 ações `*_CONSULTAR` são LEITURA, não mutação (vivem em TOOL_NAMES, não em
+ * MUTATION_NAMES), mas são detectadas pelo mesmo pipeline de detecção de mutação (é ele que
+ * extrai o termo de busca da fala). Este predicado existe pra quem precisa reconhecer as duas
+ * famílias juntas (o gate de entrada no pipeline) sem também aceitar HORA/DATA/NENHUMA.
+ */
+export const QUERY_NAMES = ['LEMBRETE_CONSULTAR', 'NOTA_CONSULTAR', 'MEMORIA_CONSULTAR'] as const;
+export type QueryName = (typeof QUERY_NAMES)[number];
+export function isQueryName(v: unknown): v is QueryName {
+  return typeof v === 'string' && (QUERY_NAMES as readonly string[]).includes(v);
 }
 
 export interface StateEvent {

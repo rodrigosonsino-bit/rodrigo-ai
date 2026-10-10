@@ -21,7 +21,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       sendMemories: true,
       sendKnowledge: false,
       cloudTts: true,
-      ttsDictated: true
+      ttsDictated: true,
+      cloudVision: true
     });
   });
 
@@ -147,7 +148,7 @@ describe('effectivePrivacy (Fase 12)', () => {
       mode: 'cloud',
       intent: 'gemini',
       keyPresent: true,
-      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true },
+      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true, visionImage: true },
       models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
       neverSends: ['audio']
@@ -159,7 +160,7 @@ describe('effectivePrivacy (Fase 12)', () => {
     const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1' });
     assert.equal(st.mode, 'local-only');
     assert.equal(st.intent, 'local');
-    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false });
+    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false, visionImage: false });
     assert.deepEqual(st.models, { generation: null, intent: null, tts: null });
     assert.deepEqual(st.tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });
   });

@@ -42,15 +42,22 @@ if os.environ.get("RODRIGO_VOICE_SETUP") != "1":
 
 CACHE_LIMIT_BYTES = 1024 * 1024 * 1024  # 1 GiB — Achado v2-8: API moderna, não mx.metal.*
 LLM_MODEL_ID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
-CLASSIFICATION_LABELS = frozenset({"GERAL", "TEOLOGIA", "VIRTOLOGIA", "AMBIGUO"})
+VISION_MODEL_ID = os.environ.get("RODRIGO_VISION_MODEL", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")
+CLASSIFICATION_LABELS = frozenset({"GERAL", "TEOLOGIA", "VIRTOLOGIA", "NEUROCIENCIA", "AMBIGUO"})
 CLASSIFICATION_SYSTEM_PROMPT = (
     "Você classifica uma frase do usuário em EXATAMENTE uma categoria. "
     "Responda com UMA ÚNICA PALAVRA, sem pontuação, sem explicação: "
-    "GERAL, TEOLOGIA, VIRTOLOGIA ou AMBIGUO.\n"
+    "GERAL, TEOLOGIA, VIRTOLOGIA, NEUROCIENCIA ou AMBIGUO.\n"
     "TEOLOGIA: perguntas sobre a Bíblia, exegese, doutrina cristã, sermões, teologia cristã.\n"
     "VIRTOLOGIA: perguntas sobre os CONCEITOS e terminologia técnica da área chamada "
     "Virtologia — só quando a frase pede para explicar, definir ou discutir o conceito em "
     "si dentro desse método/abordagem.\n"
+    "NEUROCIENCIA: perguntas sobre neurociência, neurobiologia, funcionamento do cérebro, "
+    "aprendizagem ou memória como FENÔMENO BIOLÓGICO/CIENTÍFICO — ex.: neuroplasticidade, "
+    "como o cérebro aprende, neurotransmissores, regiões cerebrais. Diferença de VIRTOLOGIA: "
+    "Virtologia é o MÉTODO de desenvolvimento humano em virtudes (Conhecimento+Habilidade+"
+    "Atitude, Faixas de Evolução); Neurociência é a CIÊNCIA de base por trás do funcionamento "
+    "cerebral, sem o enquadramento de virtudes/método.\n"
     "GERAL: qualquer outra coisa — matemática, conversa cotidiana, perguntas factuais gerais, "
     "pedidos de ação/ferramenta (ainda não implementados, tratar como GERAL). Isso inclui "
     "frases que usam palavras que TAMBÉM aparecem como termos técnicos em outra categoria, "
@@ -60,7 +67,9 @@ CLASSIFICATION_SYSTEM_PROMPT = (
     "contexto suficiente pra decidir com confiança.\n"
     "Exemplos que distinguem sentido técnico de sentido cotidiano da MESMA palavra:\n"
     "- 'Explique o conceito de Aceitação nesse método' -> VIRTOLOGIA (pede o conceito técnico).\n"
-    "- 'Preciso de mais aceitação da minha família' -> GERAL (sentimento cotidiano, não pede o conceito)."
+    "- 'Preciso de mais aceitação da minha família' -> GERAL (sentimento cotidiano, não pede o conceito).\n"
+    "- 'O que é neuroplasticidade?' -> NEUROCIENCIA (fenômeno biológico).\n"
+    "- 'Como a Virtologia usa o conceito de neuroplasticidade?' -> VIRTOLOGIA (pede o método, não a biologia)."
 )
 TOOL_NAMES = {"HORA", "DATA", "NENHUMA"}
 
@@ -119,33 +128,47 @@ def parse_tool_output(raw: str) -> str:
 
 
 MUTATION_NAMES = {
-    "LEMBRETE_CRIAR", "LEMBRETE_EDITAR", "LEMBRETE_APAGAR",
-    "NOTA_CRIAR", "NOTA_EDITAR", "NOTA_APAGAR",
-    "MEMORIA_GUARDAR", "MEMORIA_EDITAR", "MEMORIA_ESQUECER",
+    "LEMBRETE_CRIAR", "LEMBRETE_EDITAR", "LEMBRETE_APAGAR", "LEMBRETE_REAGENDAR", "LEMBRETE_CONSULTAR",
+    "NOTA_CRIAR", "NOTA_EDITAR", "NOTA_APAGAR", "NOTA_CONSULTAR",
+    "MEMORIA_GUARDAR", "MEMORIA_EDITAR", "MEMORIA_ESQUECER", "MEMORIA_CONSULTAR",
     "NENHUMA"
 }
+# Fase 14: as 3 ações *_CONSULTAR são LEITURA, não mutação — mas detectadas pelo mesmo
+# handler (detect_mutation) porque é ele que já extrai conteúdo/filtro da fala. O Node
+# (sessionManager.ts) sabe que estas não passam por confirmação; ver IMutatingTool.
+QUERY_NAMES = {"LEMBRETE_CONSULTAR", "NOTA_CONSULTAR", "MEMORIA_CONSULTAR"}
 MAX_MUTATION_CONTENT_CHARS = 200
 
 DETECT_MUTATION_SYSTEM_PROMPT = (
-    "Você decide se a frase do usuário pede para CRIAR, EDITAR ou APAGAR um LEMBRETE, uma NOTA "
-    "ou uma MEMÓRIA, ou NENHUMA das nove. Responda em UMA LINHA: AÇÃO, ou AÇÃO|conteúdo para "
-    "*_CRIAR, *_EDITAR e MEMORIA_GUARDAR (o texto do que deve ser lembrado/anotado/guardado/"
-    "corrigido, sem aspas, sem explicação extra).\n"
+    "Você decide se a frase do usuário pede para CRIAR, EDITAR, APAGAR, REAGENDAR ou CONSULTAR "
+    "um LEMBRETE, uma NOTA ou uma MEMÓRIA, ou NENHUMA das treze. Responda em UMA LINHA: AÇÃO, ou "
+    "AÇÃO|conteúdo para *_CRIAR, *_EDITAR, *_REAGENDAR, *_CONSULTAR e MEMORIA_GUARDAR (o texto do "
+    "que deve ser lembrado/anotado/guardado/corrigido/reagendado/procurado, sem aspas, sem "
+    "explicação extra; em *_CONSULTAR o conteúdo é o termo de busca e pode ficar vazio se o "
+    "pedido for 'todos'/'tudo').\n"
     "LEMBRETE_CRIAR: um compromisso, tarefa ou coisa temporária a fazer — 'lembra de', 'não "
     "deixa eu esquecer', 'anota aí que eu preciso', 'bota um lembrete pra'.\n"
     "LEMBRETE_EDITAR: pede pra CORRIGIR ou TROCAR o TEXTO do lembrete mais recente, sem criar "
     "um novo e sem mudar quando ele dispara — 'troca esse lembrete pra', 'corrige o lembrete, é'. "
     "Diferença de LEMBRETE_CRIAR: EDITAR sempre se refere a um lembrete que JÁ EXISTE. "
     "IMPORTANTE: se o pedido for pra mudar o DIA ou HORÁRIO do lembrete (não o texto), NÃO é "
-    "LEMBRETE_EDITAR — é NENHUMA, porque o sistema ainda não sabe reagendar um lembrete "
-    "existente (só apagar e criar um novo).\n"
+    "LEMBRETE_EDITAR — é LEMBRETE_REAGENDAR.\n"
+    "LEMBRETE_REAGENDAR: pede pra mudar o DIA ou HORÁRIO de um lembrete já existente, mantendo o "
+    "texto — 'passa esse lembrete pras três', 'muda pra sexta em vez de quinta', 'adia esse "
+    "lembrete pra amanhã'. content = o novo dia/horário (texto natural, quem interpreta a data é "
+    "o próprio app).\n"
     "LEMBRETE_APAGAR: pede pra apagar/cancelar o lembrete mais recente — 'apaga o lembrete', "
     "'cancela aquele lembrete', 'esquece o que eu pedi pra lembrar'.\n"
+    "LEMBRETE_CONSULTAR: pede pra OUVIR/SABER quais lembretes existem, sem mudar nada — 'quais "
+    "são meus lembretes', 'o que eu tenho pra hoje', 'tem lembrete de remédio?'. content = o "
+    "termo de busca, se houver (ex.: 'remédio'), ou vazio se o pedido for por todos.\n"
     "NOTA_CRIAR: uma ideia, observação, ou texto livre pra guardar — 'guarda essa ideia', "
     "'escreve isso pra mim', 'salva essa observação', 'registra que'.\n"
     "NOTA_EDITAR: mesma ideia de LEMBRETE_EDITAR, mas pra nota.\n"
     "NOTA_APAGAR: pede pra apagar a nota mais recente — 'apaga essa nota', 'joga fora a "
     "anotação'.\n"
+    "NOTA_CONSULTAR: pede pra OUVIR o que foi anotado, sem mudar nada — 'o que eu anotei sobre "
+    "X', 'minhas notas sobre viagem'. content = o termo de busca, ou vazio por todas.\n"
     "MEMORIA_GUARDAR: um FATO ou PREFERÊNCIA sobre o próprio usuário, pra você lembrar quem ele é — "
     "'lembra que eu prefiro', 'guarda que meu nome é', 'anota que eu gosto de'. Diferença de "
     "LEMBRETE_CRIAR: aqui não é uma TAREFA a fazer num momento futuro, é uma INFORMAÇÃO SOBRE A "
@@ -156,14 +179,26 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "MEMORIA_ESQUECER: pede pra apagar o fato mais recente guardado sobre o usuário — 'apaga essa "
     "memória sobre mim', 'apaga o que você guardou sobre mim'. Diferença de LEMBRETE_APAGAR: aquele "
     "apaga uma TAREFA pendente; este apaga um FATO sobre a pessoa.\n"
+    "MEMORIA_CONSULTAR: pede pra OUVIR o que você guardou sobre ele, sem mudar nada — 'o que você "
+    "lembra sobre mim', 'o que você sabe sobre meu time'. content = o termo de busca, ou vazio "
+    "por tudo.\n"
     "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum, e qualquer "
     "menção a lembrar/anotar que não seja um pedido direto de ação (ex.: 'eu lembro que você "
     "me falou isso' é NENHUMA, é o usuário lembrando de algo, não pedindo pra você lembrar).\n"
     "Exemplos:\n"
+    "Quais são meus lembretes pra hoje? -> LEMBRETE_CONSULTAR|hoje\n"
+    "Tem algum lembrete de remédio? -> LEMBRETE_CONSULTAR|remédio\n"
+    "O que eu tenho que fazer essa semana? -> LEMBRETE_CONSULTAR\n"
+    "O que eu anotei sobre a viagem? -> NOTA_CONSULTAR|viagem\n"
+    "Me lê minhas notas -> NOTA_CONSULTAR\n"
+    "O que você lembra sobre mim? -> MEMORIA_CONSULTAR\n"
+    "O que você sabe sobre o meu time? -> MEMORIA_CONSULTAR|time\n"
+    "Passa esse lembrete pras três da tarde -> LEMBRETE_REAGENDAR|três da tarde\n"
+    "Muda esse lembrete pra sexta em vez de quinta -> LEMBRETE_REAGENDAR|sexta\n"
+    "Adia esse lembrete pra amanhã de manhã -> LEMBRETE_REAGENDAR|amanhã de manhã\n"
     "Lembra de ligar pro dentista -> LEMBRETE_CRIAR|Ligar pro dentista\n"
     "Troca esse lembrete pra ligar pro médico -> LEMBRETE_EDITAR|Ligar pro médico\n"
     "Na verdade, corrige o lembrete: é café solúvel, não em pó -> LEMBRETE_EDITAR|Comprar café solúvel, não em pó\n"
-    "Muda esse lembrete pra sexta em vez de quinta -> NENHUMA\n"
     "Troca essa nota pra: comprar materiais na segunda -> NOTA_EDITAR|Comprar materiais na segunda\n"
     "Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR|seu nome é Rodrigo\n"
     "Na verdade, corrige isso que eu falei: meu nome é Rodrigo Sonsino -> MEMORIA_EDITAR|seu nome é Rodrigo Sonsino\n"
@@ -229,20 +264,29 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "'me dá um toque', 'bota pra me acordar'). content = a tarefa.\n"
     "LEMBRETE_EDITAR: corrige o TEXTO do lembrete mais recente (não o horário). content = o texto novo.\n"
     "LEMBRETE_APAGAR: apaga/cancela o lembrete mais recente.\n"
+    "LEMBRETE_REAGENDAR: muda o DIA ou HORÁRIO de um lembrete já existente, mantendo o texto "
+    "('passa esse lembrete pras três', 'adia pra amanhã'). content = o novo dia/horário.\n"
+    "LEMBRETE_CONSULTAR: pede para OUVIR quais lembretes existem, sem mudar nada ('quais são meus "
+    "lembretes', 'tem lembrete de remédio?'). content = o termo de busca, se houver.\n"
     "NOTA_CRIAR: anotar/guardar uma ideia ou observação livre ('anota que', 'registra que'). content = a nota.\n"
     "NOTA_EDITAR: corrige o texto da nota mais recente. content = o texto novo.\n"
     "NOTA_APAGAR: apaga a nota mais recente.\n"
+    "NOTA_CONSULTAR: pede para OUVIR o que foi anotado ('o que eu anotei sobre X'). content = o termo "
+    "de busca, se houver.\n"
     "MEMORIA_GUARDAR: guardar um fato ou preferência sobre o PRÓPRIO usuário (nome, gosto, restrição). content = o fato.\n"
     "MEMORIA_EDITAR: corrige um fato pessoal já guardado. Inclui correções IMPLÍCITAS em que o usuário "
     "afirma o fato certo contra o errado ('na real eu tenho 32, não 35', 'eu moro em Campinas, não em "
     "São Paulo', 'tá errado, eu faço medicina'). content = o fato correto.\n"
     "MEMORIA_ESQUECER: pede para esquecer/apagar o fato mais recente guardado sobre ele.\n"
+    "MEMORIA_CONSULTAR: pede para OUVIR o que foi guardado sobre ele ('o que você lembra sobre mim'). "
+    "content = o termo de busca, se houver.\n"
     "HORA: quer saber que horas são agora (qualquer jeito coloquial, inclusive 'já passou das dez?').\n"
     "DATA: quer saber o dia, dia da semana, mês ou ano de hoje.\n"
     "NENHUMA: todo o resto — conversa, perguntas de conhecimento, e qualquer menção a lembrar/anotar/"
     "apagar/nota/hora/dia que NÃO seja um pedido direto ('eu lembro que você disse', 'nota dez na prova', "
     "'apagar a luz', 'a hora da verdade', 'hora em Lisboa', preferências comuns 'prefiro café, não chá').\n"
-    "Pedidos sem conteúdo utilizável ('guarda isso pra mim') => NENHUMA. Mudar DIA/HORÁRIO de lembrete => NENHUMA.\n"
+    "Pedidos sem conteúdo utilizável ('guarda isso pra mim') => NENHUMA. Pedido de consulta sem termo "
+    "de busca ('quais são meus lembretes') é válido com content vazio/omitido, não é NENHUMA.\n"
 )
 
 
@@ -284,6 +328,12 @@ def parse_intent_json(raw: str, text: str = ""):
     content = content.strip() if isinstance(content, str) else None
     if intent in ("HORA", "DATA", "NENHUMA") or intent.endswith("_APAGAR") or intent == "MEMORIA_ESQUECER":
         return (intent, None)
+    if intent in QUERY_NAMES:
+        # Consulta: termo de busca é opcional — nunca degrada para NENHUMA por falta de
+        # conteúdo, só descarta um termo longo demais ou não ancorado na fala.
+        if content and (len(content) > MAX_MUTATION_CONTENT_CHARS or (text and not content_grounded(content, text))):
+            content = None
+        return (intent, content)
     if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
         return ("NENHUMA", None)  # criar/editar/guardar sem conteúdo utilizável
     if text and not content_grounded(content, text):
@@ -309,10 +359,17 @@ def parse_mutation_output(raw: str, truncated: bool) -> tuple[str, str | None]:
     if action not in MUTATION_NAMES:
         return ("NENHUMA", None)
     if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR",
-                  "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR"):
+                  "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR",
+                  "LEMBRETE_REAGENDAR"):
         if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
             return ("NENHUMA", None)
         return (action, content)
+    if action in QUERY_NAMES:
+        # Consulta: o termo de busca é opcional (vazio = "todos"); nunca degrada para NENHUMA
+        # por falta de conteúdo, só descarta um conteúdo longo demais pra ser um termo de busca.
+        if content and len(content) > MAX_MUTATION_CONTENT_CHARS:
+            content = None
+        return (action, content or None)
     return (action, None)
 
 
@@ -496,8 +553,6 @@ def emit(event: dict[str, Any]) -> None:
     """Único ponto de escrita em stdout — protocolo NDJSON."""
     sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
     sys.stdout.flush()
-
-
 # --- Fase 13a (docs/phase-13a-v3.md §4.2): TTS Gemini. `synthesize` NÃO passa por work_loop/work_queue (a geração ocupa
 # o laço único e a fila de tamanho 1 descartaria o pedido): roda num pool próprio de 2 threads daemon, com cancelamento
 # por pedido (reqId), prazo local por pedido e WAV gravado de forma atômica. Só o TEXTO da frase vai ao Google.
@@ -997,7 +1052,6 @@ class Worker:
         if not text or not text.strip():
             emit({"event": "mutation_detection", "reqId": req_id, "turnId": turn_id, "action": "NENHUMA", "content": None})
             return
-
         handle = GenerationHandle(turn_id=turn_id, epoch=epoch)
         self._set_current(handle)
 
@@ -1044,6 +1098,173 @@ class Worker:
         except Exception as exc:  # noqa: BLE001
             log_diag(f"Erro na detecção de mutação: {safe_exc(exc)}")
             emit({"event": "error", "reqId": req_id, "turnId": turn_id, "message": "Falha ao detectar mutação."})
+        finally:
+            with self._current_lock:
+                if self._current is handle:
+                    self._current = None
+            if self._mx is not None:
+                self._mx.clear_cache()
+
+
+    def handle_describe_screen(self, msg: dict[str, Any]) -> None:
+        req_id = msg["reqId"]
+        turn_id = msg["turnId"]
+        image_path = msg.get("imagePath", "")
+        question = msg.get("question", "")
+        cloud_authorized = bool(msg.get("cloudAuthorized", False))
+
+        if self._turn_cancelled(turn_id):
+            log_diag(f"Descrição de tela cancelada antes do início (turnId={turn_id}).")
+            return
+
+        if not image_path or not os.path.exists(image_path):
+            if self._turn_cancelled(turn_id):
+                log_diag(f"Imagem de tela ausente para turno cancelado (turnId={turn_id}).")
+                return
+            emit({
+                "event": "screen_description",
+                "reqId": req_id,
+                "turnId": turn_id,
+                "kind": "image_missing",
+                "error": "Imagem não encontrada."
+            })
+            return
+
+        handle = GenerationHandle(turn_id=turn_id, epoch=msg.get("epoch", 0))
+        self._set_current(handle)
+
+        cloud_master = os.environ.get("RODRIGO_CLOUD", "1") == "1"
+        cloud_vision = os.environ.get("RODRIGO_CLOUD_VISION", "1") == "1"
+
+        prefix = ""
+        if cloud_authorized and (not cloud_master or not cloud_vision):
+            prefix = "A visão pelo Gemini está desligada, então olhei aqui mesmo. "
+
+        try:
+            if cloud_authorized and cloud_master and cloud_vision:
+                try:
+                    from google import genai
+                    from google.genai import types
+                    client = self._gemini_client_for(genai, 20_000)
+                    with open(image_path, "rb") as f:
+                        img_bytes = f.read()
+
+                    prompt_text = (
+                        "Você vê uma captura da tela do usuário. "
+                        "Responda em português, no máximo 3 frases curtas, sem markdown. "
+                        "Se não conseguir ler, diga.\n"
+                        f"Pergunta: {question}"
+                    )
+
+                    emit({
+                        "event": "screen_sent",
+                        "turnId": turn_id,
+                        "message": "Tela enviada ao Google.",
+                        "sentAt": time.strftime("%H:%M")
+                    })
+
+                    start_time = time.monotonic()
+                    res = client.models.generate_content(
+                        model="gemini-flash-latest",
+                        contents=[
+                            types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+                            prompt_text
+                        ]
+                    )
+                    duration_ms = int((time.monotonic() - start_time) * 1000)
+                    out_text = (res.text or "").strip()
+                    log_diag(f"[screen] turno={turn_id} motor=gemini bytes={len(img_bytes)} ms={duration_ms}")
+
+                    emit({
+                        "event": "screen_description",
+                        "reqId": req_id,
+                        "turnId": turn_id,
+                        "text": out_text,
+                        "engine": "gemini",
+                        "ms": duration_ms
+                    })
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    log_diag(f"Erro na visão Gemini, tentando local: {safe_exc(exc)}")
+
+            if not hasattr(self, "_vlm_model") or self._vlm_model is None:
+                log_diag(f"Carregando modelo de visão ({VISION_MODEL_ID})...")
+                try:
+                    import mlx_vlm
+                    self._vlm_model, self._vlm_processor = mlx_vlm.load(VISION_MODEL_ID)
+                    log_diag("Modelo de visão carregado com sucesso.")
+                except Exception as exc:  # noqa: BLE001
+                    log_diag(f"Falha ao carregar modelo de visão: {safe_exc(exc)}")
+                    emit({
+                        "event": "screen_description",
+                        "reqId": req_id,
+                        "turnId": turn_id,
+                        "kind": "vlm_load_error",
+                        "error": "Falha ao carregar modelo de visão local."
+                    })
+                    return
+
+            if handle.cancel_event.is_set() or self._turn_cancelled(turn_id):
+                log_diag(f"Descrição de tela cancelada antes da inferência (turnId={turn_id}).")
+                return
+
+            import mlx_vlm
+            prompt_text = (
+                "Você vê uma captura da tela do usuário. "
+                "Responda em português, no máximo 3 frases curtas, sem markdown. "
+                "Se não conseguir ler, diga.\n"
+                f"Pergunta: {question}"
+            )
+            formatted_prompt = self._vlm_processor.apply_chat_template(
+                [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_text}]}],
+                add_generation_prompt=True
+            )
+
+            start_time = time.monotonic()
+            output_text = mlx_vlm.generate(
+                self._vlm_model,
+                self._vlm_processor,
+                image_path,
+                formatted_prompt,
+                max_tokens=200,
+                verbose=False
+            )
+
+            if handle.cancel_event.is_set() or self._turn_cancelled(turn_id):
+                log_diag(f"Descrição de tela cancelada após a inferência (turnId={turn_id}).")
+                return
+
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            log_diag(f"[screen] turno={turn_id} motor=local ms={duration_ms}")
+
+            emit({
+                "event": "screen_description",
+                "reqId": req_id,
+                "turnId": turn_id,
+                "text": prefix + str(output_text).strip(),
+                "engine": "local",
+                "ms": duration_ms
+            })
+        except FileNotFoundError:
+            if self._turn_cancelled(turn_id):
+                log_diag(f"Imagem de tela removida durante turno cancelado (turnId={turn_id}).")
+            else:
+                emit({
+                    "event": "screen_description",
+                    "reqId": req_id,
+                    "turnId": turn_id,
+                    "kind": "image_missing",
+                    "error": "Imagem não encontrada."
+                })
+        except Exception as exc:  # noqa: BLE001
+            log_diag(f"Erro na descrição de tela local: {safe_exc(exc)}")
+            emit({
+                "event": "screen_description",
+                "reqId": req_id,
+                "turnId": turn_id,
+                "kind": "vlm_error",
+                "error": "Falha ao processar imagem de tela."
+            })
         finally:
             with self._current_lock:
                 if self._current is handle:
@@ -1476,6 +1697,8 @@ class Worker:
                     self.handle_detect_mutation(msg)
                 elif cmd == "detect_intent":
                     self.handle_detect_intent(msg)
+                elif cmd == "describe_screen":
+                    self.handle_describe_screen(msg)
                 elif cmd == "detect_confirmation":
                     self.handle_detect_confirmation(msg)
                 elif cmd == "generate":

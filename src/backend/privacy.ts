@@ -24,6 +24,8 @@ export interface PrivacyConfig {
   readonly cloudTts: boolean;
   /** Fase 13a, decisão D-b — RODRIGO_TTS_DICTATED: confirmações que repetem conteúdo ditado (prévia de nota/lembrete/memória) também vão à voz em nuvem. */
   readonly ttsDictated: boolean;
+  /** Fase V — RODRIGO_CLOUD_VISION: envio da imagem da tela ao Gemini sob autorização explícita na fala. */
+  readonly cloudVision: boolean;
 }
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
@@ -90,7 +92,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     sendMemories: parseFlag(env, 'RODRIGO_SEND_MEMORIES', true),
     sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false),
     cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),
-    ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true)
+    ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true),
+    cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', true)
   };
 }
 
@@ -125,7 +128,8 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       historyTurns: cfg.cloud && cfg.sendHistory ? cfg.historyTurns : null,
       memories: cfg.cloud && cfg.sendMemories,
       knowledgeSnippet: cfg.cloud && cfg.sendKnowledge,
-      ttsText: ttsOn
+      ttsText: ttsOn,
+      visionImage: cfg.cloud && cfg.cloudVision
     },
     models: {
       generation: cfg.cloud ? 'gemini-flash-latest' : null,

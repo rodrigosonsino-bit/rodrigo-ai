@@ -65,6 +65,29 @@ export class TeologiaAgent implements IAgent {
   }
 }
 
+
+const NEUROCIENCIA_PROMPT =
+  'Você é o agente especialista em Neurociência de Rodrigo — neurobiologia da mente, ' +
+  'aprendizagem e comportamento, no material de referência pessoal dele. Responda com base ' +
+  'estrita nesse material e nos princípios científicos nele contidos; nunca invente conceito, ' +
+  'estudo ou posição que não esteja lá. Se a pergunta não for coberta pelo material, diga ' +
+  'exatamente: "Não encontrei no seu material uma posição registrada sobre este tópico." — ' +
+  'nunca complete a lacuna com conhecimento geral apresentado como se fosse do material de ' +
+  'Rodrigo. Você NÃO prescreve tratamento médico nem diagnostica condição clínica; se a ' +
+  'pergunta pedir isso, recomende buscar um profissional de saúde.';
+
+export class NeurocienciaAgent implements IAgent {
+  readonly id = 'neurociencia';
+  readonly name = 'Neurociência';
+  readonly role = 'Neurobiologia da mente, aprendizagem e comportamento (material pessoal de Rodrigo)';
+  isAvailable(): boolean {
+    return true;
+  }
+  getSystemPrompt(): string {
+    return NEUROCIENCIA_PROMPT;
+  }
+}
+
 export class VirtologiaAgent implements IAgent {
   readonly id = 'virtologia';
   readonly name = 'Virtologia';
@@ -77,15 +100,16 @@ export class VirtologiaAgent implements IAgent {
   }
 }
 
-/** Cria as 3 instâncias — usado por createVoiceRuntime() para registrar sempre juntas. */
+/** Cria as instâncias — usado por createVoiceRuntime() para registrar sempre juntas. */
 export function createSpecialistAgents(): IAgent[] {
-  return [new GeneralAgent(), new TeologiaAgent(), new VirtologiaAgent()];
+  return [new GeneralAgent(), new TeologiaAgent(), new VirtologiaAgent(), new NeurocienciaAgent()];
 }
 
 const LABEL_TO_AGENT_ID: Record<OrchestratorLabel, string> = {
   GERAL: 'geral',
   TEOLOGIA: 'teologia',
   VIRTOLOGIA: 'virtologia',
+  NEUROCIENCIA: 'neurociencia',
   AMBIGUO: 'geral', // decisão de projeto: sem especialista para AMBIGUO, cai no Geral
   TELA: 'geral' // Fase V: o classificador nunca devolve TELA (o turno de tela não passa por agente); só fecha o tipo
 };

@@ -12,7 +12,8 @@ export interface KnowledgeChunk {
 
 const SOURCES: ReadonlyArray<{ agentId: string; file: string }> = [
   { agentId: 'teologia', file: 'teologia-profile-source.md' },
-  { agentId: 'virtologia', file: 'virtologia-profile-source.md' }
+  { agentId: 'virtologia', file: 'virtologia-profile-source.md' },
+  { agentId: 'neurociencia', file: 'neurociencia-profile-source.md' }
 ];
 
 /**

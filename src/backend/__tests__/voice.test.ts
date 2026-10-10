@@ -2042,6 +2042,59 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         await teardownHarness(h);
       }
     });
+
+    it('Fase 14: LEMBRETE_CONSULTAR fala a resposta num único turno, sem pedir confirmação (achado 1 da auditoria r1)', async (t) => {
+      const { tools: mutatingTools, memoriaStore } = createMutatingTools(tmpPhase8Dir);
+      const lembreteStore = new JsonStore<StoredItem>(tmpPhase8Dir, 'lembretes.json');
+      lembreteStore.write({
+        items: [{ id: 'rem-pao', text: 'comprar pão', createdAt: new Date().toISOString() }]
+      });
+
+      const h = await setupHarness(null, [], mutatingTools, memoriaStore);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      try {
+        h.engine.fixedTranscript = 'Tem algum lembrete de pão?';
+        h.engine.mutationToReturn = ['LEMBRETE_CONSULTAR', 'pão'];
+
+        const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+        const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+
+        sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+        currentSse = sse;
+        await sse.waitFor(1);
+
+        const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+          method: 'POST',
+          headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+          body: buildTestWav(1)
+        });
+        assert.equal(audioRes.status, 200);
+        await sse.waitFor(8, 5000);
+
+        // Resposta já é o resultado da consulta — nunca uma pergunta "Posso...?" esperando confirmação.
+        const spoken = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
+          | { type: 'sentence_audio_ready'; text: string }
+          | undefined;
+        assert.ok(spoken?.text.includes('comprar pão'), spoken?.text);
+        assert.ok(!spoken?.text.startsWith('Posso'), spoken?.text);
+
+        // Um único turno basta — não há segundo round de audio/played esperando "sim".
+        const turnDone = sse.events.find((e) => (e as { type: string }).type === 'turn_done');
+        assert.ok(turnDone);
+
+        // Nenhum item foi alterado: consulta é leitura.
+        assert.equal(lembreteStore.read().items.length, 1);
+      } finally {
+        sse?.close();
+        await teardownHarness(h);
+      }
+    });
   });
 
   describe('Geração com Gemini e tratamento de erro condicional (Fase 10a — H5)', () => {

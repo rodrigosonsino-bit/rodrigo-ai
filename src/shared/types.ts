@@ -44,6 +44,8 @@ export interface PrivacyStatus {
     knowledgeSnippet: boolean;
     /** Fase 13a: o texto de cada frase falada vai ao Gemini para virar voz. */
     ttsText: boolean;
+    /** Fase V: imagem da tela enviada ao Gemini somente com autorização explícita. */
+    visionImage: boolean;
   };
   models: { generation: string | null; intent: string | null; tts: string | null };
   /** Fase 13a: estado EFETIVO do TTS em nuvem (a flag sozinha não basta; ver ttsCloudEffective). */

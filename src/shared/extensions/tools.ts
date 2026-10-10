@@ -1,4 +1,4 @@
-import type { MutationName } from '../voiceProtocol.js';
+import type { IntentName } from '../voiceProtocol.js';
 
 /**
  * Ponto de extensão para ferramentas do sistema (Fase 5b).
@@ -11,13 +11,15 @@ export interface ITool {
 }
 
 /**
- * Ponto de extensão para ferramentas que mutam estado (Fase 5c).
+ * Ponto de extensão para ferramentas que mutam estado (Fase 5c) ou consultam estado (Fase 14 —
+ * `*_CONSULTAR` é leitura, nunca mutação, mas reusa a mesma ferramenta porque é ela que guarda o
+ * `JsonStore`; por isso o parâmetro aceita `IntentName`, não só `MutationName`).
  */
 export interface IMutatingTool {
   readonly name: string;
   readonly description: string;
   isAvailable(): boolean;
-  preview(kind: MutationName, content: string | null): string;
-  execute(kind: MutationName, content: string | null): string;
+  preview(kind: IntentName, content: string | null): string;
+  execute(kind: IntentName, content: string | null): string;
 }
 

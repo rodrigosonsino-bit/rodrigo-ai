@@ -5,18 +5,19 @@ import {
   GeneralAgent,
   TeologiaAgent,
   VirtologiaAgent,
+  NeurocienciaAgent,
   createSpecialistAgents,
   selectAgentForLabel
 } from '../agents/specialistAgents.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 
-describe('Agentes especialistas (Fase 4)', () => {
-  it('createSpecialistAgents() retorna exatamente os 3 agentes, todos disponíveis', () => {
+describe('Agentes especialistas (Fase 4 + Fase 16)', () => {
+  it('createSpecialistAgents() retorna exatamente os 4 agentes, todos disponíveis', () => {
     const agents = createSpecialistAgents();
-    assert.equal(agents.length, 3);
+    assert.equal(agents.length, 4);
     assert.deepEqual(
       agents.map((a) => a.id).sort(),
-      ['geral', 'teologia', 'virtologia']
+      ['geral', 'neurociencia', 'teologia', 'virtologia']
     );
     for (const agent of agents) {
       assert.equal(agent.isAvailable(), true);
@@ -24,11 +25,12 @@ describe('Agentes especialistas (Fase 4)', () => {
     }
   });
 
-  it('selectAgentForLabel resolve GERAL/TEOLOGIA/VIRTOLOGIA para o agente correspondente', () => {
+  it('selectAgentForLabel resolve GERAL/TEOLOGIA/VIRTOLOGIA/NEUROCIENCIA para o agente correspondente', () => {
     const agents = createSpecialistAgents();
     assert.ok(selectAgentForLabel('GERAL', agents) instanceof GeneralAgent);
     assert.ok(selectAgentForLabel('TEOLOGIA', agents) instanceof TeologiaAgent);
     assert.ok(selectAgentForLabel('VIRTOLOGIA', agents) instanceof VirtologiaAgent);
+    assert.ok(selectAgentForLabel('NEUROCIENCIA', agents) instanceof NeurocienciaAgent);
   });
 
   it('selectAgentForLabel resolve AMBIGUO para a mesma instância que GERAL resolveria', () => {
