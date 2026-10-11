@@ -747,10 +747,38 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
     assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE));
   });
 
-  it('consulta sem casamento não injeta bloco nenhum', async () => {
+  it('consulta sem casamento injeta a trava de limite (F16, Fatia 3, §2.1)', async () => {
     const prompt = await runTurn('TEOLOGIA', 'receita de bolo de cenoura com cobertura');
-    assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE), 'sem termo casado, nada é injetado');
+    assert.ok(!prompt.includes(KNOWLEDGE_PREAMBLE), 'sem trecho recuperado, nada do corpus é injetado');
+    assert.ok(
+      prompt.includes('O corpus não contém informações sobre a pergunta do usuário'),
+      'trava de limite deve estar presente quando a busca retorna vazia'
+    );
+    assert.ok(
+      prompt.includes('DEVE declarar explicitamente que não encontrou a posição registrada'),
+      'a trava instrui a declarar o limite, sem adivinhar'
+    );
     assert.match(prompt, /Teologia de Rodrigo Sonsino/);
+  });
+
+  it('F16 Fatia 3: trava de limite também se aplica a NEUROCIENCIA e VIRTOLOGIA', async () => {
+    for (const label of ['NEUROCIENCIA', 'VIRTOLOGIA'] as const) {
+      const prompt = await runTurn(label, 'receita de bolo de cenoura com cobertura');
+      assert.ok(
+        prompt.includes('O corpus não contém informações sobre a pergunta do usuário'),
+        `${label}: trava de limite ausente em busca vazia`
+      );
+    }
+  });
+
+  it('F16 Fatia 3: GERAL e AMBIGUO nunca recebem a trava de limite', async () => {
+    for (const label of ['GERAL', 'AMBIGUO'] as const) {
+      const prompt = await runTurn(label, 'receita de bolo de cenoura com cobertura');
+      assert.ok(
+        !prompt.includes('O corpus não contém informações sobre a pergunta do usuário'),
+        `${label} não pode receber a trava`
+      );
+    }
   });
 
   afterEach(async () => {

@@ -231,6 +231,7 @@ const ORCHESTRATOR_LABEL_NAMES: Record<string, string> = {
   GERAL: 'Geral',
   TEOLOGIA: 'Teologia',
   VIRTOLOGIA: 'Virtologia',
+  NEUROCIENCIA: 'Neurociência',
   AMBIGUO: 'Ambiguidade',
   TELA: 'Tela'
 };

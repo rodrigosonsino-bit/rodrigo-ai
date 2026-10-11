@@ -778,11 +778,20 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           console.error('[knowledge] recuperação falhou, seguindo sem trecho:', err);
         }
       }
+      // Fase 16, Fatia 3: bloco de trava de limite (vazio quando não se aplica).
+      let knowledgeLimitBlock = '';
       if (retrieved.length > 0) {
         console.log(
           `[knowledge] turno=${turn.turnId} agente=${agent.id} ` +
             `trecho="${retrieved[0].headingPath}" score=${retrieved[0].score.toFixed(3)}`
         );
+      } else if (this.privacy.sendKnowledge && this.retriever && (label === 'TEOLOGIA' || label === 'VIRTOLOGIA' || label === 'NEUROCIENCIA')) {
+        // §2.1: trava de limite quando a busca retorna vazia para os três rótulos de
+        // conhecimento — o sistema DEVE declarar que não encontrou a posição registrada.
+        knowledgeLimitBlock =
+          '[Conhecimento: O corpus não contém informações sobre a pergunta do usuário. ' +
+          'O sistema DEVE declarar explicitamente que não encontrou a posição registrada ' +
+          'do usuário sobre isso, sem adivinhar.]';
       }
 
       // Fase 7: memória de contexto entre sessões. Lê do disco com proteção try/catch
@@ -803,6 +812,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         agent.getSystemPrompt(),
         memoryBlock,
         knowledgeBlock,
+        knowledgeLimitBlock,
         VOICE_SAFETY_AND_OUTPUT_CONSTRAINTS
       ]
         .filter((b) => b)

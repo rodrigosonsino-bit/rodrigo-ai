@@ -57,4 +57,20 @@ describe('Agentes especialistas (Fase 4 + Fase 16)', () => {
     assert.equal(afterFirst, before + 1);
     assert.equal(afterSecond, afterFirst);
   });
+
+  it('F16 Fatia 2: Teologia, Virtologia e Neurociência carregam a frase padronizada de limite', () => {
+    const agents = createSpecialistAgents();
+    for (const id of ['teologia', 'virtologia', 'neurociencia']) {
+      const agent = agents.find((a) => a.id === id)!;
+      const prompt = agent.getSystemPrompt();
+      assert.ok(
+        prompt.includes('não encontrou a posição registrada'),
+        `${id}: prompt sem a frase padronizada de limite (achado r2 N2)`
+      );
+      assert.ok(
+        prompt.includes('sem adivinhar'),
+        `${id}: prompt sem a instrução de não adivinhar`
+      );
+    }
+  });
 });

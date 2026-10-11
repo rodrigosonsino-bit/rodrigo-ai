@@ -37,7 +37,7 @@ test('Fase 16: NeurocienciaAgent implementa IAgent (id bate com o agentId do cor
   const agent = new NeurocienciaAgent();
   assert.equal(agent.id, 'neurociencia');
   assert.equal(agent.isAvailable(), true);
-  assert.ok(
-    agent.getSystemPrompt().includes('Não encontrei no seu material uma posição registrada sobre este tópico.')
-  );
+  // Fatia 2: frase padronizada (achado r2 N2), igual à de Teologia/Virtologia
+  assert.ok(agent.getSystemPrompt().includes('não encontrou a posição registrada'));
+  assert.ok(agent.getSystemPrompt().includes('sem adivinhar'));
 });
