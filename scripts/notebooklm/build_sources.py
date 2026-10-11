@@ -108,7 +108,7 @@ Os 4 arquivos não rastreados acima (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `USE
 Estado do que está rodando (comandos agora): {ports}
 `GET /api/voice/tts-status` -> `{ttsstat}`
 
-Testes (rodados em 2026-10-08 após a última mudança de código, commit `a1f12ab`; rodar de novo antes de confiar): `npm test` (compila com `tsc` e roda `node --test`) -> **646 de 646**. **Teste instável conhecido:** `f13Session` "ao fim do turno o provedor é avisado" falha raramente com `fetch failed / other side closed` em < 1 ms (2 falhas em ~10 rodadas da suíte em 2026-10-08; 0 em 13 rodadas seguidas); suspeita não confirmada: o harness reaproveita conexão keep-alive de um servidor anterior na mesma porta aleatória. Pendência pequena; `npm run typecheck` limpo; testes Python do worker (`.runtime/.venv/bin/python scripts/worker/test_*.py`, são scripts, não `unittest`; imprimem "ok") todos passando.
+**Testes: ESTADO QUEBRADO, verificado agora (`npx tsc -p tsconfig.server.json --noEmit`, 2026-10-09).** `npm test` não roda — falha já no `tsc` do `tsconfig.server.json`, antes de chegar em `node --test`: **177 erros, todos em `src/backend/voice/sessionManager.ts`**, primeiro erro na linha 591 (`'catch' or 'finally' expected`). É sintaxe quebrada (chave de bloco try/chave-abre/chave-fecha desencontrada em algum ponto do arquivo, não um erro de tipo), consistente com uma edição não commitada em andamento (ver `git status` no §2 — este arquivo está entre os 9 modificados). **Nenhuma contagem de teste anterior a isto deve ser usada**; a última vez que a suíte rodou de verdade e passou foi em 2026-10-08 após o commit `a1f12ab` (646 de 646), mas o estado do arquivo mudou desde então. `npm run typecheck` também falha pelo mesmo motivo. Testes Python do worker (`.runtime/.venv/bin/python scripts/worker/test_*.py`) não foram reverificados nesta rodada.
 
 Arquivos de teste Node:
 ```
@@ -190,8 +190,11 @@ Estado local relevante (verificado): o `.env` do usuário usa `TTS_ENGINE=gemini
 | 12 | Privacidade condizente com a promessa (controle por canal, cartão, egresso medido) + plano B da geração | feito e comitado |
 | 13a | **Voz natural: TTS do Gemini com `say` de reserva** | implementado (`e617497`); **código auditado em 2026-10-08** (Kimi K3, 9 achados: 6 corrigidos em `fe7736e`, 1 falso positivo, 2 sem ação; `docs/audits/f13a-code-audit-kimi-k3-2026-10-08.md`); **H13a.10 (o usuário ouvir) ainda PENDENTE** — ver §6 |
 | 13b | Conversa natural (latência/escuta) | começada: log `[timing]` por etapa (`af05e1e`); fim de fala aos **1,0 s** de silêncio (era 0,7 s; `e9ef641`, decisão do usuário). Plano de juntar fragmentos no servidor (`docs/phase-13b-v1.md`) **reprovado** pelo Codex (REFAZER) e substituído por essa decisão. Latência ainda não atacada |
-| V | **Visão da tela** (inserida pelo usuário) | plano v3 aprovado com ajustes (`docs/phase-vision-v3.md`); **fatias 1 e 2 feitas**, 3–5 pendentes — ver §6b |
-| 14–17 | Ciclo completo de notas; orquestrador autônomo; conhecimento pessoal; qualificação 1.0 | não iniciadas; **nova prioridade do usuário (2026-10-08): 1. visão de tela, 2. consulta de notas por voz (F14), 3. falar com o OpenClaw (F15)** |
+| V | **Visão da tela** (inserida pelo usuário) | plano v3 aprovado com ajustes (`docs/phase-vision-v3.md`); **fatias 1, 2 e 3 feitas e auditadas** (fatia 3: `ce48a79`+`99e6fbc`, Kimi K3, 5 achados, todos procedentes); **fatias 4 e 5 pendentes** — ver §6b e §6c |
+| 14 | Ciclo completo de notas, lembretes e memórias por voz | plano auditado: **aprovado com ajustes** (`docs/audits/phase-14-plan-audit-r1.md`); v2 em `docs/phase-14-v2.md`; **implementação em andamento, NÃO COMMITADA — e o build está QUEBRADO agora** (ver §2 e §6c) |
+| 15 | Orquestrador autônomo, coordenador de todos os subagentes (inclui a ponte com o OpenClaw) | plano v1 **REFAZER** (`docs/audits/phase-15-plan-audit-r1.md`: busca web como leitura autônoma não classificada = vazamento de dado pra nuvem); v2 (`docs/phase-15-v2.md`) **autodeclara** "Aprovado para implementação" — **não encontrei auditoria da rodada 2 confirmando isso de forma independente**, tratar como pendente de confirmação; arquivos novos não commitados da interface `ISubAgent` (`subAgent.ts`, `adapters.ts`, `openClawSubAgent.ts`) e teste esqueleto — ver §6c |
+| 16 | Conhecimento pessoal (Teologia/Virtologia/novas bases, ex. Neurociência) | mesma situação da F15: v1 **REFAZER** (`docs/audits/phase-16-plan-audit-r1.md`), v2 (`docs/phase-16-v2.md`) autodeclarado aprovado, sem auditoria r2 encontrada; teste esqueleto bem mais fino (24 linhas) que o da F15 — ver §6c |
+| 17 | Qualificação 1.0 | não iniciada |
 
 ## 6. Fase 13a em detalhe (a mais recente — leia `docs/phase-13a-v3.md` e `docs/implementation-phase-13a.md`)
 
@@ -227,6 +230,30 @@ Todos os commits abaixo estão em `main` e **ainda não foram empurrados** ao Gi
 
 **Próximo passo (fatia 3):** botão "Compartilhar tela" (`getDisplayMedia`), `screen_request`/`captureId` de uso único, rota `POST .../screen` que autentica e consome ANTES de gravar, JPEG ≤ 3 MiB validado, limpeza em todas as saídas. Depois: fatia 4 (visão local no worker, `mlx-vlm` com revisão fixada no setup, carga/descarga, prazo de 90 s), fatia 5 (Gemini por autorização + `RODRIGO_CLOUD_VISION` + cartão). Critérios HV.1–HV.14 em `docs/phase-vision-v3.md` §7 e §10.
 
+## 6c. Sessão de 2026-10-09 — o que foi feito, em ordem (e o que está quebrado agora)
+
+Commits novos em `main` desde o §6b (`git rev-list --count origin/main..HEAD` no §2 mostra quantos ainda não foram empurrados):
+- `ac09d4f`, `6e19437` NotebookLM do projeto atualizado (24 fontes do commit `6e19437`; README da pasta documenta a armadilha do `/tmp` symlink).
+- `ce48a79` **Fase V, fatia 3**: botão "Compartilhar tela" (`getDisplayMedia`) + protocolo de captura de uso único (HV.3, HV.4).
+- `99e6fbc` **fatia 3 — correções da auditoria de código** (Kimi K3, 5 achados, todos procedentes).
+- `4351778` **`docs/roadmap-2026-10-09.md` criado** — substitui o §7 do `docs/prompt-proxima-sessao-2026-10-02.md` como referência de objetivo e ordem das fases (o protocolo de trabalho em si, §6 daquele documento, continua valendo, inclusive o circuit breaker de 3+2 ciclos de auditoria). Ordem confirmada: V → F13 (resto, paralelo) → F14 → F15 → F16 → F17.
+- `307f695` roteiro passa a registrar a cadência de teste do usuário (tudo no final da fase, não fase a fase).
+
+**Planejamento de F14/F15/F16 (ver `docs/audits/phase-14-plan-audit-r1.md`, `phase-15-plan-audit-r1.md`, `phase-16-plan-audit-r1.md` e a fonte 15 deste notebook):**
+- **F14**: plano v1 → auditoria r1 → **APROVADO COM AJUSTES** → v2 (`docs/phase-14-v2.md`) incorpora os ajustes. Implementação já começou: `git status` (§2) mostra `mutatingTools.ts`, `privacy.ts`, `specialistAgents.ts`, `corpus.ts`, `worker.py`, `mlxWorkerEngine.ts`, `sessionManager.ts`, `types.ts`, `voiceProtocol.ts` modificados, mais o teste `src/backend/tools/__tests__/phase14.test.ts`. **Nada disso está commitado, e o `tsc` do servidor NÃO COMPILA agora** (§4: 177 erros, todos em `sessionManager.ts`, a partir da linha 591 — sintaxe quebrada, não lógica). Antes de continuar ou de confiar em qualquer medição desta fase, esse arquivo precisa ser consertado.
+- **F15**: plano v1 → auditoria r1 → **REFAZER** (achado principal: a camada de "leitura autônoma" incluía busca na web sem classificar como saída de dado pra nuvem — viola a política de privacidade; precisa separar Leitura Local Autônoma de Leitura Externa sob Aprovação). v2 (`docs/phase-15-v2.md`, 111 linhas) foi escrito e **se autodeclara** "Estado: Aprovado para implementação" — quem gerou esta fonte não achou o arquivo de auditoria da rodada 2 que confirme isso de forma independente; tratar como pendente até achar esse relatório ou rodar a auditoria. Arquivos novos não commitados: `src/backend/agents/subAgent.ts` (interface `ISubAgent`), `adapters.ts`, `openClawSubAgent.ts` (a ponte com o OpenClaw), teste `src/backend/__tests__/phase15.test.ts` (77 linhas).
+- **F16**: mesmo padrão da F15 — v1 REFAZER (`docs/audits/phase-16-plan-audit-r1.md`), v2 (`docs/phase-16-v2.md`) autodeclarado aprovado, sem auditoria r2 encontrada. Teste `src/backend/__tests__/phase16.test.ts` existe mas é só um esqueleto (24 linhas, contra 77 do da F15) — a F16 está visivelmente menos adiantada que a F15.
+
+**Decisões do usuário nesta sessão (literais, AskUserQuestion, 2026-10-09):**
+- Visão de "secretário completo": Drive, agenda, pesquisa web ampla, novas bases de conhecimento, acesso a sites, compras com aprovação final do usuário — "eu quero que ele realmente seja um secretário, um agente que automatize tudo".
+- Ordem: "Mantém a ordem de ontem primeiro (Recomendado)" — a prioridade de 2026-10-08 NÃO foi substituída; Drive/Agenda/pesquisa ampla/compras entram DEPOIS, como fases candidatas **F18** (integrações Google) e **F19** (assistente de compras), sem furar a fila V→F14→F15→F16→F17.
+- Compras: "Mantém a regra, mas com carrinho pronto (Recomendado)" — o app pode pesquisar, comparar e montar carrinho/link; quem aperta o botão final de pagamento é sempre o usuário, nunca o app. A regra dura de "nenhuma ação financeira fora de escopo" (`docs/prompt-proxima-sessao-2026-10-02.md` §1.4) não foi reaberta, só esclarecida.
+- Esclarecimento: "Ele precisa ser também o agente coordenador inteligente de todos os outros sub agentes" — **não é item novo**, é a própria F15 (coordenador único com interface `ISubAgent`: os 3 especialistas internos, as ferramentas mutantes, agentes externos via OpenClaw e, mais adiante, Drive/Agenda/pesquisa/compras — todos atrás da mesma interface, com orçamento e cancelamento cooperativo próprios).
+
+**Duas pendências de processo, não só de código:**
+1. O protocolo do projeto (§7) exige auditoria adversarial do plano antes de implementar. F14 tem essa auditoria documentada (r1, aprovado com ajustes). F15 e F16 só têm a auditoria do v1 (REFAZER); o v2 de ambas se autodeclara aprovado sem um relatório de rodada 2 que este gerador tenha encontrado. Confirmar com o usuário onde (ou se) essa auditoria aconteceu antes de tratar `subAgent.ts`/`adapters.ts`/`openClawSubAgent.ts` como implementação autorizada.
+2. O build do servidor não compila agora (ver §4 e a linha de F14 acima). Isso bloqueia `npm test`, `npm run build` e `npm start` até ser corrigido.
+
 ## 7. Como se trabalha neste projeto (regras do usuário)
 
 Fluxo obrigatório para mudança não trivial: escrever `docs/phase-N-vX.md` → **auditoria adversarial do plano** (outro modelo, sempre só-leitura; ver skill `auditoria-plano-codex`) → implementar só sem achados altos pendentes → verificar contra a realidade (testes + app real) → **auditoria do código** → registrar relatório de implementação → só então "pronto". Aprovação para implementar não é "pronto". Registrar CLI **e modelo** de cada auditor; a rotação é por modelo (a partir da 3ª rodada troca-se de auditor); um auditor que viu tudo não fecha o plano.
@@ -243,7 +270,9 @@ Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a audit
 
 - D-b (§6): manter a voz do Gemini nas confirmações que repetem o que ele ditou, ou deixá-las na voz do sistema.
 - Ouvir a voz nova (H13a.10) e colar as linhas `[timing]`.
-- Ponte com o OpenClaw (F15): saída nova de dados, precisa de plano e aprovação.
+- **Build quebrado**: `sessionManager.ts` não compila (ver §4, §6c) — provavelmente precisa de conserto antes de qualquer outra coisa.
+- **F15/F16**: confirmar se a auditoria da rodada 2 dos planos v2 (ambos autodeclarados "Aprovado para implementação") de fato aconteceu, ou se falta rodá-la antes de confiar na implementação já começada (`subAgent.ts` etc.) — ver §6c.
+- **Trabalho não commitado** (9 arquivos modificados + ~16 novos, entre F14/F15/F16): decidir quando commitar, mesmo em passos intermediários, para não arriscar perder.
 - Se vale pagar o Nível 2 do Google (US$ 100 + 3 dias) para sair do limite de 100 pedidos/dia; ele disse "nivel 1" e achou o custo mensal "caro" (estimativa: ~US$ 5 a 11/mês a 20 min de fala por dia com o modelo escolhido).
 - Os 4 arquivos de agente na raiz: apagar ou ignorar no git.
 - Dívidas 5b/5c e F11 (alvos de cobertura abertos) e a medição com voz real da F11.
@@ -254,16 +283,17 @@ Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a audit
 2. `CLAUDE.md` e `README.md` do projeto (o `CLAUDE.md` é a descrição densa de arquitetura e restrições, atualizada até a Fase 13a).
 3. Memória do agente (decisões do usuário e regras de auditoria).
 4. `rodrigo-ai-architecture-digest-2026-09-28` — resumo extenso da arquitetura até a Fase 10 (**anterior à Fase 12/13a; use o `CLAUDE.md` para o estado atual**).
-5. Handoffs e prompt de continuação (2026-09-15 a 2026-10-06) — história; o do 2026-10-06 descreve a F11 e o roteiro F12–F17.
+5. Handoffs e prompt de continuação (2026-09-15 a 2026-10-06) — história; o do 2026-10-06 descreve a F11 e o roteiro F12–F17 (**superado pela fonte 7 abaixo para ordem/objetivo de fase a partir de 2026-10-09**).
 6. Planos e relatórios de implementação por fase; planos finais; auditorias da 13a; **Fase V (visão da tela) e 13b com auditorias** (fonte 14).
-7. Código: backend de voz, núcleo do backend, worker Python, frontend e shared, scripts e configuração, testes da Fase 13a, testes da Fase V (fonte 28), lista de todos os testes.
+7. **`docs/roadmap-2026-10-09.md` (roteiro oficial vigente) e os planos/auditorias de F14, F15 e F16** (fonte 15) — use esta fonte, não a 5 ou a 6, para a ordem e o objetivo de cada fase a partir daqui.
+8. Código: backend de voz, núcleo do backend, worker Python, frontend e shared, scripts e configuração, testes da Fase 13a, testes da Fase V (fonte 28), testes das Fases 14–16 em andamento (fonte 29), lista de todos os testes.
 
 Para o estado de cada decisão, o `CLAUDE.md` e `docs/implementation-phase-13a.md` valem mais que um plano antigo; planos `vN` antigos de uma fase são história (as rodadas de auditoria que os derrubaram estão nos relatórios).
 """
 (OUT / "00-LEIA-PRIMEIRO-handoff.md").write_text(handoff, encoding="utf-8")
 
 # ---------------------------------------------------------------- 01..03 documentos centrais
-(OUT / "01-CLAUDE-md-do-projeto.md").write_text("# CLAUDE.md do projeto Rodrigo AI (instruções e arquitetura densas; texto até a Fase 13a — o que veio depois está no handoff 00, §6b)\n\n" + read("CLAUDE.md"), encoding="utf-8")
+(OUT / "01-CLAUDE-md-do-projeto.md").write_text("# CLAUDE.md do projeto Rodrigo AI (instruções e arquitetura densas; texto até a Fase 13a — o que veio depois está no handoff 00, §6b e §6c, e no roteiro oficial na fonte 15)\n\n" + read("CLAUDE.md"), encoding="utf-8")
 (OUT / "02-README-do-projeto.md").write_text("# README do projeto Rodrigo AI\n\n" + read("README.md"), encoding="utf-8")
 
 mem_parts = ["# Memória do agente (notas persistentes de sessões anteriores)\n\nDecisões e regras que o usuário deu ao longo do trabalho. São a memória de projeto mantida pelo agente anterior.\n"]
@@ -301,7 +331,15 @@ docs_bundle("13-correcoes-e-consultas.md", "Correções de defeitos e consultas 
 docs_bundle("14-fase-V-visao-e-13b.md", "Fase V (visão da tela) e Fase 13b — planos e auditorias de 2026-10-08",
     "Plano v3 da visão (vale; §10 prevalece), v2 e v1 com as auditorias que os derrubaram; plano 13b de juntar fragmentos (REPROVADO) e sua auditoria; auditorias de código da 13a e da fatia 2 da visão.",
     ["docs/phase-vision-v3.md", "docs/audits/vision-plan-agy-r2-2026-10-08.md", "docs/phase-vision-v2.md", "docs/audits/vision-plan-codex-r1-2026-10-08.md", "docs/phase-vision-v1.md",
-     "docs/phase-13b-v1.md", "docs/audits/f13b-plan-codex-2026-10-08.md", "docs/audits/f13a-code-audit-kimi-k3-2026-10-08.md", "docs/audits/fv2-code-kimi-k3-2026-10-08.md"])
+     "docs/phase-13b-v1.md", "docs/audits/f13b-plan-codex-2026-10-08.md", "docs/audits/f13a-code-audit-kimi-k3-2026-10-08.md", "docs/audits/fv2-code-kimi-k3-2026-10-08.md",
+     "docs/audits/fv3-code-kimi-k3-2026-10-08.md"])
+
+docs_bundle("15-roteiro-oficial-e-planos-f14-f16.md", "Roteiro oficial vigente (2026-10-09) e planos/auditorias de F14, F15 e F16",
+    "`docs/roadmap-2026-10-09.md` substitui o §7 do prompt de continuação como referência de objetivo e ordem das fases; vale até o usuário mudar. F14: v1->v2, auditoria r1 (aprovado com ajustes), implementacao ja comecada (ver handoff §6c). F15 e F16: v1 (REFAZER) e v2 (autodeclarado aprovado — ver handoff §6c sobre a falta de uma auditoria r2 confirmada).",
+    ["docs/roadmap-2026-10-09.md",
+     "docs/phase-14-v1.md", "docs/phase-14-v2.md", "docs/audits/phase-14-plan-audit-r1.md",
+     "docs/phase-15-v1.md", "docs/phase-15-v2.md", "docs/audits/phase-15-plan-audit-r1.md",
+     "docs/phase-16-v1.md", "docs/phase-16-v2.md", "docs/audits/phase-16-plan-audit-r1.md"])
 
 # ---------------------------------------------------------------- código
 def listing(patterns):
@@ -327,6 +365,10 @@ bundle("26-testes-da-fase-13a.md", "Testes da Fase 13a (TTS)", "Orçamento, prov
 
 bundle("28-testes-da-fase-V.md", "Testes da Fase V (visão da tela), fatias 1 e 2", "Cancelamento de comandos na fila do worker (Python) e turno de tela isolado do Gemini (Node).",
        ["src/backend/__tests__/fvScreen.test.ts", "scripts/worker/test_cancel_queue.py"])
+
+bundle("29-testes-das-fases-14-a-16.md", "Testes das Fases 14, 15 e 16 — em andamento, não commitados",
+       "F14 tem o teste mais desenvolvido; F15 tem um esqueleto maior (77 linhas) que o da F16 (24 linhas). Nenhuma das tres fases tem implementacao madura ainda, e o build do servidor nao compila agora (ver handoff §4 e §6c) — tratar como rascunho, nao como cobertura validada.",
+       ["src/backend/tools/__tests__/phase14.test.ts", "src/backend/__tests__/phase15.test.ts", "src/backend/__tests__/phase16.test.ts"])
 
 # lista de todos os títulos de teste (para o agente saber o que já está coberto)
 titles = ["# Lista de todos os testes Node (títulos)\n\nGerada por `grep` nos arquivos `*.test.ts`. Serve para saber o que já está coberto antes de escrever um teste novo.\n"]
