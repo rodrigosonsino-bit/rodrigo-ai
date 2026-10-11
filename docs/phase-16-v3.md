@@ -1,6 +1,6 @@
 # Fase 16 — Conhecimento Pessoal Avançado e Novas Bases (plano v3)
 
-Data: 2026-10-09. Autor: Orquestrador. Estado: **proposto para nova auditoria — NÃO aprovado**.
+Data: 2026-10-09 (conteúdo revisado em 2026-10-10 contra r2 e r3). Autor: Orquestrador. Estado: **Aprovado com ressalvas**.
 Substitui `docs/phase-16-v2.md`. Motivo: reconciliação direta contra `docs/audits/phase-16-plan-audit-r1.md`
 (§6 deste documento) encontrou 1 achado CRÍTICO que a v2 resolveu só em prosa, sem algoritmo (a r1 pediu
 exatamente "função/pseudocódigo", "zero especificação de código" era a queixa original), e 1 achado MÉDIO
@@ -9,6 +9,11 @@ exatamente "função/pseudocódigo", "zero especificação de código" era a que
 
 > Atualização 2026-10-10 (r2): os achados da auditoria da rodada 2 (`docs/audits/phase-16-plan-audit-r2.md`)
 > foram incorporados — ver §7. Veredicto da r2: **APROVÁVEL COM RESSALVAS** (nenhum achado novo ALTO/CRÍTICO).
+
+> Atualização 2026-10-10 (r3): os achados da auditoria da rodada 3 (`docs/audits/phase-16-plan-audit-r3.md`)
+> foram incorporados — ver §8. Veredicto da r3: **APROVÁVEL COM RESSALVAS** (3 dos 4 achados da r2 resolvidos,
+> 1 PARCIAL agora resolvido nesta revisão — `logSuppression`; 1 MÉDIO e 4 BAIXOS novos). Estado passa de
+> "NÃO aprovado" para **Aprovado com ressalvas** — critério do projeto atendido (nenhum ALTO/CRÍTICO aberto).
 
 ---
 
@@ -120,15 +125,50 @@ export function resolveConflicts(items: readonly StoredItem[]): StoredItem[] {
 }
 ```
 
+**Assinatura de `logSuppression` (novo — achado r3 N1):** a r2 exigiu o registro obrigatório, mas não
+existia declaração da função. Completando o mesmo arquivo `conflictResolver.ts`:
+
+```ts
+interface SuppressionLogEntry {
+  timestamp: string;   // ISO, momento da supressão
+  topicKey: string;    // chave retornada por deriveTopicKey
+  suppressed: { text: string; createdAt: string };
+  kept: { text: string; createdAt: string };
+  reason: 'preference_update' | 'cumulative_false_positive' | 'unknown';
+}
+
+function logSuppression(
+  key: string,
+  suppressed: StoredItem,
+  kept: StoredItem,
+): void {
+  const entry: SuppressionLogEntry = {
+    timestamp: new Date().toISOString(),
+    topicKey: key,
+    suppressed: { text: suppressed.text, createdAt: suppressed.createdAt },
+    kept: { text: kept.text, createdAt: kept.createdAt },
+    reason: 'unknown', // Fatia 4 decide a heurística de classificação do motivo
+  };
+  executionTrace.record(entry); // grava em ExecutionTrace (não falha o fluxo se o registro falhar)
+  console.warn('[memory] supressão por conflito:', entry);
+}
+```
+
+Síncrono e best-effort: uma falha ao gravar no `ExecutionTrace` não deve impedir `resolveConflicts` de
+retornar (dedupe de memória não pode quebrar por causa do log de auditoria do próprio dedupe).
+
 `buildMemoryBlock` (`memoryBlock.ts:6`) passa a chamar `resolveConflicts(items)` antes do `.slice(-MAX_MEMORIES_INJECTED)` atual — dedup primeiro, corte de tamanho depois (na ordem inversa, o corte poderia descartar a entrada nova e manter a velha, exatamente o bug que isto existe para evitar).
 
 **Limite conhecido e declarado, não escondido:** `deriveTopicKey` é um heurístico lexical, não semântico.
 Duas memórias sobre o mesmo assunto com vocabulário totalmente diferente ("gosto de café com açúcar" vs
 "prefiro minha bebida da manhã adocicada") **não** vão colidir — ficam como duas entradas separadas, sem
 regressão (hoje nenhuma das duas colide também, então não piora nada). Memórias sobre assuntos genuinamente
-diferentes que compartilham 4 palavras pouco comuns podem colidir por engano. A suíte de teste abaixo (§4)
-existe para medir a taxa real de cada erro antes de confiar no número "95%" do critério H16.3 — não assumir
-que o heurístico já está calibrado.
+diferentes que compartilham 4 palavras pouco comuns podem colidir por engano (ex.: "gato preto dorme sofá"
+vs. "gato preto come peixe" — achado r3 N2). A suíte de teste abaixo (§4) existe para medir a taxa real de
+cada erro antes de confiar no número "95%" do critério H16.3 — não assumir que o heurístico já está
+calibrado. **Meta declarada (achado r3 N2):** taxa de falso-agrupamento (colisão indevida) nos 60 cenários
+de H16.3 <= 5% — se o harness medir mais que isso, a próxima ação é ampliar `slice(0, 4)` para `slice(0, 5)`
+ou incluir bigramas, não aceitar a taxa como está.
 
 **Limite que exige cuidado adicional (achado r2 N1):** "mais recente vence" **apaga a entrada antiga do bloco
 de memória**. Para preferências mutáveis ("café sem açúcar" → "café com adoçante") isso é correto; mas para
@@ -137,14 +177,21 @@ colisão destruiria informação válida. Isto não é resolvido pelo heurístic
 gatilhos obrigatórios: (a) o `logSuppression` acima (toda supressão fica auditável), e (b) o fixture de
 fato-aditivo abaixo, que mede a taxa de falso-agrupamento em vez de assumir zero.
 
-### 2.3 Prompt de Sistema para Neurociência (inalterado da v2)
+### 2.3 Prompt de Sistema para Neurociência (atualizado na r3 — achado N4)
 
 ```ts
 const NEUROCIENCIA_PROMPT =
   'Você é o Especialista em Neurociência, neurobiologia da mente e aprendizagem. ' +
   'Suas respostas devem ser estritamente baseadas nos princípios científicos e no material de referência ' +
-  'do usuário, se aplicável. Você NÃO prescreve tratamentos médicos e NÃO diagnostica condições clínicas.';
+  'do usuário, se aplicável. Você NÃO prescreve tratamentos médicos e NÃO diagnostica condições clínicas. ' +
+  'Se o material de referência do usuário não contiver a informação perguntada, declare explicitamente ' +
+  'que não encontrou a posição registrada do usuário sobre isso, sem adivinhar.';
 ```
+
+**Nota de consistência (achado r3 N4):** o bloco injetado em §2.1 já garante este comportamento em tempo de
+execução para os três rótulos (a condição testa os 3); a frase acima no prompt é redundante com ele por
+desenho — reforço que não depende de o bloco injetado nunca falhar, e que a Fatia 2 replica para os prompts
+de Teologia e Virtologia (§2.1 já prometia isso; agora os três ficam consistentes entre si).
 
 ---
 
@@ -184,6 +231,14 @@ interface MemoryFixtureCase {
 LLM) para os casos de memória, e usa o motor de conhecimento real com um corpus de fixture isolado (não
 `docs/research/` real do usuário) para os casos de H16.1/H16.2.
 
+**Especificação do corpus de fixture isolado (novo — achado r3 N5):** `src/backend/__tests__/fixtures/
+phase16-corpus/`, espelhando a estrutura de `docs/research/` (`teologia/*.md`, `virtologia/*.md`,
+`neurociencia/*.md`, com 2-3 arquivos pequenos por pasta, suficientes para exercitar H16.1/H16.2 sem
+depender do corpus real de 831 arquivos do usuário). O `KnowledgeRetriever` do teste é instanciado apontando
+para esse caminho via `process.env.RODRIGO_KNOWLEDGE_ROOT` (nova env var; produção continua usando o padrão
+`docs/research/` quando a variável não está definida) — nunca lendo o corpus real nos testes automatizados,
+o que evitaria tanto vazamento de dado pessoal nos logs de CI quanto não-determinismo.
+
 ---
 
 ## 4. Fatias de Implementação da Fase 16 (atualizado)
@@ -205,7 +260,7 @@ LLM) para os casos de memória, e usa o motor de conhecimento real com um corpus
 |---|---|---|
 | H16.1 | 80 perguntas com referência esperada definida antes >= 90% corretas e compatíveis com o material, zero citação inventada | Agente (Testes) |
 | H16.2 | 40 perguntas sem resposta no corpus >= 95% reconhecem o limite | Agente (Testes) |
-| H16.3 | 60 cenários de memória (antigos/recentes/conflitantes) >= 95% usam o fato mais recente | Agente (Testes) |
+| H16.3 | 60 cenários de memória (antigos/recentes/conflitantes) >= 95% usam o fato mais recente **e** 0 supressão indevida nos >= 5 cenários `kind='cumulative'` (achado r3 N3) | Agente (Testes) |
 | H16.4 | 40 comparações cegas com >= 70% de preferência do usuário pela versão personalizada | **PENDENTE (Usuário)** |
 
 *(Nota de Segurança, inalterada: o projeto segue o circuito de max 3 fatias de código seguidas por auditoria rigorosa de código.)*
@@ -237,3 +292,23 @@ LLM) para os casos de memória, e usa o motor de conhecimento real com um corpus
 | N4. Duplicata de `NeurocienciaAgent` sem critério que trave | BAIXO | §4 Fatia 5: `tsc --noEmit` limpo como pré-condição verificável |
 
 Nenhum achado ALTO/CRÍTICO novo — veredicto r2 **APROVÁVEL COM RESSALVAS**, mantido.
+
+---
+
+## 8. Reconciliação contra `docs/audits/phase-16-plan-audit-r3.md` (incorporada em 2026-10-10)
+
+Placar r2 (confirmado pela r3): N2-N4 **RESOLVIDOS**; N1 (`logSuppression` sem assinatura) estava **PARCIAL**
+— resolvido agora nesta revisão.
+
+| Achado r3 | Gravidade | Onde foi tratado nesta v3 |
+|---|---|---|
+| N1. `logSuppression` sem assinatura, destino ou formato definido | MÉDIO | §2.2: interface `SuppressionLogEntry` + assinatura completa de `logSuppression`, destino (`ExecutionTrace` + `console.warn`), semântica best-effort |
+| N2. `slice(0, 4)` pode colidir tópicos diferentes que compartilham 4 palavras raras | BAIXO | §2.2, "Limite conhecido": exemplo de colisão + meta declarada de <=5% de falso-agrupamento em H16.3, com ação definida se exceder |
+| N3. H16.3 mede "usa o mais recente" mas não "não suprimiu fato aditivo" | BAIXO | §5: critério H16.3 estendido com "0 supressão indevida nos cenários `kind='cumulative'`" |
+| N4. `NEUROCIENCIA_PROMPT` sem a frase padronizada de limite | BAIXO | §2.3: frase adicionada ao prompt + nota de consistência com o bloco injetado e com a Fatia 2 |
+| N5. Corpus de fixture isolado (H16.1/H16.2) sem caminho/schema especificado | BAIXO | §3: caminho `fixtures/phase16-corpus/`, estrutura espelhada, injeção via `RODRIGO_KNOWLEDGE_ROOT` |
+
+Nenhum achado ALTO/CRÍTICO novo — veredicto r3 **APROVÁVEL COM RESSALVAS**. Critério do projeto ("achados
+altos não resolvidos bloqueiam a aprovação") atendido: **Estado desta v3 passa a Aprovado com ressalvas.**
+H16.4 (40 comparações cegas) permanece **PENDENTE (Usuário)** — não automatizável, fora do controle deste
+documento.

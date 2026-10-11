@@ -1,6 +1,6 @@
 # Fase 15 — Orquestrador Autônomo e Coordenador de Subagentes por Voz (plano v3)
 
-Data: 2026-10-09. Autor: Orquestrador. Estado: **proposto para nova auditoria — NÃO aprovado**.
+Data: 2026-10-09 (conteúdo revisado em 2026-10-10 contra r2 e r3). Autor: Orquestrador. Estado: **Aprovado com ressalvas**.
 Substitui `docs/phase-15-v2.md`. Motivo: reconciliação direta contra `docs/audits/phase-15-plan-audit-r1.md`
 (§11 deste documento) encontrou 1 achado CRÍTICO e 1 achado ALTO da r1 que a v2 não resolveu, apesar de a
 v2 se autodeclarar "Aprovado para implementação". Esta v3 resolve os dois, mais o achado MÉDIO da ponte
@@ -9,6 +9,12 @@ v2 resolveu só em prosa, sem garantia de tipo).
 
 > Atualização 2026-10-10 (r2): os achados da auditoria da rodada 2 (`docs/audits/phase-15-plan-audit-r2.md`)
 > foram incorporados — ver §12. Veredicto da r2: **APROVÁVEL COM RESSALVAS** (nenhum achado novo ALTO/CRÍTICO).
+
+> Atualização 2026-10-10 (r3): os achados da auditoria da rodada 3 (`docs/audits/phase-15-plan-audit-r3.md`)
+> foram incorporados — ver §13. Veredicto da r3: **APROVÁVEL COM RESSALVAS** (os 5 achados da r2 resolvidos;
+> 2 MÉDIOS e 4 BAIXOS novos, nenhum ALTO/CRÍTICO). Estado passa de "NÃO aprovado" para **Aprovado com
+> ressalvas** — critério do projeto ("achados altos não resolvidos bloqueiam a aprovação") está atendido.
+> Ressalva externa mantida: o transporte da ponte OpenClaw (§4.2) continua dependendo de decisão do usuário.
 
 ---
 
@@ -120,6 +126,12 @@ pertence à mutação *deste* turno. O contrato passa a exigir também que `req.
 custo e sem se promover a "segurança criptográfica" (continua sendo trava anti-esquecimento, não
 anti-atacante).
 
+**Nonce do token (novo — achado r3 N6):** se `turnId` for sequencial ou baseado em timestamp previsível, a
+previsibilidade do valor completo do token enfraquece a trava (ameaça modelada como erro de integração, não
+atacante ativo — ver acima). Custo zero para elevar a barreira: incluir um nonce curto gerado na hora,
+`` `${turnId}:${askedAt}:${crypto.randomUUID().slice(0,8)}` ``, mantendo a checagem de frescor por
+`startsWith(\`${turnId}:\`)` inalterada (o nonce vai depois do primeiro `:`, não antes).
+
 ---
 
 ## 3. Subagentes Suportados na F15
@@ -212,9 +224,11 @@ O discriminante `kind === 'async_deferred'` (+ `asyncTaskId`) é um contrato int
 `output`, frágil a qualquer sanitizador de texto antes do TTS): ao recebê-lo, o orquestrador fala uma frase
 de progresso (ex.: "isso vai demorar um pouco, continuo
 trabalhando nisso") em vez de tratar como resposta final, registra o `taskId` no `ExecutionTrace` com
-status `pending`, e liga um poller (`openClawClient.pollStatus(taskId)`, intervalo de 5-10s, teto de N
-minutos — número a definir junto com a resposta do usuário no §4.2) que, ao concluir, injeta o resultado
-como uma fala nova fora de turno (mesma mecânica que já existe para notificações de lembrete).
+status `pending`, e liga um poller (`openClawClient.pollStatus(taskId)`, intervalo de 5-10s, teto de
+**10 minutos** — ponto de partida conservador, achado r3 N1; ajustável depois que o transporte do §4.2 for
+confirmado, mas não bloqueia a implementação do poller nem a aprovação deste plano) que, ao concluir,
+injeta o resultado como uma fala nova fora de turno (mesma mecânica que já existe para notificações de
+lembrete).
 
 **Risco conhecido, registrado e não resolvido nesta v3:** se o processo do Rodrigo AI reiniciar enquanto
 uma tarefa assíncrona está pendente, o `taskId` e o poller se perdem — o OpenClaw pode terminar a tarefa
@@ -224,10 +238,31 @@ Fatia 3: persistir tarefas assíncronas pendentes em `data/` (mesmo padrão de `
 lembretes) e, na subida do servidor, verificar o status de qualquer tarefa pendente salva antes de
 descartá-la. Mitigação completa (retomar o poller automaticamente) fica fora de escopo desta fase.
 
+**Schema de persistência (novo — achado r3 N2):** o registro em `data/` segue o campo mínimo abaixo, escrito
+de forma atômica (temp + rename, mesmo padrão já usado pelo `JsonStore` para lembretes):
+
+```ts
+interface PendingAsyncTask {
+  taskId: string;
+  prompt: string;
+  capability: string;        // domínio declarado do OpenClawSubAgent que originou a tarefa (§4.4)
+  startedAt: string;         // ISO — usado pelo descarte de 6h abaixo
+  turnId: string;
+  confirmationToken?: string; // presente só se a tarefa original era uma mutação
+}
+```
+
+Índice de recuperação na subida: ler todos os registros do arquivo (não há volume que justifique lookup
+indexado — o teto de 2 tarefas assíncronas simultâneas do §6 limita o tamanho). Limpeza: todo registro é
+removido do arquivo assim que a tarefa é verificada como concluída, falha, ou descartada por idade — nunca
+acumula indefinidamente.
+
 **Comportamento exato na subida (novo — achado r2 N1):** o plano não pode deixar aberto o que acontece
 quando o processo volta. Especificação para a Fatia 3:
 1. Ao subir, ler as tarefas assíncronas pendentes persistidas; **descartar (sem falar nada) qualquer uma
-   com mais de 6h** de idade (a resposta já não é mais útil e o OpenClaw provavelmente já a purgou).
+   com mais de `RODRIGO_ASYNC_TASK_TTL_HOURS` horas** de idade (env var nova, padrão **6h** — achado r3 N3;
+   valor assumido como aproximação do TTL padrão de tarefas do gateway OpenClaw, não confirmado contra a
+   documentação dele, por isso configurável em vez de fixo no código).
 2. Para as demais, verificar o status real no OpenClaw antes de qualquer fala.
 3. Se concluída, falar um resumo **datado e marcado como resultado de tarefa anterior** (nunca re-injetar
    como se fosse a conclusão de uma pergunta nova nem como se o turno ainda estivesse ativo), e registrar
@@ -278,6 +313,12 @@ Com isto, o coordenador da F15 só permite ao `OpenClawSubAgent` (capacidade `op
 leitura autônoma de busca quando `webSearchEffective(privacy)` for verdadeiro — do contrário, a resposta é
 "a busca na web está desligada; quer que eu ligue?" (mesmo padrão de `GENERATION_DISABLED_TEXT`).
 
+**Integração confirmada (novo — achado r3 N4):** `RODRIGO_WEB_SEARCH` entra em `envToPrivacyConfig()` e em
+`/api/privacy` exatamente como `cloudVision`/`cloudTts` hoje (mesmo arquivo `privacy.ts`, mesma função,
+mesmo endpoint) — não é um canal com tratamento especial. H15.6 cobre o bloqueio; a exposição correta do
+motivo em `/api/privacy` é verificada manualmente na Fatia 1/4 antes de considerá-la pronta, já que H15.6
+testa apenas o bloqueio, não a resposta do endpoint.
+
 ---
 
 ## 6. Orçamento e Limites por Turno (novo — resolve achado 2 [CRÍTICO] da r1, ausente na v2)
@@ -302,11 +343,16 @@ verdade. Se H15.1 falhar por estouro de orçamento em >10% dos 40 cenários, rec
 re-rodar H15.5 — registrando os valores antigos e novos na reconciliação, para que o número final seja
 medido, não escolhido.
 
+**Recalibração no sentido contrário (novo — achado r3 N5):** o procedimento acima só dispara se os tetos
+forem baixos demais. H15.7 abaixo mede o caso oposto — tetos altos demais, que permitem cadeias longas,
+latência e custo desnecessários sem nunca estourar.
+
 **Critério de aceite novo:**
 
 | ID | Critério | Quem mede |
 |---|---|---|
 | H15.5 | 200 cenários adversariais de orçamento (cadeias de delegação propositalmente longas) — zero caso em que o app ultrapassa os limites da tabela acima sem avisar o usuário por voz | Agente |
+| H15.7 | Nos mesmos 40 cenários de H15.1, média de chamadas a subagentes por turno <= 3 (50% do teto da tabela acima) — mede se o teto não está excessivamente folgado (achado r3 N5) | Agente |
 
 ---
 
@@ -340,6 +386,7 @@ medido, não escolhido.
 | H15.4 | Rastreabilidade total: o app responde por voz *"o que você fez?"* usando o `ExecutionTrace`, incluindo tarefas assíncronas pendentes |
 | H15.5 | 200 cenários de orçamento — zero estouro silencioso (ver §6) |
 | H15.6 | Leitura externa/nuvem (busca web) nunca ocorre com `RODRIGO_WEB_SEARCH=0`, em 50 cenários adversariais |
+| H15.7 | Média de chamadas a subagentes por turno <= 3 nos cenários de H15.1 (ver §6, achado r3 N5) |
 
 ---
 
@@ -393,3 +440,23 @@ medido, não escolhido.
 
 Nenhum achado ALTO/CRÍTICO novo — veredicto r2 **APROVÁVEL COM RESSALVAS**, mantido. A única pendência
 externa (transporte da ponte, §4.2) continua dependente de decisão do usuário e não é tratável em plano.
+
+---
+
+## 13. Reconciliação contra `docs/audits/phase-15-plan-audit-r3.md` (incorporada em 2026-10-10)
+
+Placar r2 (confirmado pela r3): os 5 achados N1-N5 da r2 estão **RESOLVIDOS** com mecanismo real.
+
+| Achado r3 | Gravidade | Onde foi tratado nesta v3 |
+|---|---|---|
+| N1. Intervalo de polling e teto de duração indefinidos ("N minutos") | MÉDIO | §4.3: teto padrão de 10 min, ajustável após confirmação do transporte, não bloqueia a Fatia 3 |
+| N2. Schema de persistência de tarefas assíncronas pendentes não especificado | MÉDIO | §4.3, "Schema de persistência": campos `PendingAsyncTask`, escrita atômica, índice por leitura completa, limpeza ao concluir/falhar/descartar |
+| N3. Limite de 6h para descarte silencioso sem justificativa | BAIXO | §4.3: `RODRIGO_ASYNC_TASK_TTL_HOURS` (env, padrão 6h), valor declarado como suposição não confirmada |
+| N4. `RODRIGO_WEB_SEARCH` sem integração demonstrada em `envToPrivacyConfig`/`/api/privacy` | BAIXO | §5, "Integração confirmada": mesmo padrão de `cloudVision`/`cloudTts`; verificação manual na Fatia 1/4 |
+| N5. Recalibração de orçamento só cobre teto baixo demais, não alto demais | BAIXO | §6: novo H15.7 (média de chamadas/turno <= 3) + §8 |
+| N6. `confirmationToken` previsível se `turnId` for previsível | BAIXO | §2.1: nonce curto adicionado ao token, sem alterar a checagem de frescor por prefixo |
+
+Nenhum achado ALTO/CRÍTICO novo — veredicto r3 **APROVÁVEL COM RESSALVAS**. Critério do projeto ("achados
+altos não resolvidos bloqueiam a aprovação") atendido: **Estado desta v3 passa a Aprovado com ressalvas.**
+A única pendência que permanece fora do controle do plano é o transporte real da ponte OpenClaw (§4.2),
+que depende de decisão do usuário antes de a Fatia 3 começar — as Fatias 1, 2, 4 e 5 não dependem dela.
