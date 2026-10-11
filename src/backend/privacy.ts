@@ -26,6 +26,11 @@ export interface PrivacyConfig {
   readonly ttsDictated: boolean;
   /** Fase V — RODRIGO_CLOUD_VISION: envio da imagem da tela ao Gemini sob autorização explícita na fala. */
   readonly cloudVision: boolean;
+  /**
+   * Fase 15 — RODRIGO_WEB_SEARCH: leitura externa/nuvem autônoma (busca web via OpenClaw).
+   * Padrão 0 — nunca autônoma sem ligar o canal explicitamente (docs/phase-15-v3.md §5).
+   */
+  readonly webSearch: boolean;
 }
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
@@ -57,6 +62,26 @@ export function ttsDictatedViaCloud(cfg: PrivacyConfig): boolean {
 
 export const GENERATION_DISABLED_TEXT =
   'A geração de respostas em nuvem está desligada. Posso usar só as ferramentas locais, como hora, data, lembretes e notas.';
+
+/** Fase 15 §5 — busca web desligada (mesmo padrão de fala honesta de GENERATION_DISABLED_TEXT). */
+export const WEB_SEARCH_DISABLED_TEXT =
+  'A busca na web está desligada; quer que eu ligue?';
+
+/**
+ * Fase 15 §5: busca web só com o mestre ligado E o canal RODRIGO_WEB_SEARCH=1.
+ * Espelha a regra efetiva de cloudVision/cloudTts (mestre + sub-canal).
+ */
+export function webSearchEffective(cfg: PrivacyConfig): boolean {
+  return cfg.cloud && cfg.webSearch;
+}
+
+export type WebSearchOffReason = 'master-off' | 'channel-off';
+
+export function webSearchOffReason(cfg: PrivacyConfig): WebSearchOffReason | null {
+  if (!cfg.cloud) return 'master-off';
+  if (!cfg.webSearch) return 'channel-off';
+  return null;
+}
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -93,9 +118,16 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false),
     cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),
     ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true),
-    cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', true)
+    cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', true),
+    webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false)
   };
 }
+
+/**
+ * Alias estável citado no plano F15 (envToPrivacyConfig) — mesma função que parsePrivacyConfig.
+ * Preferir parsePrivacyConfig em código novo; este nome existe para casar com a auditoria r3 N4.
+ */
+export const envToPrivacyConfig = parsePrivacyConfig;
 
 /** Padrões de produção (sem variáveis definidas). */
 export const DEFAULT_PRIVACY: PrivacyConfig = parsePrivacyConfig({});
@@ -118,6 +150,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
   const key = env['GEMINI_API_KEY'];
   const intentOn = cfg.cloud && cfg.cloudIntent;
   const ttsOn = ttsCloudEffective(cfg);
+  const webOn = webSearchEffective(cfg);
   return {
     mode: cfg.cloud ? 'cloud' : 'local-only',
     intent: intentOn ? 'gemini' : 'local',
@@ -129,7 +162,8 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       memories: cfg.cloud && cfg.sendMemories,
       knowledgeSnippet: cfg.cloud && cfg.sendKnowledge,
       ttsText: ttsOn,
-      visionImage: cfg.cloud && cfg.cloudVision
+      visionImage: cfg.cloud && cfg.cloudVision,
+      webSearch: webOn
     },
     models: {
       generation: cfg.cloud ? 'gemini-flash-latest' : null,
@@ -137,6 +171,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       tts: ttsOn ? (env['RODRIGO_TTS_MODEL'] || TTS_DEFAULT_MODEL) : null
     },
     tts: { cloud: ttsOn, reason: ttsOffReason(cfg), dictatedViaCloud: ttsDictatedViaCloud(cfg) },
+    webSearch: { enabled: webOn, reason: webSearchOffReason(cfg) },
     neverSends: ['audio']
   };
 }

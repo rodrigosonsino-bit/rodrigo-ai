@@ -46,6 +46,8 @@ export interface PrivacyStatus {
     ttsText: boolean;
     /** Fase V: imagem da tela enviada ao Gemini somente com autorização explícita. */
     visionImage: boolean;
+    /** Fase 15: busca web autônoma via OpenClaw (mestre + RODRIGO_WEB_SEARCH). */
+    webSearch: boolean;
   };
   models: { generation: string | null; intent: string | null; tts: string | null };
   /** Fase 13a: estado EFETIVO do TTS em nuvem (a flag sozinha não basta; ver ttsCloudEffective). */
@@ -53,6 +55,11 @@ export interface PrivacyStatus {
     cloud: boolean;
     reason: 'master-off' | 'channel-off' | 'history-off' | null;
     dictatedViaCloud: boolean;
+  };
+  /** Fase 15: estado EFETIVO da busca web (mestre + canal; ver webSearchEffective). */
+  webSearch: {
+    enabled: boolean;
+    reason: 'master-off' | 'channel-off' | null;
   };
   neverSends: readonly ['audio'];
 }

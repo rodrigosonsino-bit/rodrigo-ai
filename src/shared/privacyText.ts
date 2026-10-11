@@ -69,6 +69,17 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
       : 'Os seus textos de pesquisa (Teologia e Virtologia) não são enviados ao Gemini.'
   );
 
+  if (status.webSearch.enabled) {
+    goes.push(
+      'Pedidos de busca na web podem sair deste computador via OpenClaw (canal RODRIGO_WEB_SEARCH ligado).'
+    );
+  } else if (status.webSearch.reason === 'channel-off') {
+    stays.push('A busca na web está desligada (RODRIGO_WEB_SEARCH=0).');
+  } else if (status.webSearch.reason === 'master-off') {
+    // modo local-only já retornou acima; este ramo é defensivo
+    stays.push('A busca na web está desligada porque a nuvem está desligada.');
+  }
+
   if (status.tts.cloud) {
     goes.push(
       'O texto de cada frase que o assistente vai falar vai ao Gemini para virar voz (o seu áudio nunca vai). Isso inclui frases que você interromper antes de ouvir até o fim.'

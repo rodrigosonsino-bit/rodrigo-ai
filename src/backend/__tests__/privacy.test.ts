@@ -22,7 +22,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       sendKnowledge: false,
       cloudTts: true,
       ttsDictated: true,
-      cloudVision: true
+      cloudVision: true,
+      webSearch: false
     });
   });
 
@@ -148,21 +149,23 @@ describe('effectivePrivacy (Fase 12)', () => {
       mode: 'cloud',
       intent: 'gemini',
       keyPresent: true,
-      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true, visionImage: true },
+      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true, visionImage: true, webSearch: false },
       models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
+      webSearch: { enabled: false, reason: 'channel-off' },
       neverSends: ['audio']
     };
     assert.deepEqual(st, gabarito);
   });
 
   it('mestre desligado: nada sai, mesmo com os sub-controles ligados', () => {
-    const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1' });
+    const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1', RODRIGO_WEB_SEARCH: '1' });
     assert.equal(st.mode, 'local-only');
     assert.equal(st.intent, 'local');
-    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false, visionImage: false });
+    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false, visionImage: false, webSearch: false });
     assert.deepEqual(st.models, { generation: null, intent: null, tts: null });
     assert.deepEqual(st.tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });
+    assert.deepEqual(st.webSearch, { enabled: false, reason: 'master-off' });
   });
 
   it('nunca expõe o valor da chave (nem tamanho): só keyPresent', () => {

@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OpenClawSubAgent } from '../agents/openClawSubAgent.js';
 import type { SubAgentTaskRequest } from '../agents/subAgent.js';
+import { DEFAULT_PRIVACY, WEB_SEARCH_DISABLED_TEXT, type PrivacyConfig } from '../privacy.js';
 
 const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:18789';
+const PRIVACY_WEB_ON: PrivacyConfig = { ...DEFAULT_PRIVACY, webSearch: true };
 
 function buildRequest(prompt: string): SubAgentTaskRequest {
   return {
@@ -41,7 +43,7 @@ test('F15 Fatia 3 (a): resposta curta concluída em <15s retorna kind final com 
       );
     }) as typeof fetch;
 
-    const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web']);
+    const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web'], PRIVACY_WEB_ON);
     assert.ok(agent);
 
     const result = await agent!.runTask(buildRequest('pesquise isso'), new AbortController().signal);
@@ -106,7 +108,7 @@ test('F15 Fatia 3 (b): timeout no curto retorna async_deferred com asyncTaskId',
       );
     }) as typeof fetch;
 
-    const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web']);
+    const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web'], PRIVACY_WEB_ON);
     assert.ok(agent);
 
     const result = await agent!.runTask(buildRequest('tarefa longa'), new AbortController().signal);
@@ -134,7 +136,10 @@ test('F15 Fatia 3 (c): sem token withHttpClient retorna null e runTask falha sem
     const maybeAgent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web']);
     assert.equal(maybeAgent, null);
 
-    const disconnected = new OpenClawSubAgent('openclaw_web', 'OpenClaw Web', ['openclaw_web']);
+    // webSearch ligado para passar o gate §5 e exercitar o caminho "sem cliente".
+    const disconnected = new OpenClawSubAgent('openclaw_web', 'OpenClaw Web', ['openclaw_web'], undefined, {
+      privacy: PRIVACY_WEB_ON
+    });
     const result = await disconnected.runTask(buildRequest('qualquer coisa'), new AbortController().signal);
     assert.equal(result.success, false);
     assert.equal(result.kind, 'final');
@@ -171,7 +176,7 @@ test('F15 Fatia 3 (d): AbortSignal externo retorna erro de cancelamento', async 
       });
     }) as typeof fetch;
 
-    const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web']);
+    const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web'], PRIVACY_WEB_ON);
     assert.ok(agent);
 
     const controller = new AbortController();
@@ -210,7 +215,7 @@ test('F15 Fatia 3 (e): HTTP 401 e 500 retornam erro honesto (sem sucesso falso)'
         );
       }) as typeof fetch;
 
-      const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web']);
+      const agent = OpenClawSubAgent.withHttpClient('openclaw_web', 'OpenClaw Web', ['openclaw_web'], PRIVACY_WEB_ON);
       assert.ok(agent);
 
       const result = await agent!.runTask(buildRequest(`teste ${status}`), new AbortController().signal);
@@ -226,5 +231,34 @@ test('F15 Fatia 3 (e): HTTP 401 e 500 retornam erro honesto (sem sucesso falso)'
     else process.env.RODRIGO_OPENCLAW_GATEWAY_TOKEN = originalToken;
     if (originalUrl === undefined) delete process.env.RODRIGO_OPENCLAW_GATEWAY_URL;
     else process.env.RODRIGO_OPENCLAW_GATEWAY_URL = originalUrl;
+  }
+});
+
+test('F15 §5: RODRIGO_WEB_SEARCH desligado responde a frase padrão (sem chamar o gateway)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalToken = process.env.RODRIGO_OPENCLAW_GATEWAY_TOKEN;
+  let fetchCalls = 0;
+  try {
+    process.env.RODRIGO_OPENCLAW_GATEWAY_TOKEN = 'token-abc';
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+
+    const agent = OpenClawSubAgent.withHttpClient(
+      'openclaw_web',
+      'OpenClaw Web',
+      ['openclaw_web'],
+      { ...DEFAULT_PRIVACY, webSearch: false }
+    );
+    assert.ok(agent);
+    const result = await agent!.runTask(buildRequest('pesquise algo'), new AbortController().signal);
+    assert.equal(result.success, true);
+    assert.equal(result.output, WEB_SEARCH_DISABLED_TEXT);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) delete process.env.RODRIGO_OPENCLAW_GATEWAY_TOKEN;
+    else process.env.RODRIGO_OPENCLAW_GATEWAY_TOKEN = originalToken;
   }
 });
