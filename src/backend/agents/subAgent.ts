@@ -1,4 +1,11 @@
-import type { OrchestratorLabel } from '../../shared/voiceProtocol.js';
+/** Tetos iniciais da Fase 15 §6 (ponto de partida; recalibração é Fatia 5). */
+export const SUBAGENT_BUDGET = {
+  MAX_CALLS_PER_TURN: 6,
+  MAX_ORCHESTRATION_MS: 60_000,
+  MAX_CONCURRENT_ASYNC: 2
+} as const;
+
+export type BudgetExceededReason = 'max_calls' | 'time' | 'max_async';
 
 export interface SubAgentTaskRequest {
   taskId: string;
@@ -52,11 +59,33 @@ export interface ExecutionTrace {
   turnId: string;
   query: string;
   tasks: TaskTraceItem[];
+  /** Contador de delegações tentadas neste turno (inclui as que passaram do orçamento). */
+  callCount: number;
+  /** Relógio (ms) da primeira delegação do turno — base do orçamento de 60s. */
+  orchestrationStartedAtMs?: number;
+  /** Preenchido quando qualquer teto do §6 estoura; nunca silencioso. */
+  budgetExceeded?: BudgetExceededReason;
+}
+
+/** Fala honesta obrigatória ao estourar qualquer teto do §6. */
+export function formatBudgetExceededSpeech(
+  coordinator: SubAgentCoordinator,
+  turnId: string
+): string {
+  const base =
+    'Não consegui terminar isso dentro do tempo/dos passos previstos; aqui está o que já fiz';
+  const summary = coordinator.formatTraceSummary(turnId);
+  if (!summary || summary.startsWith('Nenhuma ')) {
+    return base + '.';
+  }
+  return `${base}: ${summary}`;
 }
 
 export class SubAgentCoordinator {
   private readonly subAgents = new Map<string, ISubAgent>();
   private readonly traces = new Map<string, ExecutionTrace>();
+  /** taskIds assíncronos em voo nesta sessão (teto §6 = 2). */
+  private readonly asyncInFlight = new Set<string>();
 
   register(subAgent: ISubAgent): void {
     this.subAgents.set(subAgent.id, subAgent);
@@ -71,13 +100,77 @@ export class SubAgentCoordinator {
   }
 
   createTrace(turnId: string, query: string): ExecutionTrace {
-    const trace: ExecutionTrace = { turnId, query, tasks: [] };
+    const existing = this.traces.get(turnId);
+    if (existing) {
+      if (query && existing.query !== query) existing.query = query;
+      return existing;
+    }
+    const trace: ExecutionTrace = { turnId, query, tasks: [], callCount: 0 };
     this.traces.set(turnId, trace);
     return trace;
   }
 
   getTrace(turnId: string): ExecutionTrace | undefined {
     return this.traces.get(turnId);
+  }
+
+  activeAsyncCount(): number {
+    return this.asyncInFlight.size;
+  }
+
+  /**
+   * Reserva um slot de tarefa assíncrona. Idempotente por taskId.
+   * Retorna false se o teto de 2 já está cheio com outro taskId.
+   */
+  tryAcquireAsyncSlot(taskId: string): boolean {
+    if (this.asyncInFlight.has(taskId)) return true;
+    if (this.asyncInFlight.size >= SUBAGENT_BUDGET.MAX_CONCURRENT_ASYNC) return false;
+    this.asyncInFlight.add(taskId);
+    return true;
+  }
+
+  releaseAsyncSlot(taskId: string): void {
+    this.asyncInFlight.delete(taskId);
+  }
+
+  /**
+   * Checa e registra o orçamento de chamadas/tempo ANTES de invocar um subagente.
+   * Em estouro, grava `budgetExceeded` no ExecutionTrace e não incrementa o contador.
+   */
+  beginDelegation(
+    turnId: string,
+    query: string,
+    nowMs: number
+  ): { ok: true; trace: ExecutionTrace } | { ok: false; reason: BudgetExceededReason; trace: ExecutionTrace } {
+    const trace = this.createTrace(turnId, query);
+
+    if (trace.budgetExceeded) {
+      return { ok: false, reason: trace.budgetExceeded, trace };
+    }
+
+    if (trace.orchestrationStartedAtMs !== undefined) {
+      if (nowMs - trace.orchestrationStartedAtMs >= SUBAGENT_BUDGET.MAX_ORCHESTRATION_MS) {
+        trace.budgetExceeded = 'time';
+        return { ok: false, reason: 'time', trace };
+      }
+    }
+
+    if (trace.callCount >= SUBAGENT_BUDGET.MAX_CALLS_PER_TURN) {
+      trace.budgetExceeded = 'max_calls';
+      return { ok: false, reason: 'max_calls', trace };
+    }
+
+    if (trace.orchestrationStartedAtMs === undefined) {
+      trace.orchestrationStartedAtMs = nowMs;
+    }
+    trace.callCount += 1;
+    return { ok: true, trace };
+  }
+
+  markBudgetExceeded(turnId: string, reason: BudgetExceededReason): ExecutionTrace {
+    const trace = this.createTrace(turnId, '');
+    trace.budgetExceeded = reason;
+    return trace;
   }
 
   formatTraceSummary(turnId: string): string {

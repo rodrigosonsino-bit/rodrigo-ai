@@ -155,6 +155,7 @@ function recordRecoveryTrace(
     return {
       turnId,
       query: '(tarefa assíncrona anterior — prompt original não reentregue)',
+      callCount: 0,
       tasks: [
         {
           subAgentId: task.capability,

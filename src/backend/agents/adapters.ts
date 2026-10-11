@@ -61,12 +61,22 @@ export class ToolSubAgent implements ISubAgent {
 
     // §2.1 — trava estrutural: nenhuma mutação roda sem confirmationToken, mesmo que o chamador
     // esqueça de checar a confirmação por voz antes de invocar o coordenador.
-    if (req.isMutation && !req.confirmationToken) {
-      return {
-        success: false,
-        output: '',
-        error: 'Mutação bloqueada: nenhum confirmationToken presente (achado 3 da auditoria r1 da F15).'
-      };
+    if (req.isMutation) {
+      if (!req.confirmationToken) {
+        return {
+          success: false,
+          output: '',
+          error: 'Mutação bloqueada: nenhum confirmationToken presente (achado 3 da auditoria r1 da F15).'
+        };
+      }
+      // Achado r2 N4: frescor — token de outro turnId não passa.
+      if (!req.confirmationToken.startsWith(`${req.turnId}:`)) {
+        return {
+          success: false,
+          output: '',
+          error: 'Mutação bloqueada: confirmationToken não corresponde ao turno atual (achado r2 N4).'
+        };
+      }
     }
 
     try {

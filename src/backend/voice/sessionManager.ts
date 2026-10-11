@@ -32,7 +32,14 @@ import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
 import type { RetrievedChunk } from '../knowledge/index.js';
 import type { JsonStore, StoredItem } from '../storage/jsonStore.js';
 import { buildMemoryBlock } from '../memory/index.js';
-import { SubAgentCoordinator, type SubAgentTaskResult } from '../agents/subAgent.js';
+import {
+  SubAgentCoordinator,
+  formatBudgetExceededSpeech,
+  type BudgetExceededReason,
+  type SubAgentTaskRequest,
+  type SubAgentTaskResult,
+  type TaskTraceItem
+} from '../agents/subAgent.js';
 import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import {
   PendingAsyncTaskStore,
@@ -133,6 +140,17 @@ export interface SessionTuning {
   maxGroupChars?: number;
   /** Fase V §4: testes não esperam o prazo real de 5s do screen_request. */
   screenCaptureTimeoutMs?: number;
+  /** Fase 15 §6: relógio injetável para o orçamento de orquestração (60s). */
+  nowMs?: () => number;
+}
+
+/**
+ * Gera o confirmationToken pós-SIM (docs/phase-15-v3.md §2.1 + achado r3 N6).
+ * Formato: `${turnId}:${askedAt}:${nonce}` — frescor por prefixo `turnId:`.
+ */
+export function mintMutationConfirmationToken(turnId: string, askedAtMs: number = Date.now()): string {
+  const nonce = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  return `${turnId}:${askedAtMs}:${nonce}`;
 }
 
 interface ActiveTurn {
@@ -236,6 +254,12 @@ export class SessionManager {
   readonly coordinator: SubAgentCoordinator;
   /** Falas de recuperação pós-restart, entregues na primeira sessão com SSE. */
   private recoverySpeeches: AsyncRecoverySpeech[] = [];
+  /**
+   * Fase 15 §2.1: tokens de mutação minerados só após SIM por voz, indexados por turnId.
+   * `runSubAgentDelegation` só anexa o token se ele existir para o turnId da delegação.
+   */
+  private readonly confirmedMutationTokens = new Map<string, string>();
+  private readonly nowMs: () => number;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -271,6 +295,131 @@ export class SessionManager {
     this.maxGroupChars = tuning.maxGroupChars ?? MAX_GROUP_CHARS;
     this.pendingAsyncStore = pendingAsyncStore;
     this.coordinator = coordinator;
+    this.nowMs = tuning.nowMs ?? (() => Date.now());
+  }
+
+  /**
+   * Gatekeeper §2.1: gera e guarda o confirmationToken só depois de confirmação SIM real
+   * para este turnId. Nenhum outro caminho deve inventar este valor.
+   */
+  recordMutationConfirmation(turnId: string): string {
+    const token = mintMutationConfirmationToken(turnId, this.nowMs());
+    this.confirmedMutationTokens.set(turnId, token);
+    return token;
+  }
+
+  /** Só devolve o token se o SIM deste turnId já foi registrado. */
+  peekMutationConfirmationToken(turnId: string): string | undefined {
+    return this.confirmedMutationTokens.get(turnId);
+  }
+
+  /**
+   * Fase 15 Fatia 4: delega a um subagente com orçamento §6 e gatekeeper de mutação.
+   * Em estouro de limite: fala honesta + registro no ExecutionTrace; nunca conclui em silêncio.
+   */
+  async runSubAgentDelegation(opts: {
+    turnId: string;
+    query: string;
+    subAgentId: string;
+    prompt: string;
+    isMutation: boolean;
+    signal: AbortSignal;
+    context?: Record<string, unknown>;
+    taskId?: string;
+    /** Sessão autorizada — quando presente, a fala de estouro vai por TTS. */
+    sessionId?: string;
+    sessionToken?: string;
+    /** Coletor opcional (testes) da fala honesta de estouro. */
+    onSpeech?: (text: string) => void;
+  }): Promise<{
+    ok: boolean;
+    result?: SubAgentTaskResult;
+    budgetExceeded?: BudgetExceededReason;
+    speech?: string;
+  }> {
+    const budget = this.coordinator.beginDelegation(opts.turnId, opts.query, this.nowMs());
+    if (!budget.ok) {
+      const speech = formatBudgetExceededSpeech(this.coordinator, opts.turnId);
+      opts.onSpeech?.(speech);
+      await this.speakBudgetExceeded(opts.sessionId, opts.sessionToken, speech);
+      return { ok: false, budgetExceeded: budget.reason, speech };
+    }
+
+    const agent = this.coordinator.get(opts.subAgentId);
+    if (!agent) {
+      const item: TaskTraceItem = {
+        subAgentId: opts.subAgentId,
+        prompt: opts.prompt,
+        isMutation: opts.isMutation,
+        status: 'failed',
+        result: 'Subagente não registrado.'
+      };
+      budget.trace.tasks.push(item);
+      return {
+        ok: false,
+        result: { success: false, output: '', error: 'Subagente não registrado.', kind: 'final' }
+      };
+    }
+
+    // Gatekeeper: token só existe se houve SIM neste turnId; nunca inventado aqui.
+    let confirmationToken: string | undefined;
+    if (opts.isMutation) {
+      confirmationToken = this.confirmedMutationTokens.get(opts.turnId);
+    }
+
+    const req: SubAgentTaskRequest = {
+      taskId: opts.taskId ?? crypto.randomUUID(),
+      turnId: opts.turnId,
+      prompt: opts.prompt,
+      isMutation: opts.isMutation,
+      confirmationToken,
+      context: opts.context
+    };
+
+    const started = this.nowMs();
+    const result = await agent.runTask(req, opts.signal);
+    const durationMs = this.nowMs() - started;
+
+    if (result.kind === 'async_deferred') {
+      const asyncId = result.asyncTaskId;
+      if (!asyncId || !this.coordinator.tryAcquireAsyncSlot(asyncId)) {
+        this.coordinator.markBudgetExceeded(opts.turnId, 'max_async');
+        budget.trace.tasks.push({
+          subAgentId: opts.subAgentId,
+          prompt: opts.prompt,
+          isMutation: opts.isMutation,
+          status: 'failed',
+          result: 'Orçamento de tarefas assíncronas esgotado.',
+          durationMs
+        });
+        const speech = formatBudgetExceededSpeech(this.coordinator, opts.turnId);
+        opts.onSpeech?.(speech);
+        await this.speakBudgetExceeded(opts.sessionId, opts.sessionToken, speech);
+        return { ok: false, budgetExceeded: 'max_async', speech, result };
+      }
+    }
+
+    budget.trace.tasks.push({
+      subAgentId: opts.subAgentId,
+      prompt: opts.prompt,
+      isMutation: opts.isMutation,
+      status: result.success || result.kind === 'async_deferred' ? 'completed' : 'failed',
+      result: result.success ? result.output : result.error,
+      durationMs
+    });
+
+    return { ok: true, result };
+  }
+
+  private async speakBudgetExceeded(
+    sessionId: string | undefined,
+    sessionToken: string | undefined,
+    speech: string
+  ): Promise<void> {
+    if (!sessionId || !sessionToken) return;
+    const session = this.getAuthorized(sessionId, sessionToken);
+    if (!session) return;
+    await this.speakOutOfTurn(session, speech);
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -303,6 +452,7 @@ export class SessionManager {
       session.captureRequest = null;
     }
     this.clearOpenClawPollers(session);
+    this.confirmedMutationTokens.clear();
 
     if (notifyPreempted) {
       this.emit(session, { type: 'session_preempted' });
@@ -597,6 +747,8 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
           let text: string;
           if (confirmed === 'SIM') {
+            // Fase 15 §2.1: token só nasce aqui, após SIM real neste turnId (frescor + nonce).
+            this.recordMutationConfirmation(turn.turnId);
             const tool = selectMutatingToolByAction(mutation.kind, this.mutatingTools);
             if (!tool) {
               text = MUTATION_FAILURE_TEXT; // achado 4 — nunca chama .execute() em null
@@ -979,6 +1131,14 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         );
         return true;
       }
+      // §6: teto de 2 assíncronas simultâneas — recusa com fala honesta, nunca silêncio.
+      if (!this.coordinator.tryAcquireAsyncSlot(result.asyncTaskId)) {
+        const turnId = pendingMeta?.turnId ?? session.lastTurnId ?? 'unknown';
+        this.coordinator.markBudgetExceeded(turnId, 'max_async');
+        const speech = formatBudgetExceededSpeech(this.coordinator, turnId);
+        await this.speakOutOfTurn(session, speech);
+        return true;
+      }
       if (this.pendingAsyncStore && pendingMeta) {
         const record: PendingAsyncTask = {
           taskId: result.asyncTaskId,
@@ -1073,13 +1233,13 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     if (!timer) return;
     clearInterval(timer);
     session.openClawAsyncPollers.delete(taskId);
+    this.coordinator.releaseAsyncSlot(taskId);
   }
 
   private clearOpenClawPollers(session: Session): void {
-    for (const timer of session.openClawAsyncPollers.values()) {
-      clearInterval(timer);
+    for (const taskId of [...session.openClawAsyncPollers.keys()]) {
+      this.clearOpenClawAsyncPoller(session, taskId);
     }
-    session.openClawAsyncPollers.clear();
   }
 
   private describeOpenClawPollFailure(err: unknown): string {

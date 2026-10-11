@@ -56,22 +56,17 @@ test('Fase 15: OpenClawSubAgent cancela imediatamente com AbortSignal', async ()
   assert.ok(res.error?.includes('cancelada'));
 });
 
-test('Fase 15: Limite de orçamento (máximo 5 tarefas por pedido)', () => {
+test('Fase 15: Limite de orçamento (máximo 6 chamadas por turno, §6)', () => {
   const coordinator = new SubAgentCoordinator();
-  const trace = coordinator.createTrace('turn_1', 'multi-passo');
+  const now = 1_000;
 
-  for (let i = 0; i < 5; i++) {
-    trace.tasks.push({
-      subAgentId: `sub_${i}`,
-      prompt: `passo ${i}`,
-      isMutation: false,
-      status: 'completed',
-      result: `resultado ${i}`
-    });
+  for (let i = 0; i < 6; i++) {
+    const r = coordinator.beginDelegation('turn_1', 'multi-passo', now);
+    assert.equal(r.ok, true, `chamada ${i + 1}`);
   }
 
-  assert.equal(trace.tasks.length, 5);
-  // Rejeita adicionar a 6ª tarefa por orçamento
-  const isBudgetExceeded = trace.tasks.length >= 5;
-  assert.equal(isBudgetExceeded, true);
+  const seventh = coordinator.beginDelegation('turn_1', 'multi-passo', now);
+  assert.equal(seventh.ok, false);
+  if (!seventh.ok) assert.equal(seventh.reason, 'max_calls');
+  assert.equal(coordinator.getTrace('turn_1')?.budgetExceeded, 'max_calls');
 });
