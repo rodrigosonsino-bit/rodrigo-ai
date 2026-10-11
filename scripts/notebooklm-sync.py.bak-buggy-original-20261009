@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Sincronizador de cadernos NotebookLM para o Orchestrador de Voz (Rodrigo AI).
+
+Este script usa o CLI do notebooklm (já autenticado) para:
+1. Listar todos os cadernos.
+2. Filtra automaticamente os cadernos relacionados a Teologia, Virtologia e Neurociência (baseado no título).
+3. Baixa o conteúdo texto desses cadernos para a pasta docs/research/ do seu Orquestrador.
+
+Use este script para atualizar o banco de conhecimento local do seu Orchestrador com os textos reais dos seus cadernos NotebookLM.
+"""
+import json
+import os
+import sys
+import subprocess
+
+
+def run_notebooklm_command(args):
+    """Executa um comando notebooklm via CLI e retorna stdout."""
+    try:
+        result = subprocess.run(
+            ['notebooklm'] + args,
+            capture_output=True,
+            text=True,
+            cwd='/Users/rodrigosonsino/Documents/Codex/2026-09-11/referenced-chatgpt-conversation-this-is-an/outputs/rodrigo-ai'
+        )
+        return result.stdout, result.returncode
+    except Exception as e:
+        return str(e), 1
+
+
+def list_notebooks():
+    """Lista os cadernos do NotebookLM via CLI."""
+    stdout, rc = run_notebooklm_command(['list', '--json'])
+    if rc != 0:
+        return None
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        print("Erro ao fazer parse do JSON retornado pelo CLI.")
+        return None
+
+
+def filter_relevant_notebooks(notebooks):
+    """Filtra cadernos relacionados a Teologia, Virtologia e Neurociência."""
+    relevant = []
+    keywords = [
+        'teologia', 'novo testamento', 'antigo testamento', 'hermenêutica',
+        'exegese', 'dicionário', 'neuro', 'neurociência', 'virtologia',
+        'psicologia', 'filosofia', 'religião', 'alcorão', 'acorão',
+        'biblia', 'ketuvim', 'tanakh'
+    ]
+
+    for nb in notebooks:
+        title = nb.get('title', '').lower()
+        # Verifica se o título contém palavras-chave relevantes
+        if any(kw in title for kw in keywords):
+            relevant.append(nb)
+
+    # Se não encontrou nada pelos títulos, retorna todos os cadernos (para o usuário revisar)
+    if not relevant:
+        relevant = notebooks
+
+    return relevant
+
+
+def download_notebook_content(notebook_id, notebook_title, research_dir):
+    """Baixa o fulltext de um caderno específico."""
+    stdout, rc = run_notebooklm_command(['source', 'fulltext', notebook_id, '-n', notebook_id, '--json'])
+    if rc != 0:
+        print(f"  ✗ Falha ao baixar {notebook_title} (código {rc})")
+        return False
+
+    try:
+        data = json.loads(stdout)
+        # O campo de conteúdo pode estar em diferentes posições dependendo da versão do CLI
+        # Vamos tentar os campos mais comuns
+        content = None
+        for key in ['content', 'fulltext', 'text', 'body']:
+            if key in data and data[key]:
+                content = data[key]
+                break
+
+        if not content:
+            # Tentar pegar o primeiro valor de string que pareça conteúdo
+            for key, value in data.items():
+                if isinstance(value, str) and len(value) > 50:
+                    content = value
+                    break
+
+        if content:
+            # Definir nome do arquivo baseado no ID e título
+            safe_title = "".join(c for c in notebook_title if c.isalnum() or c in ' _-')
+            filename = f"{notebook_id}_{safe_title}.md"
+            filepath = os.path.join(research_dir, filename)
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            print(f"  ✓ Salvo em: {filepath}")
+            return True
+        else:
+            print(f"  ! Conteúdo vazio para {notebook_title}")
+            return False
+
+    except json.JSONDecodeError as e:
+        print(f"  ! Erro ao fazer parse do conteúdo: {e}")
+        return False
+
+
+def main():
+    print("=== Sincronizador de Cadernos NotebookLM ===\n")
+
+    # 1. Listar cadernos
+    print("Buscando cadernos...")
+    notebooks = list_notebooks()
+    if not notebooks:
+        print("Não foi possível listar cadernos. Verifique se o CLI do notebooklm está logado.")
+        print("Tente: `notebooklm login`")
+        return
+
+    total = len(notebooks.get('notebooks', []))
+    print(f"Total de cadernos na conta: {total}\n")
+
+    # 2. Filtrar relevantes
+    relevant = filter_relevant_notebooks(notebooks.get('notebooks', []))
+
+    print(f"Cadernos relevantes identificados: {len(relevant)}\n")
+    for nb in relevant:
+        title = nb.get('title', 'Sem título')
+        nb_id = nb.get('id', '')
+        print(f"  - {title} (ID: {nb_id})")
+
+    # 3. Baixar conteúdo automaticamente (sem pedir confirmação)
+    print("\nBaixando conteúdo para docs/research/...\n")
+
+    research_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'docs', 'research'))
+    os.makedirs(research_dir, exist_ok=True)
+
+    downloaded = 0
+    for nb in relevant:
+        nb_id = nb.get('id', '')
+        nb_title = nb.get('title', 'Sem título')
+        print(f"\nBaixando: {nb_title}...")
+        if download_notebook_content(nb_id, nb_title, research_dir):
+            downloaded += 1
+
+    print(f"\n=== Download concluído! ===")
+    print(f"{downloaded} de {len(relevant)} cadernos baixados com sucesso.")
+    print(f"Arquivos .md estão em: {research_dir}")
+    print("Seu Orchestrador agora pode usar esses textos para respostas baseadas em conhecimento real.")
+
+
+if __name__ == '__main__':
+    main()
