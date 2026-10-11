@@ -32,6 +32,8 @@ import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
 import type { RetrievedChunk } from '../knowledge/index.js';
 import type { JsonStore, StoredItem } from '../storage/jsonStore.js';
 import { buildMemoryBlock } from '../memory/index.js';
+import type { SubAgentTaskResult } from '../agents/subAgent.js';
+import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
 
 export interface ArmedMutation {
   kind: MutationName;
@@ -109,6 +111,10 @@ const MAX_GROUP_CHARS = 300;
 const COALESCE_MAX_WAIT_MS = 1_500;
 /** Um item de síntese que não resolve em 15 s é pulado e registrado; o seguinte não fica preso atrás dele. */
 const SENTENCE_READY_TIMEOUT_MS = 15_000;
+const OPENCLAW_ASYNC_POLL_MS = 7_000;
+const OPENCLAW_ASYNC_POLL_TIMEOUT_MS = 10 * 60_000;
+const OPENCLAW_DEFERRED_PROGRESS_TEXT =
+  'Isso vai demorar um pouco, continuo trabalhando nisso e te aviso quando terminar.';
 
 /** Ajustes de tempo e tamanho da emissão/coalescência; os padrões valem em produção (os testes encurtam os prazos). */
 export interface SessionTuning {
@@ -178,6 +184,7 @@ interface Session {
    * duplicado para o mesmo captureId nunca encontra o pedido pela segunda vez.
    */
   captureRequest: CaptureRequest | null;
+  openClawAsyncPollers: Map<string, NodeJS.Timeout>;
 }
 
 interface CaptureRequest {
@@ -276,6 +283,7 @@ export class SessionManager {
       session.captureRequest.resolve({ ok: false, reason: 'rejected' });
       session.captureRequest = null;
     }
+    this.clearOpenClawPollers(session);
 
     if (notifyPreempted) {
       this.emit(session, { type: 'session_preempted' });
@@ -312,7 +320,8 @@ export class SessionManager {
         cancelledTurnIds: new Set(),
         armedMutation: null,
       captureRequest: null,
-        pendingMutation: null
+        pendingMutation: null,
+        openClawAsyncPollers: new Map()
       };
       clearTimeout(session.idleTimer);
       this.touch(session);
@@ -889,6 +898,161 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         session.activeTurn = null;
       }
     }
+  }
+
+  async consumeOpenClawTaskResult(
+    sessionId: string,
+    token: string,
+    result: SubAgentTaskResult,
+    openClawClient: OpenClawHttpClient
+  ): Promise<boolean> {
+    const session = this.getAuthorized(sessionId, token);
+    if (!session) return false;
+    this.touch(session);
+
+    if (result.kind === 'async_deferred') {
+      if (!result.asyncTaskId) {
+        await this.speakOutOfTurn(
+          session,
+          'Não consegui continuar a tarefa no OpenClaw porque o identificador assíncrono não veio.'
+        );
+        return true;
+      }
+      await this.speakOutOfTurn(session, OPENCLAW_DEFERRED_PROGRESS_TEXT);
+      this.startOpenClawAsyncPoller(session, openClawClient, result.asyncTaskId);
+      return true;
+    }
+
+    if (result.success && result.output.trim()) {
+      await this.speakOutOfTurn(session, result.output);
+      return true;
+    }
+
+    if (!result.success && result.error) {
+      await this.speakOutOfTurn(session, result.error);
+    }
+    return true;
+  }
+
+  private startOpenClawAsyncPoller(
+    session: Session,
+    openClawClient: OpenClawHttpClient,
+    taskId: string
+  ): void {
+    this.clearOpenClawAsyncPoller(session, taskId);
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      void this.tickOpenClawAsyncPoller(session, openClawClient, taskId, startedAt);
+    }, OPENCLAW_ASYNC_POLL_MS);
+    interval.unref?.();
+    session.openClawAsyncPollers.set(taskId, interval);
+  }
+
+  private async tickOpenClawAsyncPoller(
+    session: Session,
+    openClawClient: OpenClawHttpClient,
+    taskId: string,
+    startedAt: number
+  ): Promise<void> {
+    if (this.current !== session) {
+      this.clearOpenClawAsyncPoller(session, taskId);
+      return;
+    }
+
+    if (Date.now() - startedAt >= OPENCLAW_ASYNC_POLL_TIMEOUT_MS) {
+      this.clearOpenClawAsyncPoller(session, taskId);
+      await this.speakOutOfTurn(
+        session,
+        'A tarefa do OpenClaw demorou demais e encerrei a espera por agora.'
+      );
+      return;
+    }
+
+    try {
+      const status = await openClawClient.pollStatus(taskId);
+      const normalized = status.status.trim().toLowerCase();
+      if (normalized === 'completed') {
+        this.clearOpenClawAsyncPoller(session, taskId);
+        await this.speakOutOfTurn(
+          session,
+          status.result?.trim() || 'A tarefa no OpenClaw terminou sem resultado textual.'
+        );
+        return;
+      }
+      if (normalized === 'failed') {
+        this.clearOpenClawAsyncPoller(session, taskId);
+        await this.speakOutOfTurn(
+          session,
+          status.result?.trim() || 'A tarefa no OpenClaw falhou.'
+        );
+      }
+    } catch (err) {
+      this.clearOpenClawAsyncPoller(session, taskId);
+      await this.speakOutOfTurn(session, this.describeOpenClawPollFailure(err));
+    }
+  }
+
+  private clearOpenClawAsyncPoller(session: Session, taskId: string): void {
+    const timer = session.openClawAsyncPollers.get(taskId);
+    if (!timer) return;
+    clearInterval(timer);
+    session.openClawAsyncPollers.delete(taskId);
+  }
+
+  private clearOpenClawPollers(session: Session): void {
+    for (const timer of session.openClawAsyncPollers.values()) {
+      clearInterval(timer);
+    }
+    session.openClawAsyncPollers.clear();
+  }
+
+  private describeOpenClawPollFailure(err: unknown): string {
+    return `Não consegui falar com o OpenClaw agora (${err instanceof Error ? err.message : 'erro desconhecido'}).`;
+  }
+
+  private async speakOutOfTurn(session: Session, text: string): Promise<void> {
+    const clean = cleanTextForSpeech(text);
+    const turnId = session.lastTurnId;
+    if (!clean || !turnId || this.current !== session || session.activeTurn) return;
+
+    this.emit(session, { type: 'state', state: 'falando' });
+    const sentenceIndex = session.emittedSentences?.turnId === turnId
+      ? session.emittedSentences.items.length
+      : 0;
+    const { audioId, filePath } = this.audioStore.newOutputPath(session.id);
+    const controller = new AbortController();
+
+    try {
+      await this.ttsProvider.synthesize(clean, filePath, controller.signal, {
+        turnId,
+        kind: 'local',
+        isFirstOfTurn: false
+      });
+    } catch {
+      fs.rm(filePath, { force: true }, () => {});
+      if (this.current === session && !session.activeTurn) {
+        this.emit(session, { type: 'state', state: 'ouvindo' });
+      }
+      return;
+    }
+
+    if (this.current !== session || session.activeTurn || session.lastTurnId !== turnId) {
+      fs.rm(filePath, { force: true }, () => {});
+      return;
+    }
+
+    if (!session.emittedSentences || session.emittedSentences.turnId !== turnId) {
+      session.emittedSentences = { turnId, items: [] };
+    }
+    session.emittedSentences.items.push({ text: clean, consumed: false });
+    this.emit(session, {
+      type: 'sentence_audio_ready',
+      turnId,
+      sentenceIndex,
+      audioId,
+      text: clean
+    });
+    this.emit(session, { type: 'state', state: 'ouvindo' });
   }
 
   /**

@@ -18,6 +18,14 @@ export interface SubAgentTaskResult {
   success: boolean;
   output: string;
   error?: string;
+  /**
+   * Discriminante estrutural (Fase 15, §4.3, achado r2 N2): 'final' (padrão) é a
+   * resposta concluída da tarefa; 'async_deferred' sinaliza que a tarefa seguiu como
+   * long-running (linha com `asyncTaskId`) e quem orquestra deve falar progresso em
+   * vez de uma resposta final. Opcional para não quebrar ISubAgent implementados antes.
+   */
+  kind?: 'final' | 'async_deferred';
+  asyncTaskId?: string;
 }
 
 export interface ISubAgent {
