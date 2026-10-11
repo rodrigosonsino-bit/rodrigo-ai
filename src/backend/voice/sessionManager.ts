@@ -32,8 +32,17 @@ import { buildKnowledgeBlock, KnowledgeRetriever } from '../knowledge/index.js';
 import type { RetrievedChunk } from '../knowledge/index.js';
 import type { JsonStore, StoredItem } from '../storage/jsonStore.js';
 import { buildMemoryBlock } from '../memory/index.js';
-import type { SubAgentTaskResult } from '../agents/subAgent.js';
+import { SubAgentCoordinator, type SubAgentTaskResult } from '../agents/subAgent.js';
 import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
+import {
+  PendingAsyncTaskStore,
+  parseAsyncTaskTtlHours,
+  type PendingAsyncTask
+} from '../agents/pendingAsyncStore.js';
+import {
+  recoverPendingAsyncTasks,
+  type AsyncRecoverySpeech
+} from '../agents/pendingAsyncRecovery.js';
 
 export interface ArmedMutation {
   kind: MutationName;
@@ -221,6 +230,12 @@ export class SessionManager {
   private readonly coalesceWaitMs: number;
   private readonly maxGroupSentences: number;
   private readonly maxGroupChars: number;
+  /** Fase 15: tarefas OpenClaw assíncronas persistidas em data/pendingAsyncTasks.json. */
+  private readonly pendingAsyncStore: PendingAsyncTaskStore | null;
+  /** Fase 15: coordenador de subagentes + ExecutionTrace (inclui recuperação na subida). */
+  readonly coordinator: SubAgentCoordinator;
+  /** Falas de recuperação pós-restart, entregues na primeira sessão com SSE. */
+  private recoverySpeeches: AsyncRecoverySpeech[] = [];
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -236,7 +251,9 @@ export class SessionManager {
     mutatingTools: readonly IMutatingTool[] = [],
     memoriaStore: JsonStore<StoredItem> | null = null,
     privacy: PrivacyConfig = DEFAULT_PRIVACY,
-    tuning: SessionTuning = {}
+    tuning: SessionTuning = {},
+    pendingAsyncStore: PendingAsyncTaskStore | null = null,
+    coordinator: SubAgentCoordinator = new SubAgentCoordinator()
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
@@ -252,6 +269,8 @@ export class SessionManager {
     this.coalesceWaitMs = tuning.coalesceWaitMs ?? COALESCE_MAX_WAIT_MS;
     this.maxGroupSentences = tuning.maxGroupSentences ?? MAX_GROUP_SENTENCES;
     this.maxGroupChars = tuning.maxGroupChars ?? MAX_GROUP_CHARS;
+    this.pendingAsyncStore = pendingAsyncStore;
+    this.coordinator = coordinator;
   }
 
   private emit(session: Session, event: VoiceServerEvent): void {
@@ -350,7 +369,28 @@ export class SessionManager {
     session.sseRes = res;
     this.touch(session);
     this.emit(session, { type: 'state', state: 'ouvindo' });
+    // Entrega falas de recuperação pós-restart assim que há SSE (sem re-injetar prompt ao LLM).
+    if (this.recoverySpeeches.length > 0) {
+      const queued = this.recoverySpeeches.splice(0, this.recoverySpeeches.length);
+      void this.flushRecoverySpeeches(session, queued);
+    }
     return true;
+  }
+
+  private async flushRecoverySpeeches(
+    session: Session,
+    speeches: AsyncRecoverySpeech[]
+  ): Promise<void> {
+    // speakOutOfTurn exige lastTurnId; numa sessão recém-aberta ainda não há turno —
+    // sintetiza um só para emitir o áudio de recuperação (nunca vira prompt de LLM).
+    if (!session.lastTurnId) {
+      session.lastTurnId = `recovery-${crypto.randomUUID()}`;
+      session.emittedSentences = { turnId: session.lastTurnId, items: [] };
+    }
+    for (const speech of speeches) {
+      if (this.current !== session) return;
+      await this.speakOutOfTurn(session, speech.text);
+    }
   }
 
   private trimHistory(session: Session): void {
@@ -900,11 +940,32 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     }
   }
 
+  /**
+   * Fase 15 §4.3 — na subida: ler pendências, descartar por TTL, verificar status real,
+   * enfileirar falas datadas (entregues na primeira sessão com SSE). O prompt original
+   * nunca é re-entregue ao LLM.
+   */
+  async recoverPendingAsyncOnBoot(
+    openClawClient: OpenClawHttpClient | null,
+    ttlHours: number = parseAsyncTaskTtlHours()
+  ): Promise<{ discardedByAge: number; queued: number }> {
+    if (!this.pendingAsyncStore) return { discardedByAge: 0, queued: 0 };
+    const result = await recoverPendingAsyncTasks({
+      store: this.pendingAsyncStore,
+      client: openClawClient,
+      ttlHours,
+      coordinator: this.coordinator
+    });
+    this.recoverySpeeches.push(...result.speeches);
+    return { discardedByAge: result.discardedByAge, queued: result.speeches.length };
+  }
+
   async consumeOpenClawTaskResult(
     sessionId: string,
     token: string,
     result: SubAgentTaskResult,
-    openClawClient: OpenClawHttpClient
+    openClawClient: OpenClawHttpClient,
+    pendingMeta?: { prompt: string; capability: string; turnId: string; confirmationToken?: string }
   ): Promise<boolean> {
     const session = this.getAuthorized(sessionId, token);
     if (!session) return false;
@@ -917,6 +978,17 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           'Não consegui continuar a tarefa no OpenClaw porque o identificador assíncrono não veio.'
         );
         return true;
+      }
+      if (this.pendingAsyncStore && pendingMeta) {
+        const record: PendingAsyncTask = {
+          taskId: result.asyncTaskId,
+          prompt: pendingMeta.prompt,
+          capability: pendingMeta.capability,
+          startedAt: new Date().toISOString(),
+          turnId: pendingMeta.turnId,
+          confirmationToken: pendingMeta.confirmationToken
+        };
+        this.pendingAsyncStore.upsert(record);
       }
       await this.speakOutOfTurn(session, OPENCLAW_DEFERRED_PROGRESS_TEXT);
       this.startOpenClawAsyncPoller(session, openClawClient, result.asyncTaskId);
@@ -961,6 +1033,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
     if (Date.now() - startedAt >= OPENCLAW_ASYNC_POLL_TIMEOUT_MS) {
       this.clearOpenClawAsyncPoller(session, taskId);
+      this.pendingAsyncStore?.remove(taskId);
       await this.speakOutOfTurn(
         session,
         'A tarefa do OpenClaw demorou demais e encerrei a espera por agora.'
@@ -973,6 +1046,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       const normalized = status.status.trim().toLowerCase();
       if (normalized === 'completed') {
         this.clearOpenClawAsyncPoller(session, taskId);
+        this.pendingAsyncStore?.remove(taskId);
         await this.speakOutOfTurn(
           session,
           status.result?.trim() || 'A tarefa no OpenClaw terminou sem resultado textual.'
@@ -981,6 +1055,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       }
       if (normalized === 'failed') {
         this.clearOpenClawAsyncPoller(session, taskId);
+        this.pendingAsyncStore?.remove(taskId);
         await this.speakOutOfTurn(
           session,
           status.result?.trim() || 'A tarefa no OpenClaw falhou.'
@@ -988,6 +1063,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       }
     } catch (err) {
       this.clearOpenClawAsyncPoller(session, taskId);
+      this.pendingAsyncStore?.remove(taskId);
       await this.speakOutOfTurn(session, this.describeOpenClawPollFailure(err));
     }
   }

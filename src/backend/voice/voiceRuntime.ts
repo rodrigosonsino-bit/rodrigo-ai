@@ -16,6 +16,10 @@ import { createSystemTools } from '../tools/systemTools.js';
 import { createMutatingTools } from '../tools/mutatingTools.js';
 import { ReminderScheduler } from '../tools/reminderScheduler.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
+import { SubAgentCoordinator } from '../agents/subAgent.js';
+import { registerWiredOpenClawAgents } from '../agents/openClawSubAgent.js';
+import { makeOpenClawHttpClient } from '../agents/openClawHttpClient.js';
+import { PendingAsyncTaskStore, parseAsyncTaskTtlHours } from '../agents/pendingAsyncStore.js';
 
 export type TtsStatusResponse = TtsStatus;
 
@@ -127,9 +131,33 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     console.log(`[Rodrigo AI] Limpeza de resíduos de áudio: ${tmp.removed.length} diretório(s) órfão(s) removido(s).`);
   }
   const audioStore = new AudioStore(tmp.dir);
+  const coordinator = new SubAgentCoordinator();
+  const openClawClient = makeOpenClawHttpClient();
+  registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
+  const pendingAsyncStore = new PendingAsyncTaskStore(dataDir);
   const sessionManager = new SessionManager(
-    engine, ttsProvider, audioStore, agents, retriever, tools, mutatingTools, memoriaStore, privacy
+    engine,
+    ttsProvider,
+    audioStore,
+    agents,
+    retriever,
+    tools,
+    mutatingTools,
+    memoriaStore,
+    privacy,
+    {},
+    pendingAsyncStore,
+    coordinator
   );
+
+  // Fase 15 §4.3: recuperação mínima pós-restart (descarta por TTL; fala datada na 1ª sessão).
+  void sessionManager.recoverPendingAsyncOnBoot(openClawClient, parseAsyncTaskTtlHours()).then((r) => {
+    if (r.discardedByAge > 0 || r.queued > 0) {
+      console.log(
+        `[Rodrigo AI] Tarefas OpenClaw na subida: ${r.discardedByAge} descartada(s) por idade, ${r.queued} fala(s) enfileirada(s).`
+      );
+    }
+  });
 
   return {
     available: true,
