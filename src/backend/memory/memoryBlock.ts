@@ -1,11 +1,15 @@
 import type { StoredItem } from '../storage/jsonStore.js';
+import { resolveConflicts } from './conflictResolver.js';
 
 export const MAX_MEMORIES_INJECTED = 10;
 export const MAX_MEMORY_BLOCK_CHARS = 1200;
 
 export function buildMemoryBlock(items: readonly StoredItem[]): string {
   if (items.length === 0) return '';
-  const recent = items.slice(-MAX_MEMORIES_INJECTED).reverse();
+  // Dedup PRIMEIRO (Fase 16, Fatia 4 — resolveConflicts), corte de tamanho DEPOIS.
+  // Na ordem inversa, o slice poderia descartar a entrada nova e manter a velha.
+  const deduped = resolveConflicts(items);
+  const recent = deduped.slice(-MAX_MEMORIES_INJECTED).reverse();
   const lines: string[] = [];
   let totalChars = 0;
   for (const it of recent) {

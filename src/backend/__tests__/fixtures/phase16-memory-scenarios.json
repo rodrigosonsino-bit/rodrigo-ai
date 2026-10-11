@@ -1,0 +1,137 @@
+[
+  {
+    "id": "H16.3-001",
+    "kind": "preference",
+    "items": [
+      { "text": "gosto de café com açúcar", "createdAt": "2026-01-15T10:00:00.000Z" },
+      { "text": "prefiro café sem açúcar", "createdAt": "2026-10-05T10:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "prefiro café sem açúcar"
+  },
+  {
+    "id": "H16.3-002",
+    "kind": "preference",
+    "items": [
+      { "text": "tomo café sem açúcar", "createdAt": "2026-02-01T08:00:00.000Z" },
+      { "text": "bebo café com adoçante", "createdAt": "2026-09-20T08:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "bebo café com adoçante"
+  },
+  {
+    "id": "H16.3-003",
+    "kind": "preference",
+    "items": [
+      { "text": "prefiro chá gelado", "createdAt": "2026-03-10T14:00:00.000Z" },
+      { "text": "gosto de chá quente", "createdAt": "2026-03-10T14:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "gosto de chá quente"
+  },
+  {
+    "id": "H16.3-004",
+    "kind": "preference",
+    "items": [
+      { "text": "quero leite desnatado", "createdAt": "2026-04-01T09:00:00.000Z" },
+      { "text": "uso leite integral", "createdAt": "2026-04-01T09:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "uso leite integral"
+  },
+  {
+    "id": "H16.3-005",
+    "kind": "preference",
+    "items": [
+      { "text": "gosto de pão francês", "createdAt": "2026-05-05T07:00:00.000Z" },
+      { "text": "como pão integral", "createdAt": "2026-08-11T07:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "como pão integral"
+  },
+  {
+    "id": "H16.3-006",
+    "kind": "preference",
+    "items": [
+      { "text": "uso sabonete neutro", "createdAt": "2026-06-12T20:00:00.000Z" },
+      { "text": "prefiro sabonete de lavanda", "createdAt": "2026-07-04T20:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "prefiro sabonete de lavanda"
+  },
+  {
+    "id": "H16.3-007",
+    "kind": "preference",
+    "items": [
+      { "text": "gosto de música clássica", "createdAt": "2026-01-20T19:00:00.000Z" },
+      { "text": "ouço música clássica e jazz", "createdAt": "2026-09-15T19:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "ouço música clássica e jazz"
+  },
+  {
+    "id": "H16.3-008",
+    "kind": "preference",
+    "items": [
+      { "text": "treino musculação", "createdAt": "2026-02-14T06:30:00.000Z" },
+      { "text": "faço musculação três vezes por semana", "createdAt": "2026-10-01T06:30:00.000Z" }
+    ],
+    "expectedSurvivorText": "faço musculação três vezes por semana"
+  },
+  {
+    "id": "H16.3-009",
+    "kind": "cumulative",
+    "items": [
+      { "text": "minha irmã Ana mora em São Paulo", "createdAt": "2026-01-05T12:00:00.000Z" },
+      { "text": "minha irmã Ana fez aniversário em março", "createdAt": "2026-03-20T12:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "minha irmã Ana mora em São Paulo"
+  },
+  {
+    "id": "H16.3-010",
+    "kind": "cumulative",
+    "items": [
+      { "text": "meu cachorro Thor gosta de passear", "createdAt": "2026-04-10T17:00:00.000Z" },
+      { "text": "meu cachorro Thor completou dois anos", "createdAt": "2026-08-22T17:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "meu cachorro Thor gosta de passear"
+  },
+  {
+    "id": "H16.3-011",
+    "kind": "cumulative",
+    "items": [
+      { "text": "meu tio Carlos trabalha com engenharia", "createdAt": "2026-05-18T09:30:00.000Z" },
+      { "text": "meu tio Carlos se aposentou recentemente", "createdAt": "2026-09-30T09:30:00.000Z" }
+    ],
+    "expectedSurvivorText": "meu tio Carlos trabalha com engenharia"
+  },
+  {
+    "id": "H16.3-012",
+    "kind": "cumulative",
+    "items": [
+      { "text": "minha avó Rosa faz crochê", "createdAt": "2026-06-25T15:00:00.000Z" },
+      { "text": "minha avó Rosa completou 85 anos", "createdAt": "2026-10-08T15:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "minha avó Rosa faz crochê"
+  },
+  {
+    "id": "H16.3-013",
+    "kind": "cumulative",
+    "items": [
+      { "text": "meu colega Pedro programador", "createdAt": "2026-07-01T11:00:00.000Z" },
+      { "text": "meu colega Pedro mudou de emprego", "createdAt": "2026-10-02T11:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "meu colega Pedro programador"
+  },
+  {
+    "id": "H16.3-014",
+    "kind": "preference",
+    "items": [
+      { "text": "gosto de maçã verde", "createdAt": "2026-03-03T16:00:00.000Z" },
+      { "text": "prefiro maçã vermelha", "createdAt": "2026-03-03T16:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "prefiro maçã vermelha"
+  },
+  {
+    "id": "H16.3-015",
+    "kind": "preference",
+    "items": [
+      { "text": "uso toalha branca", "createdAt": "2026-04-15T21:00:00.000Z" },
+      { "text": "prefiro toalha azul", "createdAt": "2026-04-15T21:00:00.000Z" }
+    ],
+    "expectedSurvivorText": "prefiro toalha azul"
+  }
+]
