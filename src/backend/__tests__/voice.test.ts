@@ -1765,7 +1765,9 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         const previewEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
           | { type: 'sentence_audio_ready'; text: string }
           | undefined;
-        assert.equal(previewEvent?.text, 'Posso apagar a memória mais recente?');
+        // F14: content=null cai pro item mais recente via findBestMatchingItemIndex, mas a
+        // frase agora cita o texto real do item encontrado em vez da frase genérica antiga.
+        assert.equal(previewEvent?.text, 'Posso apagar a memória "fato mais recente"?');
 
         // Confirma reprodução da pergunta
         await fetch(`${h.baseUrl}/api/voice/session/played`, {
@@ -2007,7 +2009,9 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         const previewEvent = sse.events.find((e) => (e as { type: string }).type === 'sentence_audio_ready') as
           | { type: 'sentence_audio_ready'; text: string }
           | undefined;
-        assert.equal(previewEvent?.text, 'Posso trocar o lembrete mais recente para: comprar café solúvel?');
+        // F14: EDITAR agora localiza o item por correspondência de conteúdo e cita o texto
+        // real encontrado, em vez da frase genérica "o lembrete mais recente".
+        assert.equal(previewEvent?.text, 'Posso trocar o lembrete "comprar café em pó" para: comprar café solúvel?');
 
         // Confirma reprodução da pergunta
         await fetch(`${h.baseUrl}/api/voice/session/played`, {

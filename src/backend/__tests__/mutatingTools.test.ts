@@ -211,13 +211,16 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
         tool.preview('LEMBRETE_CRIAR', 'Comprar café'),
         'Posso criar o lembrete: Comprar café?'
       );
-      assert.equal(
-        tool.preview('LEMBRETE_APAGAR', null),
-        'Posso apagar o lembrete mais recente?'
-      );
 
       // Execute criar
       assert.equal(tool.execute('LEMBRETE_CRIAR', 'Comprar café'), 'Lembrete criado.');
+
+      // Preview de apagar só faz sentido depois de o item existir de verdade (preview() lê o
+      // store para formular a pergunta com o texto real — não pode ser chamado antes do execute).
+      assert.equal(
+        tool.preview('LEMBRETE_APAGAR', 'café'),
+        'Posso apagar o lembrete "Comprar café"?'
+      );
 
       // Achado 6 / v5 §4.4: Prevenção de duplicata idêntica consecutiva
       assert.equal(tool.execute('LEMBRETE_CRIAR', 'Comprar café'), 'Isso já estava salvo.');
@@ -225,14 +228,14 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       // Criar segundo lembrete
       assert.equal(tool.execute('LEMBRETE_CRIAR', 'Lavar o carro'), 'Lembrete criado.');
 
-      // Apagar o mais recente
-      assert.equal(tool.execute('LEMBRETE_APAGAR', null), 'Lembrete apagado.');
+      // Apagar o mais recente (por conteúdo)
+      assert.equal(tool.execute('LEMBRETE_APAGAR', 'carro'), 'Lembrete apagado.');
 
-      // Apagar o primeiro
-      assert.equal(tool.execute('LEMBRETE_APAGAR', null), 'Lembrete apagado.');
+      // Apagar o primeiro (por conteúdo)
+      assert.equal(tool.execute('LEMBRETE_APAGAR', 'café'), 'Lembrete apagado.');
 
       // Apagar quando não há nada
-      assert.equal(tool.execute('LEMBRETE_APAGAR', null), 'Não há nenhum lembrete para apagar.');
+      assert.equal(tool.execute('LEMBRETE_APAGAR', 'qualquer'), 'Não há nenhum lembrete para apagar.');
     });
   });
 
@@ -248,20 +251,23 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
         tool.preview('NOTA_CRIAR', 'Ideia de aplicativo'),
         'Posso guardar a nota: Ideia de aplicativo?'
       );
-      assert.equal(
-        tool.preview('NOTA_APAGAR', null),
-        'Posso apagar a nota mais recente?'
-      );
 
       // Execute criar
       assert.equal(tool.execute('NOTA_CRIAR', 'Ideia de aplicativo'), 'Nota criada.');
+
+      // Preview de apagar só faz sentido depois de o item existir de verdade (mesma razão do
+      // LembreteTool acima).
+      assert.equal(
+        tool.preview('NOTA_APAGAR', 'aplicativo'),
+        'Posso apagar a nota "Ideia de aplicativo"?'
+      );
 
       // Prevenção de duplicata consecutiva
       assert.equal(tool.execute('NOTA_CRIAR', 'Ideia de aplicativo'), 'Isso já estava salvo.');
 
       // Apagar
-      assert.equal(tool.execute('NOTA_APAGAR', null), 'Nota apagada.');
-      assert.equal(tool.execute('NOTA_APAGAR', null), 'Não há nenhuma nota para apagar.');
+      assert.equal(tool.execute('NOTA_APAGAR', 'aplicativo'), 'Nota apagada.');
+      assert.equal(tool.execute('NOTA_APAGAR', 'qualquer'), 'Não há nenhuma nota para apagar.');
     });
   });
 
@@ -350,8 +356,8 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       const itemId = saved.items[0].id;
       assert.equal(scheduler.hasTimer(itemId), true);
 
-      // Apaga o lembrete
-      const resApagar = tool.execute('LEMBRETE_APAGAR', null);
+      // Apaga o lembrete (por conteúdo)
+      const resApagar = tool.execute('LEMBRETE_APAGAR', 'pagar conta');
       assert.equal(resApagar, 'Lembrete apagado.');
 
       // Confirma que o timer foi cancelado no scheduler
@@ -461,10 +467,22 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
         /Conteúdo ausente para guardar memória\./
       );
 
-      // MEMORIA_ESQUECER: frase exata sem cauda
+      // MEMORIA_ESQUECER: conteúdo é pista de desambiguação, não requisito (diferente de
+      // EDITAR/GUARDAR) — "apaga essa memória" sem citar qual é o caso comum por voz, e content
+      // nulo/vazio cai pro item mais recente (ver findBestMatchingItemIndex). preview() lê o
+      // store de verdade, então precisa de um item real guardado antes de formular a pergunta.
+      tool.execute('MEMORIA_GUARDAR', 'prefere respostas curtas');
+      assert.equal(
+        tool.preview('MEMORIA_ESQUECER', 'respostas curtas'),
+        'Posso apagar a memória "prefere respostas curtas"?'
+      );
       assert.equal(
         tool.preview('MEMORIA_ESQUECER', null),
-        'Posso apagar a memória mais recente?'
+        'Posso apagar a memória "prefere respostas curtas"?'
+      );
+      assert.equal(
+        tool.preview('MEMORIA_ESQUECER', '   '),
+        'Posso apagar a memória "prefere respostas curtas"?'
       );
 
       // Ação inválida
@@ -519,18 +537,18 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       tool.execute('MEMORIA_GUARDAR', 'item 2');
       assert.equal(store.read().items.length, 2);
 
-      // Apaga o mais recente (item 2)
-      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Apagado.');
+      // Apaga o mais recente (item 2) - por conteúdo
+      assert.equal(tool.execute('MEMORIA_ESQUECER', 'item 2'), 'Apagado.');
       const dataAfterPop = store.read();
       assert.equal(dataAfterPop.items.length, 1);
       assert.equal(dataAfterPop.items[0].text, 'item 1');
 
-      // Apaga o remanescente (item 1)
-      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Apagado.');
+      // Apaga o remanescente (item 1) - por conteúdo
+      assert.equal(tool.execute('MEMORIA_ESQUECER', 'item 1'), 'Apagado.');
       assert.equal(store.read().items.length, 0);
 
       // Agora vazia novamente
-      assert.equal(tool.execute('MEMORIA_ESQUECER', null), 'Não há nada guardado pra apagar.');
+      assert.equal(tool.execute('MEMORIA_ESQUECER', 'qualquer'), 'Não há nada guardado pra apagar.');
 
       // Ação inválida
       assert.throws(
@@ -675,10 +693,16 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       const notaTool = tools.find((t) => t.name === 'NOTA')!;
       const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
 
+      // EDITAR agora faz correspondência por conteúdo contra o store real (F14) — precisa de um
+      // item de verdade salvo em cada ferramenta antes de preview() poder formular a pergunta.
+      lembreteTool.execute('LEMBRETE_CRIAR', 'ligar para o médico');
+      notaTool.execute('NOTA_CRIAR', 'comprar materiais');
+      memoriaTool.execute('MEMORIA_GUARDAR', 'seu nome é Rodrigo Sonsino');
+
       // Lembrete
       assert.equal(
         lembreteTool.preview('LEMBRETE_EDITAR', 'ligar para o médico'),
-        'Posso trocar o lembrete mais recente para: ligar para o médico?'
+        'Posso trocar o lembrete "ligar para o médico" para: ligar para o médico?'
       );
       assert.throws(
         () => lembreteTool.preview('LEMBRETE_EDITAR', null),
@@ -696,7 +720,7 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       // Nota
       assert.equal(
         notaTool.preview('NOTA_EDITAR', 'comprar materiais'),
-        'Posso trocar a nota mais recente para: comprar materiais?'
+        'Posso trocar a nota "comprar materiais" para: comprar materiais?'
       );
       assert.throws(
         () => notaTool.preview('NOTA_EDITAR', null),
@@ -714,7 +738,7 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       // Memória
       assert.equal(
         memoriaTool.preview('MEMORIA_EDITAR', 'seu nome é Rodrigo Sonsino'),
-        'Posso trocar essa memória para: seu nome é Rodrigo Sonsino?'
+        'Posso trocar a memória "seu nome é Rodrigo Sonsino" para: seu nome é Rodrigo Sonsino?'
       );
       assert.throws(
         () => memoriaTool.preview('MEMORIA_EDITAR', null),
@@ -782,27 +806,39 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       scheduler.shutdown();
     });
 
-    it('H6 — MEMORIA_EDITAR recusa duplicata contra outros itens da lista (mas permite editar pro próprio texto caindo em no-op)', () => {
+    it('H6 — MEMORIA_EDITAR: conteúdo igual a OUTRO item vira no-op nesse item; conteúdo inédito atualiza normalmente', () => {
+      // Acima do F14 (aprovado 2026-10-09), EDITAR passou a localizar o item por correspondência
+      // de conteúdo em vez de "sempre o mais recente" (docs/phase-14-v2.md §2.1). Isso muda o
+      // cenário original deste teste: pedir para editar usando um texto que já é EXATAMENTE o
+      // texto de outro item não cai mais em "duplicata contra o mais recente" — a própria busca
+      // por conteúdo encontra esse outro item (é uma correspondência exata) e o resultado é um
+      // no-op NELE, não uma recusa de duplicata contra um terceiro item-alvo. O guarda de
+      // duplicata-contra-outro-item (`isDuplicateOfOther` em `mutatingTools.ts`) continua no
+      // código como defesa em profundidade, mas fica estruturalmente difícil de alcançar quando o
+      // conteúdo é uma cópia exata de um item existente — por isso este teste passou a validar o
+      // caminho de no-op (que é o que realmente acontece) em vez do caminho de recusa de
+      // duplicata, que a correspondência exata intercepta antes.
       const { tools } = createMutatingTools(tmpDir);
       const memoriaTool = tools.find((t) => t.name === 'MEMORIA')!;
       const store = new JsonStore<StoredItem>(tmpDir, 'memorias.json');
 
-      // Guarda dois itens
-      memoriaTool.execute('MEMORIA_GUARDAR', 'item um');
-      memoriaTool.execute('MEMORIA_GUARDAR', 'item dois');
+      memoriaTool.execute('MEMORIA_GUARDAR', 'prefere café sem açúcar');
+      memoriaTool.execute('MEMORIA_GUARDAR', 'mora em São Paulo');
       assert.equal(store.read().items.length, 2);
 
-      // Tenta editar o mais recente (item dois) para o texto do item um -> recusado
-      const resDup = memoriaTool.execute('MEMORIA_EDITAR', 'ITEM UM');
-      assert.equal(resDup, 'Isso já estava guardado.');
+      // Conteúdo idêntico ao texto do item 1 -> a correspondência encontra o item 1 (é ele
+      // mesmo) -> no-op nele, nada muda.
+      const resSelf = memoriaTool.execute('MEMORIA_EDITAR', 'mora em São Paulo');
+      assert.equal(resSelf, 'Isso já era o texto guardado.');
+      assert.equal(store.read().items[0].text, 'prefere café sem açúcar');
+      assert.equal(store.read().items[1].text, 'mora em São Paulo');
 
-      // Verifica que o item dois continua inalterado
-      assert.equal(store.read().items[1].text, 'item dois');
-
-      // Edita para algo inédito -> aceito
-      const resOk = memoriaTool.execute('MEMORIA_EDITAR', 'item três');
+      // Edita o item do café (melhor correspondência: compartilha "prefere"/"café") para algo
+      // inédito -> aceito, e é o item 0 que muda, não o 1.
+      const resOk = memoriaTool.execute('MEMORIA_EDITAR', 'prefere café com leite');
       assert.equal(resOk, 'Atualizado.');
-      assert.equal(store.read().items[1].text, 'item três');
+      assert.equal(store.read().items[0].text, 'prefere café com leite');
+      assert.equal(store.read().items[1].text, 'mora em São Paulo');
     });
 
     it('Defesa em profundidade: LEMBRETE_EDITAR recusa pedidos de troca de horário disfarçados de edição de texto', () => {
@@ -900,10 +936,13 @@ describe('Ferramentas Mutantes (Fase 5c) — Lembrete, Nota e Gates', () => {
       const id = store.read().items[0].id;
       assert.equal(scheduler.hasTimer(id), true);
 
-      const previewApagar = tool.preview('LEMBRETE_APAGAR', null);
-      assert.equal(previewApagar, 'Posso apagar o lembrete mais recente?');
+      // O texto guardado é o residual pós-recorrência ("passear"), não a frase completa de
+      // criação — LEMBRETE_CRIAR extrai a recorrência e guarda só o resíduo (ver `finalText` em
+      // execute/LEMBRETE_CRIAR); a pergunta de apagar ecoa o que está de fato no store.
+      const previewApagar = tool.preview('LEMBRETE_APAGAR', 'passear');
+      assert.equal(previewApagar, 'Posso apagar o lembrete "passear"?');
 
-      const execApagar = tool.execute('LEMBRETE_APAGAR', null);
+      const execApagar = tool.execute('LEMBRETE_APAGAR', 'passear');
       assert.equal(execApagar, 'Lembrete apagado.');
 
       assert.equal(store.read().items.length, 0);

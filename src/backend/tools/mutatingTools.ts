@@ -31,13 +31,20 @@ export function findBestMatchingItemIndex(
     } else if (normText.includes(normQuery) || normQuery.includes(normText)) {
       score = 0.8;
     } else {
-      const qWords = normQuery.split(/\s+/).filter((w) => w.length > 2);
-      const tWords = normText.split(/\s+/).filter((w) => w.length > 2);
+      // Correção (continuação da Fatia 2 da F14): a versão anterior filtrava palavras com
+      // length <= 2 e dividia só por qWords.length. Isso tinha dois bugs que colidiam:
+      // (a) um dígito ou palavra curta ("1" vs "2", "um" vs "dois") era exatamente o que
+      //     distinguia dois itens parecidos, e era descartado antes de contar;
+      // (b) dividir só por qWords.length (sem considerar tWords.length) deixava uma
+      //     correspondência parcial empatar com uma correspondência exata de outro item,
+      //     disparando ambiguidade falsa onde havia um vencedor claro.
+      const qWords = normQuery.split(/\s+/).filter((w) => w.length > 0);
+      const tWords = normText.split(/\s+/).filter((w) => w.length > 0);
       let matchCount = 0;
       for (const qw of qWords) {
         if (tWords.some((tw) => tw.includes(qw) || qw.includes(tw))) matchCount += 1;
       }
-      score = qWords.length > 0 ? matchCount / qWords.length : 0;
+      score = qWords.length > 0 ? matchCount / Math.max(qWords.length, tWords.length) : 0;
     }
     return { index: idx, item, score };
   });
@@ -140,10 +147,32 @@ export class LembreteTool implements IMutatingTool {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar lembrete.');
       }
-      return `Posso trocar o lembrete mais recente para: ${content.trim()}?`;
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhum lembrete para editar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const current = store.items[matchResult.index];
+      return `Posso trocar o lembrete "${current.text}" para: ${content.trim()}?`;
     }
     if (kind === 'LEMBRETE_APAGAR') {
-      return 'Posso apagar o lembrete mais recente?';
+      // Conteúdo aqui é uma PISTA de desambiguação, não um requisito — diferente de EDITAR
+      // (onde content é o novo valor, obrigatório). "Apaga esse lembrete" sem citar qual é o
+      // caso comum por voz, e findBestMatchingItemIndex já sabe cair pro mais recente quando
+      // query é vazia/nula; exigir conteúdo aqui quebraria exatamente esse caso comum.
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhum lembrete para apagar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
+      }
+      const current = store.items[matchResult.index];
+      return `Posso apagar o lembrete "${current.text}"?`;
     }
     throw new Error(`Ação inválida para LembreteTool: ${kind}`);
   }
@@ -195,7 +224,11 @@ export class LembreteTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nenhum lembrete para editar.';
       }
-      const idx = store.items.length - 1;
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const idx = matchResult.index;
       const current = store.items[idx];
 
       if (current.notifiedAt) {
@@ -318,7 +351,12 @@ export class LembreteTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nenhum lembrete para apagar.';
       }
-      const removed = store.items.pop()!;
+      const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
+      }
+      const idx = matchResult.index;
+      const removed = store.items.splice(idx, 1)[0];
       // Cancela o agendamento em memória se houver
       this.scheduler.cancel(removed.id);
       this.store.write(store);
@@ -368,10 +406,30 @@ export class NotaTool implements IMutatingTool {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar nota.');
       }
-      return `Posso trocar a nota mais recente para: ${content.trim()}?`;
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhuma nota para editar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const current = store.items[matchResult.index];
+      return `Posso trocar a nota "${current.text}" para: ${content.trim()}?`;
     }
     if (kind === 'NOTA_APAGAR') {
-      return 'Posso apagar a nota mais recente?';
+      // Conteúdo aqui é pista de desambiguação, não requisito — ver comentário equivalente em
+      // LEMBRETE_APAGAR.
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nenhuma nota para apagar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
+      }
+      const current = store.items[matchResult.index];
+      return `Posso apagar a nota "${current.text}"?`;
     }
     throw new Error(`Ação inválida para NotaTool: ${kind}`);
   }
@@ -388,7 +446,11 @@ export class NotaTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nenhuma nota para editar.';
       }
-      const idx = store.items.length - 1;
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const idx = matchResult.index;
       const current = store.items[idx];
       const trimmed = content.trim();
 
@@ -424,7 +486,12 @@ export class NotaTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nenhuma nota para apagar.';
       }
-      store.items.pop();
+      const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
+      }
+      const idx = matchResult.index;
+      store.items.splice(idx, 1);
       this.store.write(store);
       return 'Nota apagada.';
     }
@@ -472,7 +539,16 @@ export class MemoriaTool implements IMutatingTool {
       if (!content || !content.trim()) {
         throw new Error('Conteúdo ausente para editar memória.');
       }
-      return `Posso trocar essa memória para: ${content.trim()}?`;
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nada guardado para editar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const current = store.items[matchResult.index];
+      return `Posso trocar a memória "${current.text}" para: ${content.trim()}?`;
     }
     if (kind === 'MEMORIA_ESQUECER') {
       // Achado 2 (CRÍTICA, rodada 1): "apagar", nunca "esquecer" — a palavra "esquece" está em
@@ -480,7 +556,18 @@ export class MemoriaTool implements IMutatingTool {
       // Achado novo (BAIXA, rodada 2): frase curta, simétrica a LEMBRETE_APAGAR/NOTA_APAGAR —
       // uma cauda como "...que você me pediu para guardar?" reintroduziria "guardar", que é ele
       // mesmo um marcador afirmativo ('pode guardar'), abrindo espaço pra ambiguidade contrária.
-      return 'Posso apagar a memória mais recente?';
+      // Conteúdo aqui é pista de desambiguação, não requisito — ver comentário equivalente em
+      // LEMBRETE_APAGAR.
+      const store = this.store.read();
+      if (store.items.length === 0) {
+        return 'Não há nada guardado pra apagar.';
+      }
+      const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
+      }
+      const current = store.items[matchResult.index];
+      return `Posso apagar a memória "${current.text}"?`;
     }
     throw new Error(`Ação inválida para MemoriaTool: ${kind}`);
   }
@@ -497,7 +584,11 @@ export class MemoriaTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nada guardado para editar.';
       }
-      const idx = store.items.length - 1;
+      const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
+      }
+      const idx = matchResult.index;
       const trimmed = content.trim();
       const normalized = trimmed.toLowerCase();
 
@@ -543,7 +634,12 @@ export class MemoriaTool implements IMutatingTool {
       if (store.items.length === 0) {
         return 'Não há nada guardado pra apagar.';
       }
-      store.items.pop();
+      const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.ambiguous && matchResult.matches) {
+        return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
+      }
+      const idx = matchResult.index;
+      store.items.splice(idx, 1);
       this.store.write(store);
       return 'Apagado.';
     }
