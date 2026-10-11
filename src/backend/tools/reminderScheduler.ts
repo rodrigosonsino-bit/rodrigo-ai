@@ -3,6 +3,10 @@ import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
 import { computeNextOccurrence } from './relativeTimeParser.js';
 
 export const OVERDUE_CUTOFF_MS = 24 * 60 * 60 * 1000; // 24 horas
+// Teto de 32 bits do setTimeout do Node (2^31-1 ms, ~24,85 dias) — acima disso o delay é
+// truncado e o timer dispara quase imediatamente (achado 2, auditoria Kimi K3). schedule()
+// encadeia reagendamentos nesse incremento em vez de passar o delay real de uma vez.
+const MAX_SAFE_TIMEOUT_MS = 2_147_483_647;
 
 export class ReminderScheduler {
   private readonly timers = new Map<string, NodeJS.Timeout>();
@@ -51,6 +55,17 @@ export class ReminderScheduler {
           // tratamento de schedule() — rastreado no Map (pra shutdown() poder cancelá-lo) e
           // unref()'d (pra nunca ser o motivo do processo não encerrar, mesma armadilha do
           // CLAUDE.md global sobre setTimeout ref'd).
+          // Achado 5 (auditoria de código, Kimi K3, rodada da Fatia 4, revisado — NÃO corrigido
+          // estruturalmente): em teoria, um processo sem NENHUM outro handle ref'd poderia
+          // encerrar antes deste timer disparar, perdendo a notificação de atraso do reinício.
+          // Verificado contra o caminho real (src/backend/index.ts): createVoiceRuntime() chama
+          // bootstrap() e, poucas linhas depois, startServer() chama server.listen() — o socket
+          // HTTP fica ref'd quase imediatamente, bem antes de qualquer janela real de
+          // esvaziamento do event loop. Reverter o unref() reintroduziria o bug original do
+          // achado 1 (processo nunca encerra com timer atrasado pendente). Risco aceito e
+          // documentado para quem reusar bootstrap() fora desse caminho de startup (ex. um
+          // script CLI que chama bootstrap() e sai logo em seguida sem abrir servidor) —
+          // nesse caso específico, a perda é real.
           const lateTimer = setTimeout(() => {
             this.timers.delete(item.id);
             this.notify(item, { late: true });
@@ -103,7 +118,32 @@ export class ReminderScheduler {
     // Limpa timer anterior para o mesmo ID se houver
     this.cancel(item.id);
 
-    const ms = new Date(item.dueAt).getTime() - Date.now();
+    const target = new Date(item.dueAt).getTime();
+    // Achado 4 (auditoria de código, Kimi K3, rodada da Fatia 4): dueAt malformado (NaN) fazia
+    // Math.max(0, NaN) = NaN, e setTimeout(fn, NaN) dispara com delay efetivo 0 — o lembrete
+    // recém-criado notificaria IMEDIATAMENTE em silêncio. bootstrap() já validava isso com
+    // throw; o caminho de criação (muito mais frequentado) não validava nada. Aqui, único
+    // ponto de entrada de todo agendamento, loga e recusa em vez de disparar às cegas.
+    if (Number.isNaN(target)) {
+      console.error(`[ReminderScheduler] dueAt inválido para lembrete id=${item.id}: "${item.dueAt}" — não agendado.`);
+      return;
+    }
+
+    const ms = target - Date.now();
+    // Achado 2 (auditoria de código, Kimi K3, CRÍTICO): setTimeout do Node trunca qualquer
+    // delay > 2^31-1 ms (~24,85 dias) para 1ms — dispara quase na hora, e notify() persiste
+    // notifiedAt, marcando como entregue um lembrete que na verdade nunca tocou. Lembretes de
+    // "daqui a um mês" ou o reagendamento automático de uma recorrência anual cruzam esse teto.
+    // Em vez de agendar o delay real de uma vez, agenda o máximo seguro e, ao vencer essa
+    // parcela, chama schedule() de novo — a cadeia de reagendamentos converge pro horário real
+    // em incrementos de no máximo ~24,85 dias, nunca dispara cedo.
+    if (ms > MAX_SAFE_TIMEOUT_MS) {
+      const timer = setTimeout(() => this.schedule(item), MAX_SAFE_TIMEOUT_MS);
+      timer.unref();
+      this.timers.set(item.id, timer);
+      return;
+    }
+
     const timer = setTimeout(() => this.fire(item.id), Math.max(0, ms));
     timer.unref();
     this.timers.set(item.id, timer);

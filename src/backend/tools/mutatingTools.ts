@@ -18,7 +18,7 @@ export { type IMutatingTool };
 export function findBestMatchingItemIndex(
   items: readonly StoredItem[],
   query: string
-): { index: number; ambiguous: boolean; matches?: [StoredItem, StoredItem] } {
+): { index: number; ambiguous: boolean; matches?: [StoredItem, StoredItem]; notFound?: boolean } {
   if (items.length === 0) return { index: -1, ambiguous: false };
   if (!query || !query.trim()) return { index: items.length - 1, ambiguous: false };
 
@@ -28,33 +28,63 @@ export function findBestMatchingItemIndex(
     let score = 0;
     if (normText === normQuery) {
       score = 1.0;
-    } else if (normText.includes(normQuery) || normQuery.includes(normText)) {
+    } else if (normText.length > 2 && normQuery.length > 2 && (normText.includes(normQuery) || normQuery.includes(normText))) {
+      // Achado 3 (auditoria de código, Kimi K3, rodada da Fatia 4): a correção de palavras
+      // curtas (wordsMatch, abaixo) não valia pro texto INTEIRO — um item com texto curto
+      // ("1", "oi") era substring trivial de qualquer query mais longa que o contivesse,
+      // ganhando 0.8 por acaso. Mesma doença do "o" coringa, um nível acima. Agora os dois
+      // lados precisam ter mais de 2 caracteres pra essa correspondência frouxa valer; textos
+      // curtos caem no scoring por palavra abaixo, que já exige igualdade exata pra eles.
       score = 0.8;
     } else {
-      // Correção (continuação da Fatia 2 da F14): a versão anterior filtrava palavras com
-      // length <= 2 e dividia só por qWords.length. Isso tinha dois bugs que colidiam:
-      // (a) um dígito ou palavra curta ("1" vs "2", "um" vs "dois") era exatamente o que
-      //     distinguia dois itens parecidos, e era descartado antes de contar;
-      // (b) dividir só por qWords.length (sem considerar tWords.length) deixava uma
-      //     correspondência parcial empatar com uma correspondência exata de outro item,
-      //     disparando ambiguidade falsa onde havia um vencedor claro.
+      // Correção (Fatia 2 da F14, revisada na Fatia 4 após a suíte de estresse achar um
+      // defeito real): a versão original filtrava palavras com length <= 2 e dividia só por
+      // qWords.length — isso descartava dígitos/palavras curtas que eram exatamente o que
+      // distinguia dois itens ("1" vs "2", "um" vs "dois") e deixava correspondência parcial
+      // empatar com correspondência exata (Math.max(qWords.length, tWords.length) corrigiu
+      // isso). Mas incluir palavras curtas SEM EXIGIR igualdade exata criou um bug pior: uma
+      // palavra de 1 caractere como "o"/"a" (artigos comuníssimos em português) "contém" ou
+      // "é contida" por quase qualquer palavra que tenha aquela letra — "comprar", "pão" e
+      // "horas" todos incluem a letra "o", então o item errado "enviar O email..." empatava
+      // com o item certo só por causa do "o" (achado real da suíte H14.2, cenário
+      // D-reagendar-0: REAGENDAR com o texto completo do item + "daqui a N horas" virava
+      // ambíguo contra um item totalmente não relacionado). A regra agora: correspondência por
+      // substring só vale entre palavras com MAIS de 2 caracteres cada; palavras de 1-2
+      // caracteres só contam se forem EXATAMENTE iguais — preserva a distinção por dígito/
+      // palavra curta sem deixar peças curtas virarem coringas universais.
+      const wordsMatch = (a: string, b: string): boolean => {
+        if (a === b) return true;
+        if (a.length <= 2 || b.length <= 2) return false;
+        return a.includes(b) || b.includes(a);
+      };
       const qWords = normQuery.split(/\s+/).filter((w) => w.length > 0);
       const tWords = normText.split(/\s+/).filter((w) => w.length > 0);
       let matchCount = 0;
       for (const qw of qWords) {
-        if (tWords.some((tw) => tw.includes(qw) || qw.includes(tw))) matchCount += 1;
+        if (tWords.some((tw) => wordsMatch(qw, tw))) matchCount += 1;
       }
       score = qWords.length > 0 ? matchCount / Math.max(qWords.length, tWords.length) : 0;
     }
     return { index: idx, item, score };
   });
 
-  scored.sort((a, b) => b.score - a.score);
+  // Achado 7 (auditoria de código, Kimi K3): empate exato de score antes dependia da ordem de
+  // iteração de `items` (JS sort é estável, mas a ordem de leitura do JsonStore não é um
+  // contrato documentado). Desempate explícito por `createdAt` mais recente — determinístico e
+  // nomeado, não um acidente de implementação.
+  scored.sort((a, b) => b.score - a.score || b.item.createdAt.localeCompare(a.item.createdAt));
   const best = scored[0];
   const second = scored[1];
 
+  // Achado 1 (auditoria de código, Kimi K3, CRÍTICO): quando a query NÃO é vazia mas nenhum
+  // item se parece minimamente com ela (score < 0.2), a versão anterior caía pro item "mais
+  // recente" em silêncio — exatamente o que a F14 existe pra eliminar. Cenário real: usuário
+  // pede pra apagar/reagendar algo que já não existe (ou o ASR errou o nome) e o app mutaria o
+  // item errado com uma confirmação que parece legítima, violando H14.2 ("zero alteração no
+  // item errado"). Agora reporta notFound; os chamadores (preview/execute de cada ferramenta)
+  // respondem "não encontrei" em vez de prosseguir.
   if (best.score < 0.2) {
-    return { index: items.length - 1, ambiguous: false };
+    return { index: -1, ambiguous: false, notFound: true };
   }
 
   if (second && best.score - second.score < 0.15 && second.score >= 0.4) {
@@ -132,6 +162,9 @@ export class LembreteTool implements IMutatingTool {
         return 'Não há nenhum lembrete para reagendar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.notFound) {
+        return `Não encontrei nenhum lembrete parecido com "${content}" pra reagendar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
@@ -155,7 +188,14 @@ export class LembreteTool implements IMutatingTool {
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
-      const current = store.items[matchResult.index];
+      // EDITAR: content é o NOVO valor, não uma descrição do item antigo — ao contrário de
+      // APAGAR/REAGENDAR, raramente se parece com o texto que está sendo substituído ("comprar
+      // pão" -> "buscar as crianças" não tem palavra em comum, e isso é normal). "Não encontrei"
+      // aqui seria falso negativo frequente; sem match forte, cai pro item mais recente
+      // (comportamento herdado, inofensivo porque a pergunta de confirmação mostra qual item
+      // foi escolhido antes de qualquer mutação).
+      const idx = matchResult.notFound ? store.items.length - 1 : matchResult.index;
+      const current = store.items[idx];
       return `Posso trocar o lembrete "${current.text}" para: ${content.trim()}?`;
     }
     if (kind === 'LEMBRETE_APAGAR') {
@@ -168,6 +208,9 @@ export class LembreteTool implements IMutatingTool {
         return 'Não há nenhum lembrete para apagar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.notFound) {
+        return `Não encontrei nenhum lembrete parecido com "${content}" pra apagar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
       }
@@ -201,6 +244,9 @@ export class LembreteTool implements IMutatingTool {
         return 'Não há nenhum lembrete para reagendar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.notFound) {
+        return `Não encontrei nenhum lembrete parecido com "${content}" pra reagendar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
@@ -212,7 +258,12 @@ export class LembreteTool implements IMutatingTool {
       }
       store.items[idx] = { ...current, dueAt: timeParsed.dueAt, notifiedAt: null };
       this.store.write(store);
-      this.scheduler.schedule({ id: current.id, text: current.text, dueAt: timeParsed.dueAt });
+      try {
+        this.scheduler.schedule({ id: current.id, text: current.text, dueAt: timeParsed.dueAt });
+      } catch (err) {
+        console.error('[mutation] lembrete reagendado no store, mas o agendamento falhou:', err);
+        return 'Reagendei no registro, mas não consegui atualizar o aviso.';
+      }
       return 'Lembrete reagendado com sucesso.';
     }
 
@@ -228,7 +279,16 @@ export class LembreteTool implements IMutatingTool {
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
-      const idx = matchResult.index;
+      // Achado D5 (auditoria da própria suíte de estresse, Fatia 4): propagar `notFound`
+      // pra cá regrediu o H7 da Fase 9 e o H14.1 do phase14Stress — execute(EDITAR) passou
+      // a responder "não encontrei" quando o content é o TEXTO NOVO ("todo domingo de manhã
+      // passear", "buscar as crianças"), que por definição não se parece com nenhum item
+      // existente. preview(LEMBRETE_EDITAR) já reconhecia isso e caía pro item mais recente
+      // (ver comentário lá); o execute ficou inconsistente com a pergunta já confirmada.
+      // Seguro porque a confirmação do preview mostra qual item será trocado antes da
+      // mutação, e porque as recusas semânticas (recorrência, horário) abaixo dependem de
+      // chegar até aqui.
+      const idx = matchResult.notFound ? store.items.length - 1 : matchResult.index;
       const current = store.items[idx];
 
       if (current.notifiedAt) {
@@ -340,7 +400,15 @@ export class LembreteTool implements IMutatingTool {
       this.store.write(store);
 
       if (dueAt) {
-        this.scheduler.schedule({ id, text: finalText, dueAt });
+        // Achado 4 (auditoria de código, Kimi K3): o ramo recorrente, logo acima, já protegia
+        // schedule() com try/catch; este ramo (bem mais frequentado) chamava a céu aberto —
+        // qualquer exceção síncrona derrubaria o processo em vez de reportar honestamente.
+        try {
+          this.scheduler.schedule({ id, text: finalText, dueAt });
+        } catch (err) {
+          console.error('[mutation] lembrete gravado, mas o agendamento falhou:', err);
+          return 'Guardei o lembrete, mas não consegui agendar o aviso.';
+        }
         return `Lembrete criado para ${formatHumanRelative(dueAt)}.`;
       }
       return 'Lembrete criado.';
@@ -352,6 +420,9 @@ export class LembreteTool implements IMutatingTool {
         return 'Não há nenhum lembrete para apagar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.notFound) {
+        return `Não encontrei nenhum lembrete parecido com "${content}" pra apagar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei dois lembretes parecidos: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
       }
@@ -411,6 +482,9 @@ export class NotaTool implements IMutatingTool {
         return 'Não há nenhuma nota para editar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.notFound) {
+        return `Não encontrei nenhuma nota parecida com "${content}" pra editar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
@@ -425,6 +499,9 @@ export class NotaTool implements IMutatingTool {
         return 'Não há nenhuma nota para apagar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.notFound) {
+        return `Não encontrei nenhuma nota parecida com "${content}" pra apagar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
       }
@@ -450,7 +527,10 @@ export class NotaTool implements IMutatingTool {
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
-      const idx = matchResult.index;
+      // Mesmo achado D5 de LembreteTool.execute(LEMBRETE_EDITAR): content aqui é o novo
+      // valor, que não precisa se parecer com o texto antigo — sem match forte, cai pro
+      // item mais recente (o preview da confirmação já mostra qual).
+      const idx = matchResult.notFound ? store.items.length - 1 : matchResult.index;
       const current = store.items[idx];
       const trimmed = content.trim();
 
@@ -487,6 +567,9 @@ export class NotaTool implements IMutatingTool {
         return 'Não há nenhuma nota para apagar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.notFound) {
+        return `Não encontrei nenhuma nota parecida com "${content}" pra apagar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas notas parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
       }
@@ -544,6 +627,9 @@ export class MemoriaTool implements IMutatingTool {
         return 'Não há nada guardado para editar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content);
+      if (matchResult.notFound) {
+        return `Não encontrei nenhuma memória parecida com "${content}" pra editar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
@@ -563,6 +649,9 @@ export class MemoriaTool implements IMutatingTool {
         return 'Não há nada guardado pra apagar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.notFound) {
+        return `Não encontrei nenhuma memória parecida com "${content}" pra apagar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
       }
@@ -588,7 +677,10 @@ export class MemoriaTool implements IMutatingTool {
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer alterar?`;
       }
-      const idx = matchResult.index;
+      // Mesmo achado D5 de LembreteTool.execute(LEMBRETE_EDITAR): content aqui é o novo
+      // valor — sem match forte, cai pro item mais recente (o preview da confirmação já
+      // mostra qual item será trocado).
+      const idx = matchResult.notFound ? store.items.length - 1 : matchResult.index;
       const trimmed = content.trim();
       const normalized = trimmed.toLowerCase();
 
@@ -635,6 +727,9 @@ export class MemoriaTool implements IMutatingTool {
         return 'Não há nada guardado pra apagar.';
       }
       const matchResult = findBestMatchingItemIndex(store.items, content ?? '');
+      if (matchResult.notFound) {
+        return `Não encontrei nenhuma memória parecida com "${content}" pra apagar.`;
+      }
       if (matchResult.ambiguous && matchResult.matches) {
         return `Encontrei duas memórias parecidas: "${matchResult.matches[0].text}" e "${matchResult.matches[1].text}". Qual você quer apagar?`;
       }
