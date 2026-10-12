@@ -7,3 +7,6 @@
 - **L5:** "CSRF token not found" no NotebookLM significa parar e pedir ao Rodrigo `notebooklm login --browser-cookies chrome`.
 - **L6:** gerador de fontes não pode ter estado fixo no código. Ler o estado de `ESTADO.md`.
 - **L7:** checar a cota antes de mandar trabalho a modelos premium. Usar `auto` como padrão.
+- **L8:** ao configurar um agente, conferir se o provedor do modelo tem chave no gateway (`openclaw agent --agent <id> --message "OK"`). O modelo funcional hoje é `nvidia/moonshotai/kimi-k3`.
+- **L9:** quando mudar as filas do `delegar`, atualizar no mesmo passo a skill `agent-catalog` do OpenClaw.
+- **L10:** depois de executar uma fase, atualizar o status e o inventário do plano na mesma mudança. Documento que diz "proposta" sobre algo já feito engana os outros agentes.
