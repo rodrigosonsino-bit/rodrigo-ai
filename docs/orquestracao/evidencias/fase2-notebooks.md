@@ -25,3 +25,10 @@ As duas listas de fontes têm o mesmo título e a mesma quantidade, mas os **con
 | 91c4cf62-0ff1-4aa2-84a8-1886231c1e04 | (vazio) | 0 | deletar (vazio) |
 
 Deleção autorizada pelo Rodrigo sob essas condições (notebook vazio).
+
+## 3. Execução (2026-10-12 07:32 PT)
+
+- Antes de cada deleção, a contagem de fontes foi conferida de novo (0). Foram deletados deb98c1c, d6421dc7 e 91c4cf62. Depois disso, `notebooklm list` não lista mais nenhum dos três.
+- Psicoterapeuta 5cddc991 e 082c057a: **mantidos**, porque o conteúdo difere.
+- Novo notebook: `d7378de8-3f8f-4fec-94ff-c6d96f216e4a`, "ENGENHARIA DE SOFTWARE (backend e frontend)", com 17 fontes por URL. Durante a montagem, removi 2 fontes que eu mesmo tinha adicionado por engano: um arXiv errado (2105.12854, sobre teoria dos números) e uma URL da IEEE que deu erro ao ingerir.
+- Exportação de psicanálise para `docs/research/`: 4d6ff1c2 (42), 4b9a4517 (47), 64beea89 (6), 09ff14d7 (27), 5cddc991 (1) e 082c057a (1). Total de 124 fontes, sem erros.

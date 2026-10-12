@@ -15,7 +15,11 @@
 
 ## Markdown local (prioridade 2, `rodrigo-ai/docs/research/`, gitignored)
 
-- `Psicoterapeuta_… (pastas vazias)`
+- `Acervo_Psicanálise_Freud_Winnicott_Klein_Anna_Freud_Lacan__4d6ff1c2/` (42 md)
+- `LIVROS_FREUD_LACAN_e_outros__4b9a4517/` (47 md)
+- `Psicopatologia_e_a_Ciência_do_Diagnóstico_na_Psicologia_Clínica__64beea89/` (6 md)
+- `TRANSTORNOS__09ff14d7/` (27 md)
+- `Psicoterapeuta_…__5cddc991/` e `__082c057a/` (1 md cada)
 
 ## Repositórios acadêmicos (prioridade 3)
 
@@ -23,7 +27,7 @@ PEP-Web, APA PsycInfo, PePSIC/BVS-Psi, SciELO, International Journal of Psychoan
 
 ## Lacunas
 
-Este acervo ainda não foi exportado para markdown (previsto na Fase 2). Até lá, consultar direto no NotebookLM.
+O acervo foi exportado na Fase 2 em 2026-10-12.
 
 ## Regras de citação
 

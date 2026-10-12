@@ -4,6 +4,7 @@
 
 | id curto | Título |
 |---|---|
+| d7378de8 | ENGENHARIA DE SOFTWARE (backend e frontend): 17 fontes (12-factor, RFC 9110, OWASP, SRE, DORA, Fowler, Azure patterns, MDN, web.dev, WCAG 2.2, React, arXiv) |
 | 803ea045 | Rodrigo AI (orquestrador de voz) |
 | f96a5ea7 | PsicoApp Monorepo |
 | c7b355ab | Projeto App Virtologia |
@@ -17,6 +18,7 @@
 
 ## Markdown local (prioridade 2, `rodrigo-ai/docs/research/`, gitignored)
 
+- `ENGENHARIA_SOFTWARE/` (17 md, 68K)
 - `Projeto_App_Virtologia_Memória_e_Arquitetura__c7b355ab (9 md)`
 
 ## Repositórios acadêmicos (prioridade 3)
@@ -25,7 +27,7 @@ ACM Digital Library, IEEE Xplore, arXiv (cs.SE, cs.HC), USENIX, RFCs IETF, OWASP
 
 ## Lacunas
 
-Por enquanto só há notebooks de projeto, sem notebook de teoria (previsto na Fase 2).
+O notebook de teoria foi criado na Fase 2. As fontes do arXiv entram só com o resumo (página abs). Os livros clássicos não entraram por direitos autorais.
 
 ## Regras de citação
 
