@@ -6,24 +6,35 @@
 > `docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md` (aceito pelo Rodrigo em 2026-10-11; no git a partir do PR do branch `docs-estado-pos-merge`).
 > O gerador do NotebookLM (`scripts/notebooklm/build_sources.py`) copia este arquivo para a fonte 00 (§2b) e para a fonte 31: o estado escrito à mão mora só aqui.
 
-- **Atualizado em:** 2026-10-11 23:40 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
+- **Atualizado em:** 2026-10-12 08:00 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
 
 ## Trava (lease)
 - titular: ORQUESTRADOR_GROK (Grok Bot, com voz em tempo real)
-- desde: 2026-10-11 22:45 BRT (renovada 23:40 BRT)
-- expira_em: 2026-10-12 03:40 BRT
+- desde: 2026-10-11 22:45 BRT (renovada 2026-10-12 08:00 BRT)
+- expira_em: 2026-10-12 12:00 BRT
 - duração: 4 h, renovada a cada atualização. Aceita pelo Rodrigo em 2026-10-11 como ponto de partida; **revisar depois de uma semana de uso (~2026-10-18)**.
 - reserva: Claude Code Sonnet (`~/.local/bin/claude`). Login e cota **não testados** — o Rodrigo pediu para não testar agora.
 
 ## Estado do repo
-- `main` = `origin/main` = `9cb5bdb`: **F15 Fatia 4 mergeada pelo PR #1** (https://github.com/rodrigosonsino-bit/rodrigo-ai/pull/1), com aval do Rodrigo. Inclui `bdfdc9e` (este arquivo e o roteiro com a nova ordem).
-- Branch `docs-estado-pos-merge`: esta atualização, o gerador do NotebookLM e os documentos de orquestração/auditoria/plano (PR aberto, sem merge).
+- `main` = `origin/main` = `d94575b`: **PR #2 mergeado** em 2026-10-12, com aval do Rodrigo (ESTADO pós-merge, gerador do NotebookLM, documentos de orquestração). Antes: `9cb5bdb`, que é o PR #1 da F15 Fatia 4.
+- Branch `docs-plano-auto-melhoria` (PR #3, aberto, sem merge): plano de auto-melhoria (Fases 1 e 2), `INCIDENTES.md`, `LICOES.md`, `docs/conhecimento/` (7 áreas: índice, sínteses com citação e briefs por papel), evidências da Fase 2. Também corrige no gerador os 2 apontamentos do review do PR #2: o estado da F16 (o `conflictResolver` já existe, em `eba54e5`) e os hashes dos commits da F15. Acrescenta a fonte 34.
 - Suíte: em `main` 739/740 a 740/740; na branch da Fatia 4, 743/745 a 745/745. As únicas falhas são de `fvScreen.test.js` (HV.3 ×2 e "auditoria Kimi K3 achado 5"), **intermitentes e pré-existentes** (0 a 3 falhas por execução também antes da Fatia 4). `tsc` verde.
 - Não rastreados (não commitar nem apagar): arquivos de persona OpenClaw (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `DREAMS.md`), `HANDOFF-*.md`, `.openclaw-cli-images/`.
 
 ## NotebookLM ("Rodrigo AI (orquestrador de voz)", `803ea045-d8fb-4a59-9caa-872d91a51124`)
 - Atualizado em 2026-10-11 após o PR #1: **30 fontes**, todas prontas. Trocadas as 6 que mudaram (00, 15, 20, 21, 27, 29) e reenviada a 06, que estava com erro.
-- Novas: 30 plano de orquestração (`930ad4e8`), 31 estado da orquestração = este arquivo (`d8a2168d`, reenviado a cada mudança relevante), 32 auditoria de fechamento da F15 (`008ad12c`), 33 plano da F15 Fatia 4 (`461564f4`).
+- Novas: 30 plano de orquestração (`930ad4e8`), 31 estado da orquestração = este arquivo (id atual em `notebooklm source list`; o antigo `d8a2168d` foi substituído por `2c09d0c8` em 2026-10-11 e é trocado a cada reenvio), 32 auditoria de fechamento da F15 (`008ad12c`), 33 plano da F15 Fatia 4 (`461564f4`).
+
+## Auto-melhoria e conhecimento (2026-10-12, PR #3)
+- Fase 1: `INCIDENTES.md` (7 incidentes reais), `LICOES.md` (L1–L7), `docs/conhecimento/<área>/INDICE.md` para as 7 áreas (Virtologia sempre rotulada "segundo Casarotto") e 12 briefs por papel em `docs/conhecimento/briefs/`.
+- Sínteses (NotebookLM, só fontes dos notebooks, com citação): neurociência, virtologia, hermenêutica, teologia (NT e AT), exegese, psicanálise e engenharia de software.
+- Fase 2:
+  - Novo notebook **"ENGENHARIA DE SOFTWARE (backend e frontend)" `d7378de8-3f8f-4fec-94ff-c6d96f216e4a`**, com 17 fontes; o markdown está em `docs/research/ENGENHARIA_SOFTWARE/`.
+  - Psicanálise exportada para `docs/research/` (124 fontes, de 6 notebooks).
+  - **Deletados** 3 notebooks vazios sem título (deb98c1c, d6421dc7, 91c4cf62).
+  - Os 2 "Psicoterapeuta" (5cddc991, 082c057a) foram **mantidos**: o conteúdo difere. Fica para o Rodrigo decidir.
+  - As evidências estão em `docs/orquestracao/evidencias/fase2-notebooks.md`.
+- Rotina semanal de revisão (seg 08:00 BRT): o Rodrigo cria; prompt no relatório do orquestrador.
 
 ## Prioridades (em ordem) — registradas em `docs/roadmap-2026-10-09.md` (2026-10-11)
 1. ~~**F15 Fatia 4 (integração)**~~ — **mergeada (PR #1, `9cb5bdb`)**. Token comparado com o emitido e de uso único (o token forjado do H15.2 agora dá 0 execuções); ferramentas do `runTurn` pelo coordenador; mutação pós-SIM pelo gatekeeper; fala de estouro dentro do turno; pendentes com id e "o que você fez?". Testes primeiro, nenhum teste afrouxado.
@@ -57,5 +68,5 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 | `delegar` | — | — | **Consertado.** Filas: `antigravity-gemini-3.1-pro` primeiro; Opus/Sonnet fora até 11/11; tempo de código 600 s |
 
 ## Último passo / próximo passo
-- Último: PR #1 (F15 Fatia 4) mergeado; NotebookLM atualizado (30 fontes); este arquivo e o gerador do NotebookLM corrigidos (o estado da fonte 00 agora vem daqui).
+- Último: PR #2 mergeado (`d94575b`); auto-melhoria Fases 1 e 2 no PR #3; NotebookLM atualizado com as fontes 00, 15, 29, 31 e a nova 34.
 - Próximo: **Fase V Fatia 5**, plano curto antes do código, numa sessão nova do `orquestrador-de-voz`; nenhum código antes do aval do Rodrigo.
