@@ -1405,6 +1405,61 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       }
     });
 
+    it('F15 Fatia 4 (A1): mutação pós-SIM passa pelo gatekeeper e consome o token do turno', async (t) => {
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      h.engine.fixedTranscript = 'Lembrete: lavar o carro';
+      h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'lavar o carro'];
+
+      const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      currentSse = sse;
+      await sse.waitFor(1);
+
+      const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+      await sse.waitFor(8, 5000);
+      await fetch(`${h.baseUrl}/api/voice/session/played`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
+      });
+
+      h.engine.fixedTranscript = 'Pode sim, obrigado';
+      const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: simTurnId } = (await audioRes2.json()) as { turnId: string };
+      await sse.waitFor(15, 5000);
+
+      const audioEvent = sse.events
+        .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+        .pop() as { type: 'sentence_audio_ready'; text: string };
+      assert.equal(audioEvent.text, 'Lembrete criado.');
+
+      const trace = h.sessionManager.coordinator.getTrace(simTurnId);
+      assert.ok(trace, 'o turno do SIM deve ter ExecutionTrace');
+      assert.equal(trace.tasks.length, 1);
+      assert.equal(trace.tasks[0].subAgentId, 'tool_lembrete');
+      assert.equal(trace.tasks[0].isMutation, true);
+      assert.equal(trace.tasks[0].status, 'completed');
+      assert.equal(h.sessionManager.peekMutationConfirmationToken(simTurnId), undefined, 'token consumido pelo gatekeeper');
+    });
+
     it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): SIM da Camada 0 nunca aciona o gate nem detectConfirmation', async (t) => {
       const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);

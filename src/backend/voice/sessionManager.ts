@@ -792,12 +792,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             if (!tool) {
               text = MUTATION_FAILURE_TEXT; // achado 4 — nunca chama .execute() em null
             } else {
-              try {
-                text = tool.execute(mutation.kind, mutation.content); // achado 3 — kind completo
-              } catch (err) {
-                text = MUTATION_FAILURE_TEXT; // achado 7 — texto literal definido em voiceProtocol.ts
-                console.error('[mutation] execução falhou:', err);
-              }
+              // Fatia 4 (A1): a mutação passa pelo gatekeeper do coordenador, que consome o token emitido acima.
+              const r = await this.delegateToolInTurn(turn, transcript, tool, mutation.kind, mutation.content, true); // achado 3 — kind completo
+              if (session.activeTurn !== turn) return;
+              text = r.text ?? MUTATION_FAILURE_TEXT; // achado 7 — texto literal definido em voiceProtocol.ts
+              if (r.text === null) console.error('[mutation] execução falhou:', r.error);
             }
           } else {
             text = MUTATION_CANCELLED_TEXT; // achado 7
