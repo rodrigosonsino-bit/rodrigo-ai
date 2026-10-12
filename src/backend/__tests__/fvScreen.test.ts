@@ -489,7 +489,7 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
   });
 
   it('auditoria Kimi K3 (achado 5): o JSON de unavailable usa SÓ o captureId do corpo, nunca cai para o da query', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 5000 } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -567,7 +567,7 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
   });
 
   it('HV.3: assinatura inválida (não é JPEG) é rejeitada com 400, sem escrever nada', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 5000 } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -575,12 +575,14 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     const res = await postScreenJpeg(h, s, captureId, Buffer.from('isto não é um jpeg'));
     assert.equal(res.status, 400);
     assert.equal(findScreenFiles(h.tmp).length, 0);
-    await waitFor(() => done(s.sse), 'turn_done'); // o pedido segue pendente: o teste espera o timeout dar frase fixa
+    // o upload rejeitado não consome o pedido: encerrá-lo explicitamente tem de dar 200 (e destrava o turno sem esperar o prazo)
+    assert.equal((await postScreenUnavailable(h, s, captureId)).status, 200);
+    await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
 
   it('HV.3: dimensão acima do limite é rejeitada com 400, sem escrever nada', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 5000 } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -588,12 +590,14 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     const res = await postScreenJpeg(h, s, captureId, makeJpeg(1601, 900));
     assert.equal(res.status, 400);
     assert.equal(findScreenFiles(h.tmp).length, 0);
+    // o upload rejeitado não consome o pedido: encerrá-lo explicitamente tem de dar 200 (e destrava o turno sem esperar o prazo)
+    assert.equal((await postScreenUnavailable(h, s, captureId)).status, 200);
     await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
 
   it('HV.3: corpo maior que o limite é rejeitado com 413, sem escrever nada', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: 5000 } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -602,6 +606,8 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     const res = await postScreenJpeg(h, s, captureId, big);
     assert.equal(res.status, 413);
     assert.equal(findScreenFiles(h.tmp).length, 0);
+    // o upload rejeitado não consome o pedido: encerrá-lo explicitamente tem de dar 200 (e destrava o turno sem esperar o prazo)
+    assert.equal((await postScreenUnavailable(h, s, captureId)).status, 200);
     await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
