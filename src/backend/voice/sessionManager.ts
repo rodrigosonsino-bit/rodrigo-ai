@@ -102,6 +102,8 @@ const ACTION_CLAIM_VERBS =
 const ACTION_CLAIM_OBJECTS =
   /\b(lembrete|lembretes|nota|notas|anotaç[aã]o|memória|memoria|alarme|aviso|compromisso|tarefa|agenda|evento)\b/i;
 const ACTION_CLAIM_STANDALONE = /\b(anotei|salvei|guardei|agendei|apaguei|registrei)\b/i;
+/** Fatia 4 (A2): pergunta determinística de rastreabilidade ("o que você fez?"). */
+const WHAT_DID_YOU_DO = /\bo que (voc[eê]|vc) (j[aá] )?fez\b/i;
 
 /** F11: afirmação em 1ª pessoa de ação concluída sobre lembrete/nota/memória (sem ferramenta executada). */
 export function claimsUnexecutedAction(text: string): boolean {
@@ -414,13 +416,16 @@ export class SessionManager {
       }
     }
 
+    // Fatia 4 (§4.3, A2): async_deferred fica 'pending' com o id até concluir (M4 fora do escopo).
+    const deferred = result.kind === 'async_deferred';
     budget.trace.tasks.push({
       subAgentId: opts.subAgentId,
       prompt: opts.prompt,
       isMutation: opts.isMutation,
-      status: result.success || result.kind === 'async_deferred' ? 'completed' : 'failed',
+      status: deferred ? 'pending' : result.success ? 'completed' : 'failed',
       result: result.success ? result.output : result.error,
-      durationMs
+      durationMs,
+      ...(deferred ? { asyncTaskId: result.asyncTaskId } : {})
     });
 
     return { ok: true, result };
@@ -825,6 +830,24 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           }
           return;
         }
+      }
+
+      // Fatia 4 (A2): "o que você fez?" responde pelo ExecutionTrace — só se já houver trace com tarefas (R1);
+      // sem isso, a fala segue o caminho normal (inclusive o filtro de afirmação alucinada da F11).
+      const lastTrace = WHAT_DID_YOU_DO.test(transcript) ? this.coordinator.latestTraceWithTasks() : undefined;
+      if (lastTrace) {
+        this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+        this.emit(session, { type: 'state', state: 'falando' });
+        const clean = cleanTextForSpeech(this.coordinator.formatTraceSummary(lastTrace.turnId));
+        turn.expectedSentences.add(0);
+        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
+        await Promise.allSettled(turn.pendingSynthesis);
+        if (session.activeTurn === turn) {
+          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+          this.emit(session, { type: 'state', state: 'ouvindo' });
+          session.activeTurn = null;
+        }
+        return;
       }
 
       // F11 adendo (decisão do usuário, 2026-10-03): UMA classificação de intenção em nuvem (Gemini) para

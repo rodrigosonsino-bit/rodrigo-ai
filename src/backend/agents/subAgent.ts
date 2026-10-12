@@ -53,6 +53,8 @@ export interface TaskTraceItem {
   status: 'pending' | 'completed' | 'cancelled' | 'failed';
   result?: string;
   durationMs?: number;
+  /** Fatia 4 (§4.3, A2): id da tarefa async_deferred ainda em andamento (espelha SubAgentTaskResult). */
+  asyncTaskId?: string;
 }
 
 export interface ExecutionTrace {
@@ -173,6 +175,15 @@ export class SubAgentCoordinator {
     return trace;
   }
 
+  /** Fatia 4 (A2): último trace com tarefas, pela ordem de inserção (coordenador é do processo — R3). */
+  latestTraceWithTasks(): ExecutionTrace | undefined {
+    let latest: ExecutionTrace | undefined;
+    for (const trace of this.traces.values()) {
+      if (trace.tasks.length > 0) latest = trace;
+    }
+    return latest;
+  }
+
   formatTraceSummary(turnId: string): string {
     const trace = this.traces.get(turnId);
     if (!trace || trace.tasks.length === 0) {
@@ -180,13 +191,18 @@ export class SubAgentCoordinator {
     }
 
     const completed = trace.tasks.filter((t) => t.status === 'completed');
+    // Fatia 4 (A2): pendentes assíncronas entram na fala com o id da tarefa.
+    const pending = trace.tasks
+      .filter((t) => t.status === 'pending')
+      .map((t) => ` Ainda em andamento: ${t.prompt} (tarefa ${t.asyncTaskId ?? 'sem id'}).`)
+      .join('');
     if (completed.length === 0) {
-      return 'Nenhuma tarefa foi concluída com sucesso.';
+      return pending ? pending.trim() : 'Nenhuma tarefa foi concluída com sucesso.';
     }
 
     const summaryList = completed
       .map((t, idx) => `Passo ${idx + 1}: ${t.result || 'concluído'}`)
       .join('; ');
-    return `Executei ${completed.length} ${completed.length === 1 ? 'passo' : 'passos'}: ${summaryList}.`;
+    return `Executei ${completed.length} ${completed.length === 1 ? 'passo' : 'passos'}: ${summaryList}.${pending}`;
   }
 }

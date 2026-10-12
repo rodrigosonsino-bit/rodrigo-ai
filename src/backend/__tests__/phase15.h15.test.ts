@@ -362,45 +362,52 @@ test('H15.3: barge-in cancela em <= 350ms p95, sem tarefas órfãs', async () =>
  * H15.4 — Rastreabilidade: "o que você fez?" inclui async pendentes
  * ------------------------------------------------------------------------ */
 
-test('H15.4: formatTraceSummary responde com tarefas concluídas (base para voz)', () => {
+test('H15.4: "o que você fez?" inclui as concluídas e a async pendente com id (A2)', async () => {
   const coordinator = new SubAgentCoordinator();
   coordinator.register(
-    fakeAgent('a1', () => ({ success: true, output: 'ok a1', kind: 'final' }))
+    fakeAgent('a1', (req) => ({ success: true, output: `${req.prompt} concluído`, kind: 'final' }))
   );
+  coordinator.register(
+    fakeAgent('a2', () => ({ success: true, output: '', kind: 'async_deferred', asyncTaskId: 'async-42' }))
+  );
+  const { sm, tmpDir } = makeSessionManager({ coordinator });
 
-  const trace = coordinator.createTrace('turn-h154', 'fluxo misto');
-  trace.tasks.push({
-    subAgentId: 'a1',
-    prompt: 'primeiro passo',
-    isMutation: false,
-    status: 'completed',
-    result: 'primeiro concluído'
-  });
-  trace.tasks.push({
-    subAgentId: 'a1',
-    prompt: 'segundo passo',
-    isMutation: false,
-    status: 'completed',
-    result: 'segundo concluído'
-  });
-  trace.tasks.push({
-    subAgentId: 'a1',
-    prompt: 'terceiro (async)',
-    isMutation: false,
-    status: 'pending',
-    result: 'asyncTaskId=async-42' // H15.4: pendente async identificado
-  });
+  try {
+    const steps: Array<[string, string]> = [
+      ['a1', 'primeiro'],
+      ['a1', 'segundo'],
+      ['a2', 'terceiro (async)']
+    ];
+    for (const [subAgentId, prompt] of steps) {
+      const r = await sm.runSubAgentDelegation({
+        turnId: 'turn-h154',
+        query: 'fluxo misto',
+        subAgentId,
+        prompt,
+        isMutation: false,
+        signal: new AbortController().signal
+      });
+      assert.equal(r.ok, true);
+    }
 
-  const speech = coordinator.formatTraceSummary('turn-h154');
-  assert.ok(speech.includes('Executei 2 passos'));
-  assert.ok(speech.includes('primeiro concluído'));
-  assert.ok(speech.includes('segundo concluído'));
-  // A parte async pendente não aparece na fala final — ela é tratada
-  // separadamente pela fala de progresso do async_deferred. Apenas
-  // confirmamos que a task pendente EXISTE no trace para renderização futura.
-  const pending = trace.tasks.find((t) => t.status === 'pending');
-  assert.ok(pending);
-  assert.match(pending!.result ?? '', /asyncTaskId=async-42/);
+    const trace = coordinator.getTrace('turn-h154');
+    assert.ok(trace);
+    const pending = trace.tasks.find((t) => t.status === 'pending');
+    assert.ok(pending, 'a tarefa async_deferred fica pending no trace (§4.3)');
+    assert.equal(pending.prompt, 'terceiro (async)');
+    assert.equal(pending.asyncTaskId, 'async-42');
+    assert.equal(coordinator.latestTraceWithTasks()?.turnId, 'turn-h154');
+
+    const speech = coordinator.formatTraceSummary('turn-h154');
+    assert.ok(speech.includes('Executei 2 passos'));
+    assert.ok(speech.includes('primeiro concluído'));
+    assert.ok(speech.includes('segundo concluído'));
+    assert.ok(speech.includes('terceiro (async)'), 'a pendente aparece na fala');
+    assert.ok(speech.includes('async-42'), 'com o id da tarefa');
+  } finally {
+    await sm.shutdownAll();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 /* --------------------------------------------------------------------------
