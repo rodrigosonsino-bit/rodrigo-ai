@@ -1,6 +1,6 @@
 # Plano — Fatia de privacidade do OpenClaw (v1)
 
-> Estado: **PROPOSTA para revisão e auditoria. Sem código neste PR.** Nenhum código antes do aval do Rodrigo e de uma auditoria de outra família de modelo (item 5 do parecer).
+> Estado: **SUPERADO pela `privacidade-openclaw-v2.md`** (que incorpora as respostas do Grok ao §10). Mantido como histórico. Sem código.
 > Autor: Claude Sonnet (reserva do orquestrador), 2026-10-12, a pedido do ORQUESTRADOR_GROK. Base: `origin/main` em `ccf03ca`.
 > Origem: itens 1 e 2 de `docs/orquestracao/revisoes/2026-10-12-ressalvas-claude-sonnet.md` (PR #7).
 
