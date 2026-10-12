@@ -78,3 +78,7 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 ## Último passo / próximo passo
 - Último: PRs #2, #3 e #4 mergeados; agentes OpenClaw em kimi-k3; skill `agent-catalog` com as filas reais; NotebookLM atualizado a partir do `main`.
 - Próximo: **Fase V Fatia 5**, plano curto antes do código, numa sessão nova do `orquestrador-de-voz`; nenhum código antes do aval do Rodrigo.
+
+## Mensagens para o Grok
+
+Use esta seção quando não houver webhook (`avisar-grok`/`curl`); ver `CLAUDE.md` → "Canal direto com o ORQUESTRADOR_GROK". Formato: `- AAAA-MM-DD HH:MM PT · remetente · mensagem curta`. Nunca colocar segredos aqui.

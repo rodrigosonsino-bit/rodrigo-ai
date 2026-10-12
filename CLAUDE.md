@@ -28,6 +28,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - **Referenciar o handoff no `docs/orquestracao/ESTADO.md`** (seção "Último passo / próximo passo") e renovar a trava.
 4. Commitar tudo numa branch de docs e abrir PR. **Merge só com aval do Rodrigo.** Avisar ao Rodrigo o sha, o PR, o status do notebook e o caminho do handoff.
 
+## Canal direto com o ORQUESTRADOR_GROK (2026-10-12)
+
+**Quando avisar:**
+- em caso de dúvida;
+- quando estiver bloqueado;
+- ao terminar algo relevante (merge, fase, auditoria);
+- depois de concluir o protocolo "final de sessão".
+
+**Como avisar:**
+1. **No Mac:** `avisar-grok "mensagem"` (ou `echo "mensagem" | avisar-grok`). O script fica em `~/.local/bin/avisar-grok` e lê `GROK_WEBHOOK_URL` e `GROK_WEBHOOK_AUTH` de `~/.config/grok-webhook.env`, que o Rodrigo preenche; o `~/.zshenv` carrega esse arquivo. Exit 3 significa que as variáveis não estão definidas.
+2. **Em container ou nuvem sem o comando:** se `$GROK_WEBHOOK_URL` e `$GROK_WEBHOOK_AUTH` existirem no ambiente, usar
+   `curl -fsS -X POST "$GROK_WEBHOOK_URL" -H "Authorization: $GROK_WEBHOOK_AUTH" -H 'Content-Type: application/json' -d '{"from":"claude","project":"rodrigo-ai","message":"...","ts":"<ISO>"}'`
+   (escapar o JSON com `jq -n --arg` ou python).
+3. **Sem nenhum dos dois:** escrever a mensagem, com data e hora PT, na seção `## Mensagens para o Grok` de `docs/orquestracao/ESTADO.md` e commitar na branch de trabalho.
+
+**Regras:**
+- mensagens curtas (no máximo 2–3 frases), com o essencial e o link do PR ou commit;
+- **nunca** segredos, tokens ou chaves (nem o valor de `GROK_WEBHOOK_AUTH`), nem conteúdo de `docs/research/`, nem dados pessoais do Rodrigo.
+
 ## What this is
 
 Rodrigo AI: a personal local voice orchestrator, built incrementally phase by phase (see `docs/`). Each phase must ship something functional and testable before the next begins — do not build ahead of the current phase's approved plan. Currently: Phase 1 (foundation), Phase 2 (local voice), Phase 3 (orchestrator — intent classification + routing transparency), and Phase 4 (real specialist agents — Geral/Teologia/Virtologia, real routing effect on generation) are all implemented, automated-tested, and confirmed working end-to-end with a real human voice test (see `docs/implementation-phase-2.md`, `docs/implementation-phase-3.md`, `docs/implementation-phase-4.md`). `Rodrigo AI v0.3.0`. Nenhuma pendência aberta. Each of GERAL/TEOLOGIA/VIRTOLOGIA now has its own system prompt (identity + methodology + limits, see `src/backend/agents/specialistAgents.ts`) built from real source material the user maintains (ChatGPT conversation memory for Teologia, a 101-source NotebookLM notebook for Virtologia — both preserved unabridged in `docs/research/`); AMBIGUO has no dedicated specialist and falls back to Geral by design. `scripts/worker/worker.py`'s `handle_generate()` also has a deterministic loop-repetition cutoff (`difflib.SequenceMatcher` on emitted sentences, `repetition_penalty` too) as a low-risk safety net — but the "severe repetition bug" that motivated it (Fase 4 §3.5) turned out to be largely a test-harness artifact, not a real, frequent model defect: a polling bug in the manual verification script (`matrix-c6.mjs`, fixed) was re-scanning and duplicating already-seen SSE events, inflating the apparent repetition. Two independent real-audio investigations after the fix (a 72-generation sampling study and an 18-generation rerun with the corrected script) found zero genuine loops. Full honest account, including the correction of the original overstatement, in `docs/implementation-phase-4.md` §6 and `docs/fix-generation-repetition-loop-v2.md`.
