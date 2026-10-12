@@ -870,6 +870,88 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     await teardownHarness(h);
   });
 
+  it('F15 Fatia 4 (C1): ferramenta HORA no runTurn passa pelo coordenador e fica no ExecutionTrace', async (t) => {
+    const h = await setupHarness(null, createSystemTools());
+    let sse: ReturnType<typeof readSse> | null = null;
+    t.after(async () => {
+      sse?.close();
+      await teardownHarness(h);
+    });
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    h.engine.toolToReturn = 'HORA';
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+    sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId } = (await audioRes.json()) as { turnId: string };
+    await sse.waitFor(8, 5000);
+
+    const trace = h.sessionManager.coordinator.getTrace(turnId);
+    assert.ok(trace, 'o turno da ferramenta deve ter ExecutionTrace');
+    assert.equal(trace.tasks.length, 1);
+    assert.equal(trace.tasks[0].subAgentId, 'tool_hora');
+    assert.equal(trace.tasks[0].isMutation, false);
+    assert.equal(trace.tasks[0].status, 'completed');
+    assert.equal(h.engine.generateCalls.length, 0);
+  });
+
+  it('F15 Fatia 4 (A2): "o que você fez?" depois de uma delegação responde pelo ExecutionTrace, sem LLM', async (t) => {
+    const clock = () => new Date('2026-09-21T11:06:00');
+    const h = await setupHarness(null, [new HoraAtualTool(clock)]);
+    let sse: ReturnType<typeof readSse> | null = null;
+    t.after(async () => {
+      sse?.close();
+      await teardownHarness(h);
+    });
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    h.engine.toolToReturn = 'HORA';
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+    sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+    await sse.waitFor(8, 5000);
+    await fetch(`${h.baseUrl}/api/voice/session/played`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
+    });
+
+    h.engine.fixedTranscript = 'O que você fez?';
+    h.engine.toolToReturn = 'NENHUMA';
+    await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    await sse.waitFor(15, 5000);
+
+    const ready = sse.events.filter((e) => (e as { type: string }).type === 'sentence_audio_ready') as Array<{
+      text: string;
+    }>;
+    assert.equal(ready.length, 2);
+    assert.equal(ready[1].text, h.sessionManager.coordinator.formatTraceSummary(turnId1));
+    assert.match(ready[1].text, /Executei 1 passo: Passo 1: São 11 horas e 6 minutos/);
+    assert.equal(h.engine.generateCalls.length, 0, 'o resumo vem do trace, não do LLM');
+    assert.equal(h.engine.classifyCalls.length, 0);
+  });
+
   it('Fase 5b (H6): execute() que lança sintetiza TOOL_FAILURE_TEXT sem chamar modelo', async () => {
     const brokenTool: ITool = {
       name: 'HORA',
@@ -1370,6 +1452,124 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         sse?.close();
         await teardownHarness(h);
       }
+    });
+
+    it('F15 Fatia 4 (A1): mutação pós-SIM passa pelo gatekeeper e consome o token do turno', async (t) => {
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      h.engine.fixedTranscript = 'Lembrete: lavar o carro';
+      h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'lavar o carro'];
+
+      const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      currentSse = sse;
+      await sse.waitFor(1);
+
+      const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+      await sse.waitFor(8, 5000);
+      await fetch(`${h.baseUrl}/api/voice/session/played`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
+      });
+
+      h.engine.fixedTranscript = 'Pode sim, obrigado';
+      const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: simTurnId } = (await audioRes2.json()) as { turnId: string };
+      await sse.waitFor(15, 5000);
+
+      const audioEvent = sse.events
+        .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+        .pop() as { type: 'sentence_audio_ready'; text: string };
+      assert.equal(audioEvent.text, 'Lembrete criado.');
+
+      const trace = h.sessionManager.coordinator.getTrace(simTurnId);
+      assert.ok(trace, 'o turno do SIM deve ter ExecutionTrace');
+      assert.equal(trace.tasks.length, 1);
+      assert.equal(trace.tasks[0].subAgentId, 'tool_lembrete');
+      assert.equal(trace.tasks[0].isMutation, true);
+      assert.equal(trace.tasks[0].status, 'completed');
+      assert.equal(h.sessionManager.peekMutationConfirmationToken(simTurnId), undefined, 'token consumido pelo gatekeeper');
+    });
+
+    it('F15 Fatia 4 (A3): estouro de orçamento durante o turno do SIM é falado no próprio turno', async (t) => {
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      // Os 2 slots assíncronos já ocupados; o subagente do lembrete adia (async_deferred) -> estoura max_async.
+      const coordinator = h.sessionManager.coordinator;
+      assert.ok(coordinator.tryAcquireAsyncSlot('ocupado-1'));
+      assert.ok(coordinator.tryAcquireAsyncSlot('ocupado-2'));
+      coordinator.register({
+        id: 'tool_lembrete',
+        name: 'LEMBRETE',
+        capabilities: ['test'],
+        async runTask() {
+          return { success: true, output: '', kind: 'async_deferred', asyncTaskId: 'async-a3' };
+        }
+      });
+
+      h.engine.fixedTranscript = 'Lembrete: lavar o carro';
+      h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'lavar o carro'];
+
+      const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      currentSse = sse;
+      await sse.waitFor(1);
+
+      const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+      await sse.waitFor(8, 5000);
+      await fetch(`${h.baseUrl}/api/voice/session/played`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
+      });
+
+      h.engine.fixedTranscript = 'Pode sim, obrigado';
+      const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: simTurnId } = (await audioRes2.json()) as { turnId: string };
+      await sse.waitFor(15, 5000);
+
+      const audioEvent = sse.events
+        .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+        .pop() as { type: 'sentence_audio_ready'; turnId: string; text: string };
+      assert.equal(audioEvent.turnId, simTurnId);
+      assert.match(audioEvent.text, /Não consegui terminar/);
+      assert.ok(h.tts.synthesizeCalls.some((s) => /Não consegui terminar/.test(s)), 'a fala de estouro passa pelo TTS do turno');
+      assert.equal(coordinator.getTrace(simTurnId)?.budgetExceeded, 'max_async');
     });
 
     it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): SIM da Camada 0 nunca aciona o gate nem detectConfirmation', async (t) => {

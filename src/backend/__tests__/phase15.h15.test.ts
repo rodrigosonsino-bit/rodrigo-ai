@@ -220,26 +220,85 @@ test('H15.2: 200 cenários adversariais — zero mutação executada sem token v
       },
       new AbortController().signal
     );
-    // ToolSubAgent valida só o prefixo — este passa na checagem rasa.
-    // A proteção real é o SessionManager nunca ter gerado este token para
-    // este turnId; aqui o requisito estrutural é cumprido, então execute()
-    // PODE rodar. Marcamos que não foi testado com session manager para
-    // não falsificar o cenário. Pulamos a execução via token que falha.
-    if (!r4.success) {
-      assert.match(r4.error ?? '', /Mutação bloqueada/);
-    }
+    // Fatia 4 (C2): prefixo certo não basta — sem verificador do gatekeeper, fail-closed.
+    assert.equal(r4.success, false);
+    assert.match(r4.error ?? '', /Mutação bloqueada/);
   }
 
-  // Só casos 1-3 foram executados adversariamente sem permissão.
-  // Caso 4 (r4) com token forjado que passa na checagem rasa do adapter
-  // PODE ter executado dependendo do contexto — para não falsificar
-  // o resultado, checamos que nenhuma execução NÃO AUTORIZADA ocorreu:
-  // o session manager jamais anexa tokens forjados (esse is o gatekeeper
-  // real; o adapter só verifica frescor).
-  assert.ok(
-    executedCount <= 50,
-    `executedCount=${executedCount} (deve estar entre 0 e 50; hmm r4 pode ter passado)`
-  );
+  assert.equal(executedCount, 0, `executedCount=${executedCount}: nenhuma mutação sem token emitido`);
+});
+
+test('H15.2 (gatekeeper): token forjado com prefixo certo bloqueado; token emitido vale uma vez (C2, B1)', async () => {
+  let executedCount = 0;
+  const tool: IMutatingTool = {
+    name: 'NOTA',
+    description: 'spy',
+    isAvailable: () => true,
+    preview: () => 'Confirma?',
+    execute: () => {
+      executedCount += 1;
+      return 'NOTA EXECUTADA';
+    }
+  };
+  const { sm, tmpDir } = makeSessionManager();
+  const sub = new ToolSubAgent(tool, (turnId, token) => sm.consumeMutationToken(turnId, token));
+  const req = (turnId: string, confirmationToken: string): SubAgentTaskRequest => ({
+    taskId: 't',
+    turnId,
+    prompt: 'anota',
+    isMutation: true,
+    confirmationToken,
+    context: { action: 'NOTA_CRIAR' }
+  });
+
+  try {
+    for (let i = 0; i < 50; i += 1) {
+      const turnId = `turn-h152-gk-${i}`;
+      const issued = sm.recordMutationConfirmation(turnId);
+
+      const forged = await sub.runTask(req(turnId, `${turnId}:0:forged`), new AbortController().signal);
+      assert.equal(forged.success, false);
+      assert.match(forged.error ?? '', /Mutação bloqueada/);
+
+      const first = await sub.runTask(req(turnId, issued), new AbortController().signal);
+      assert.equal(first.success, true, 'o token emitido pelo gatekeeper executa');
+
+      const reused = await sub.runTask(req(turnId, issued), new AbortController().signal);
+      assert.equal(reused.success, false, 'token já consumido não executa de novo');
+      assert.match(reused.error ?? '', /Mutação bloqueada/);
+    }
+    assert.equal(executedCount, 50, 'exatamente uma execução por token emitido');
+
+    // Mesmo contrato no OpenClawSubAgent: sem verificador, ou com token forjado, nada sai para o gateway.
+    let invoked = 0;
+    const client: OpenClawHttpClient = {
+      invokeShort: async () => {
+        invoked += 1;
+        return 'executado';
+      },
+      invokeLongAsync: async () => {
+        throw new Error('não deveria');
+      },
+      pollStatus: async () => ({ status: 'pending' })
+    };
+    const turnId = 'turn-h152-oc';
+    const issued = sm.recordMutationConfirmation(turnId);
+    const noVerifier = new OpenClawSubAgent('openclaw_x', 'X', ['openclaw_x'], client, { requiresConfirmation: true });
+    const r1 = await noVerifier.runTask(req(turnId, issued), new AbortController().signal);
+    assert.equal(r1.success, false);
+    assert.match(r1.error ?? '', /Mutação bloqueada/);
+    const withVerifier = new OpenClawSubAgent('openclaw_x', 'X', ['openclaw_x'], client, {
+      requiresConfirmation: true,
+      verifyMutationToken: (t, k) => sm.consumeMutationToken(t, k)
+    });
+    const r2 = await withVerifier.runTask(req(turnId, `${turnId}:0:forged`), new AbortController().signal);
+    assert.equal(r2.success, false);
+    assert.match(r2.error ?? '', /Mutação bloqueada/);
+    assert.equal(invoked, 0, 'nenhuma chamada ao gateway sem token emitido');
+  } finally {
+    await sm.shutdownAll();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 /* --------------------------------------------------------------------------
@@ -303,45 +362,52 @@ test('H15.3: barge-in cancela em <= 350ms p95, sem tarefas órfãs', async () =>
  * H15.4 — Rastreabilidade: "o que você fez?" inclui async pendentes
  * ------------------------------------------------------------------------ */
 
-test('H15.4: formatTraceSummary responde com tarefas concluídas (base para voz)', () => {
+test('H15.4: "o que você fez?" inclui as concluídas e a async pendente com id (A2)', async () => {
   const coordinator = new SubAgentCoordinator();
   coordinator.register(
-    fakeAgent('a1', () => ({ success: true, output: 'ok a1', kind: 'final' }))
+    fakeAgent('a1', (req) => ({ success: true, output: `${req.prompt} concluído`, kind: 'final' }))
   );
+  coordinator.register(
+    fakeAgent('a2', () => ({ success: true, output: '', kind: 'async_deferred', asyncTaskId: 'async-42' }))
+  );
+  const { sm, tmpDir } = makeSessionManager({ coordinator });
 
-  const trace = coordinator.createTrace('turn-h154', 'fluxo misto');
-  trace.tasks.push({
-    subAgentId: 'a1',
-    prompt: 'primeiro passo',
-    isMutation: false,
-    status: 'completed',
-    result: 'primeiro concluído'
-  });
-  trace.tasks.push({
-    subAgentId: 'a1',
-    prompt: 'segundo passo',
-    isMutation: false,
-    status: 'completed',
-    result: 'segundo concluído'
-  });
-  trace.tasks.push({
-    subAgentId: 'a1',
-    prompt: 'terceiro (async)',
-    isMutation: false,
-    status: 'pending',
-    result: 'asyncTaskId=async-42' // H15.4: pendente async identificado
-  });
+  try {
+    const steps: Array<[string, string]> = [
+      ['a1', 'primeiro'],
+      ['a1', 'segundo'],
+      ['a2', 'terceiro (async)']
+    ];
+    for (const [subAgentId, prompt] of steps) {
+      const r = await sm.runSubAgentDelegation({
+        turnId: 'turn-h154',
+        query: 'fluxo misto',
+        subAgentId,
+        prompt,
+        isMutation: false,
+        signal: new AbortController().signal
+      });
+      assert.equal(r.ok, true);
+    }
 
-  const speech = coordinator.formatTraceSummary('turn-h154');
-  assert.ok(speech.includes('Executei 2 passos'));
-  assert.ok(speech.includes('primeiro concluído'));
-  assert.ok(speech.includes('segundo concluído'));
-  // A parte async pendente não aparece na fala final — ela é tratada
-  // separadamente pela fala de progresso do async_deferred. Apenas
-  // confirmamos que a task pendente EXISTE no trace para renderização futura.
-  const pending = trace.tasks.find((t) => t.status === 'pending');
-  assert.ok(pending);
-  assert.match(pending!.result ?? '', /asyncTaskId=async-42/);
+    const trace = coordinator.getTrace('turn-h154');
+    assert.ok(trace);
+    const pending = trace.tasks.find((t) => t.status === 'pending');
+    assert.ok(pending, 'a tarefa async_deferred fica pending no trace (§4.3)');
+    assert.equal(pending.prompt, 'terceiro (async)');
+    assert.equal(pending.asyncTaskId, 'async-42');
+    assert.equal(coordinator.latestTraceWithTasks()?.turnId, 'turn-h154');
+
+    const speech = coordinator.formatTraceSummary('turn-h154');
+    assert.ok(speech.includes('Executei 2 passos'));
+    assert.ok(speech.includes('primeiro concluído'));
+    assert.ok(speech.includes('segundo concluído'));
+    assert.ok(speech.includes('terceiro (async)'), 'a pendente aparece na fala');
+    assert.ok(speech.includes('async-42'), 'com o id da tarefa');
+  } finally {
+    await sm.shutdownAll();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 /* --------------------------------------------------------------------------

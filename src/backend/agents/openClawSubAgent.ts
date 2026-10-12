@@ -38,6 +38,8 @@ export class OpenClawSubAgent implements ISubAgent {
       shortTimeoutMs?: number;
       requiresConfirmation?: boolean;
       privacy?: PrivacyConfig;
+      /** Fatia 4 (C2/B1): gatekeeper que confirma e consome o token emitido; sem ele, fail-closed. */
+      verifyMutationToken?: (turnId: string, token: string) => boolean;
     } = {}
   ) {
     this.id = id;
@@ -46,9 +48,11 @@ export class OpenClawSubAgent implements ISubAgent {
     this.shortTimeoutMs = opts.shortTimeoutMs ?? DEFAULT_SHORT_TIMEOUT_MS;
     this.requiresConfirmation = opts.requiresConfirmation ?? false;
     this.privacy = opts.privacy ?? DEFAULT_PRIVACY;
+    this.verifyMutationToken = opts.verifyMutationToken;
   }
 
   private readonly privacy: PrivacyConfig;
+  private readonly verifyMutationToken?: (turnId: string, token: string) => boolean;
 
   static fromCapability(
     spec: OpenClawCapabilitySpec,
@@ -119,6 +123,14 @@ export class OpenClawSubAgent implements ISubAgent {
           success: false,
           output: '',
           error: 'Mutação bloqueada: confirmationToken não corresponde ao turno atual (achado r2 N4).',
+          kind: 'final'
+        };
+      }
+      if (this.verifyMutationToken?.(req.turnId, req.confirmationToken) !== true) {
+        return {
+          success: false,
+          output: '',
+          error: 'Mutação bloqueada: confirmationToken não emitido pelo gatekeeper',
           kind: 'final'
         };
       }

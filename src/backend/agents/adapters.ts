@@ -45,7 +45,14 @@ export class ToolSubAgent implements ISubAgent {
   readonly name: string;
   readonly capabilities: readonly string[];
 
-  constructor(private readonly tool: ITool | IMutatingTool) {
+  /**
+   * `verifyMutationToken` (Fatia 4, C2/B1): o gatekeeper confirma que o token foi EMITIDO por ele
+   * para este turno (e o consome). Sem verificador, toda mutação fica bloqueada (fail-closed).
+   */
+  constructor(
+    private readonly tool: ITool | IMutatingTool,
+    private readonly verifyMutationToken?: (turnId: string, token: string) => boolean
+  ) {
     this.id = `tool_${tool.name.toLowerCase()}`;
     this.name = tool.name;
     this.capabilities = ['ferramenta', tool.name.toLowerCase()];
@@ -77,6 +84,14 @@ export class ToolSubAgent implements ISubAgent {
           error: 'Mutação bloqueada: confirmationToken não corresponde ao turno atual (achado r2 N4).'
         };
       }
+      // Fatia 4 (C2): prefixo certo não basta — só o token emitido, uma única vez (B1).
+      if (this.verifyMutationToken?.(req.turnId, req.confirmationToken) !== true) {
+        return {
+          success: false,
+          output: '',
+          error: 'Mutação bloqueada: confirmationToken não emitido pelo gatekeeper'
+        };
+      }
     }
 
     try {
@@ -86,7 +101,7 @@ export class ToolSubAgent implements ISubAgent {
       // ficava morto: tsc hoje acusa `Expected 2 arguments, but got 0` bem aqui).
       if ('preview' in this.tool) {
         const actionName = (req.context?.action as IntentName | undefined) ?? 'NENHUMA';
-        output = this.tool.execute(actionName, req.prompt);
+        output = this.tool.execute(actionName, req.prompt === '' ? null : req.prompt); // '' volta a null (contrato da ferramenta)
       } else {
         output = this.tool.execute();
       }

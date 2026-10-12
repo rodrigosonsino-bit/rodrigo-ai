@@ -230,10 +230,10 @@ test('F15 Fatia 4 (d): mutação com token válido passa; token de outro turnId 
     preview: () => 'Confirma?',
     execute: () => 'Lembrete criado.'
   };
-  const sub = new ToolSubAgent(tool);
   const coordinator = new SubAgentCoordinator();
-  coordinator.register(sub);
   const { sm, tmpDir } = makeSessionManager({ coordinator });
+  const sub = new ToolSubAgent(tool, (turnId, token) => sm.consumeMutationToken(turnId, token));
+  coordinator.register(sub);
 
   try {
     const turnId = 'turn-d';

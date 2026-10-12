@@ -41,6 +41,7 @@ import {
   type TaskTraceItem
 } from '../agents/subAgent.js';
 import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
+import { ToolSubAgent } from '../agents/adapters.js';
 import {
   PendingAsyncTaskStore,
   parseAsyncTaskTtlHours,
@@ -101,6 +102,8 @@ const ACTION_CLAIM_VERBS =
 const ACTION_CLAIM_OBJECTS =
   /\b(lembrete|lembretes|nota|notas|anotaç[aã]o|memória|memoria|alarme|aviso|compromisso|tarefa|agenda|evento)\b/i;
 const ACTION_CLAIM_STANDALONE = /\b(anotei|salvei|guardei|agendei|apaguei|registrei)\b/i;
+/** Fatia 4 (A2): pergunta determinística de rastreabilidade ("o que você fez?"). */
+const WHAT_DID_YOU_DO = /\bo que (voc[eê]|vc) (j[aá] )?fez\b/i;
 
 /** F11: afirmação em 1ª pessoa de ação concluída sobre lembrete/nota/memória (sem ferramenta executada). */
 export function claimsUnexecutedAction(text: string): boolean {
@@ -296,6 +299,10 @@ export class SessionManager {
     this.pendingAsyncStore = pendingAsyncStore;
     this.coordinator = coordinator;
     this.nowMs = tuning.nowMs ?? (() => Date.now());
+    // Fatia 4 (§2.2): ferramentas locais como subagentes, todas atrás do gatekeeper de token.
+    for (const t of [...this.tools, ...this.mutatingTools]) {
+      this.coordinator.register(new ToolSubAgent(t, (turnId, token) => this.consumeMutationToken(turnId, token)));
+    }
   }
 
   /**
@@ -306,6 +313,16 @@ export class SessionManager {
     const token = mintMutationConfirmationToken(turnId, this.nowMs());
     this.confirmedMutationTokens.set(turnId, token);
     return token;
+  }
+
+  /**
+   * Gatekeeper (Fatia 4, C2/B1): true só para o token EMITIDO para este turnId, e então o consome —
+   * cada token vale uma única mutação. Token forjado não consome o verdadeiro.
+   */
+  consumeMutationToken(turnId: string, token: string): boolean {
+    if (this.confirmedMutationTokens.get(turnId) !== token) return false;
+    this.confirmedMutationTokens.delete(turnId);
+    return true;
   }
 
   /** Só devolve o token se o SIM deste turnId já foi registrado. */
@@ -399,16 +416,45 @@ export class SessionManager {
       }
     }
 
+    // Fatia 4 (§4.3, A2): async_deferred fica 'pending' com o id até concluir (M4 fora do escopo).
+    const deferred = result.kind === 'async_deferred';
     budget.trace.tasks.push({
       subAgentId: opts.subAgentId,
       prompt: opts.prompt,
       isMutation: opts.isMutation,
-      status: result.success || result.kind === 'async_deferred' ? 'completed' : 'failed',
+      status: deferred ? 'pending' : result.success ? 'completed' : 'failed',
       result: result.success ? result.output : result.error,
-      durationMs
+      durationMs,
+      ...(deferred ? { asyncTaskId: result.asyncTaskId } : {})
     });
 
     return { ok: true, result };
+  }
+
+  /**
+   * Fatia 4 (§2.3): ferramenta do turno via coordenador — orçamento, trace, gatekeeper e sinal do turno.
+   * Sem sessionId/sessionToken: a fala de estouro não sai fora do turno — vira o texto do próprio turno
+   * (§2.4, A3). `text: null` = falha.
+   */
+  private async delegateToolInTurn(
+    turn: ActiveTurn,
+    transcript: string,
+    tool: ITool | IMutatingTool,
+    action: IntentName,
+    content: string | null,
+    isMutation: boolean
+  ): Promise<{ text: string | null; error?: string }> {
+    const r = await this.runSubAgentDelegation({
+      turnId: turn.turnId,
+      query: transcript,
+      subAgentId: `tool_${tool.name.toLowerCase()}`,
+      prompt: content ?? '',
+      isMutation,
+      signal: turn.abortController.signal,
+      context: { action }
+    });
+    if (r.budgetExceeded && r.speech) return { text: r.speech };
+    return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
   }
 
   private async speakBudgetExceeded(
@@ -753,12 +799,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             if (!tool) {
               text = MUTATION_FAILURE_TEXT; // achado 4 — nunca chama .execute() em null
             } else {
-              try {
-                text = tool.execute(mutation.kind, mutation.content); // achado 3 — kind completo
-              } catch (err) {
-                text = MUTATION_FAILURE_TEXT; // achado 7 — texto literal definido em voiceProtocol.ts
-                console.error('[mutation] execução falhou:', err);
-              }
+              // Fatia 4 (A1): a mutação passa pelo gatekeeper do coordenador, que consome o token emitido acima.
+              const r = await this.delegateToolInTurn(turn, transcript, tool, mutation.kind, mutation.content, true); // achado 3 — kind completo
+              if (session.activeTurn !== turn) return;
+              text = r.text ?? MUTATION_FAILURE_TEXT; // achado 7 — texto literal definido em voiceProtocol.ts
+              if (r.text === null) console.error('[mutation] execução falhou:', r.error);
             }
           } else {
             text = MUTATION_CANCELLED_TEXT; // achado 7
@@ -785,6 +830,24 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           }
           return;
         }
+      }
+
+      // Fatia 4 (A2): "o que você fez?" responde pelo ExecutionTrace — só se já houver trace com tarefas (R1);
+      // sem isso, a fala segue o caminho normal (inclusive o filtro de afirmação alucinada da F11).
+      const lastTrace = WHAT_DID_YOU_DO.test(transcript) ? this.coordinator.latestTraceWithTasks() : undefined;
+      if (lastTrace) {
+        this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+        this.emit(session, { type: 'state', state: 'falando' });
+        const clean = cleanTextForSpeech(this.coordinator.formatTraceSummary(lastTrace.turnId));
+        turn.expectedSentences.add(0);
+        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
+        await Promise.allSettled(turn.pendingSynthesis);
+        if (session.activeTurn === turn) {
+          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+          this.emit(session, { type: 'state', state: 'ouvindo' });
+          session.activeTurn = null;
+        }
+        return;
       }
 
       // F11 adendo (decisão do usuário, 2026-10-03): UMA classificação de intenção em nuvem (Gemini) para
@@ -835,13 +898,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           } else if (isQueryName(action)) {
             // Fase 14 (achado 1 da auditoria r1): *_CONSULTAR é LEITURA, nunca mutação — executa
             // direto e fala o resultado, sem preview()/armedMutation/confirmação por voz.
-            let text: string;
-            try {
-              text = tool.execute(action, content);
-            } catch (err) {
-              text = MUTATION_FAILURE_TEXT;
-              console.error('[query] execução falhou:', err);
-            }
+            const r = await this.delegateToolInTurn(turn, transcript, tool, action, content, false);
+            if (session.activeTurn !== turn) return;
+            const text = r.text ?? MUTATION_FAILURE_TEXT;
+            if (r.text === null) console.error('[query] execução falhou:', r.error);
 
             this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
             this.emit(session, { type: 'state', state: 'falando' });
@@ -916,14 +976,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
         const tool = selectToolByName(detected, this.tools);
         if (tool) {
-          let text: string;
-          try {
-            text = tool.execute();
-          } catch (err) {
-            // §4.3: falha FECHADA e determinística — o modelo não volta ao caminho.
-            text = TOOL_FAILURE_TEXT;
-            console.error('[tool] execução falhou:', err);
-          }
+          const r = await this.delegateToolInTurn(turn, transcript, tool, detected as IntentName, null, false);
+          if (session.activeTurn !== turn) return;
+          // §4.3: falha FECHADA e determinística — o modelo não volta ao caminho.
+          const text = r.text ?? TOOL_FAILURE_TEXT;
+          if (r.text === null) console.error('[tool] execução falhou:', r.error);
           console.log(`[tool] turno=${turn.turnId} ferramenta=${tool.name}`);
 
           this.emit(session, {
