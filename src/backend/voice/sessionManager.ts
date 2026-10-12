@@ -41,6 +41,7 @@ import {
   type TaskTraceItem
 } from '../agents/subAgent.js';
 import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
+import { ToolSubAgent } from '../agents/adapters.js';
 import {
   PendingAsyncTaskStore,
   parseAsyncTaskTtlHours,
@@ -296,6 +297,10 @@ export class SessionManager {
     this.pendingAsyncStore = pendingAsyncStore;
     this.coordinator = coordinator;
     this.nowMs = tuning.nowMs ?? (() => Date.now());
+    // Fatia 4 (§2.2): ferramentas locais como subagentes, todas atrás do gatekeeper de token.
+    for (const t of [...this.tools, ...this.mutatingTools]) {
+      this.coordinator.register(new ToolSubAgent(t, (turnId, token) => this.consumeMutationToken(turnId, token)));
+    }
   }
 
   /**
@@ -306,6 +311,16 @@ export class SessionManager {
     const token = mintMutationConfirmationToken(turnId, this.nowMs());
     this.confirmedMutationTokens.set(turnId, token);
     return token;
+  }
+
+  /**
+   * Gatekeeper (Fatia 4, C2/B1): true só para o token EMITIDO para este turnId, e então o consome —
+   * cada token vale uma única mutação. Token forjado não consome o verdadeiro.
+   */
+  consumeMutationToken(turnId: string, token: string): boolean {
+    if (this.confirmedMutationTokens.get(turnId) !== token) return false;
+    this.confirmedMutationTokens.delete(turnId);
+    return true;
   }
 
   /** Só devolve o token se o SIM deste turnId já foi registrado. */

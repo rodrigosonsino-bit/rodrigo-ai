@@ -220,26 +220,85 @@ test('H15.2: 200 cenários adversariais — zero mutação executada sem token v
       },
       new AbortController().signal
     );
-    // ToolSubAgent valida só o prefixo — este passa na checagem rasa.
-    // A proteção real é o SessionManager nunca ter gerado este token para
-    // este turnId; aqui o requisito estrutural é cumprido, então execute()
-    // PODE rodar. Marcamos que não foi testado com session manager para
-    // não falsificar o cenário. Pulamos a execução via token que falha.
-    if (!r4.success) {
-      assert.match(r4.error ?? '', /Mutação bloqueada/);
-    }
+    // Fatia 4 (C2): prefixo certo não basta — sem verificador do gatekeeper, fail-closed.
+    assert.equal(r4.success, false);
+    assert.match(r4.error ?? '', /Mutação bloqueada/);
   }
 
-  // Só casos 1-3 foram executados adversariamente sem permissão.
-  // Caso 4 (r4) com token forjado que passa na checagem rasa do adapter
-  // PODE ter executado dependendo do contexto — para não falsificar
-  // o resultado, checamos que nenhuma execução NÃO AUTORIZADA ocorreu:
-  // o session manager jamais anexa tokens forjados (esse is o gatekeeper
-  // real; o adapter só verifica frescor).
-  assert.ok(
-    executedCount <= 50,
-    `executedCount=${executedCount} (deve estar entre 0 e 50; hmm r4 pode ter passado)`
-  );
+  assert.equal(executedCount, 0, `executedCount=${executedCount}: nenhuma mutação sem token emitido`);
+});
+
+test('H15.2 (gatekeeper): token forjado com prefixo certo bloqueado; token emitido vale uma vez (C2, B1)', async () => {
+  let executedCount = 0;
+  const tool: IMutatingTool = {
+    name: 'NOTA',
+    description: 'spy',
+    isAvailable: () => true,
+    preview: () => 'Confirma?',
+    execute: () => {
+      executedCount += 1;
+      return 'NOTA EXECUTADA';
+    }
+  };
+  const { sm, tmpDir } = makeSessionManager();
+  const sub = new ToolSubAgent(tool, (turnId, token) => sm.consumeMutationToken(turnId, token));
+  const req = (turnId: string, confirmationToken: string): SubAgentTaskRequest => ({
+    taskId: 't',
+    turnId,
+    prompt: 'anota',
+    isMutation: true,
+    confirmationToken,
+    context: { action: 'NOTA_CRIAR' }
+  });
+
+  try {
+    for (let i = 0; i < 50; i += 1) {
+      const turnId = `turn-h152-gk-${i}`;
+      const issued = sm.recordMutationConfirmation(turnId);
+
+      const forged = await sub.runTask(req(turnId, `${turnId}:0:forged`), new AbortController().signal);
+      assert.equal(forged.success, false);
+      assert.match(forged.error ?? '', /Mutação bloqueada/);
+
+      const first = await sub.runTask(req(turnId, issued), new AbortController().signal);
+      assert.equal(first.success, true, 'o token emitido pelo gatekeeper executa');
+
+      const reused = await sub.runTask(req(turnId, issued), new AbortController().signal);
+      assert.equal(reused.success, false, 'token já consumido não executa de novo');
+      assert.match(reused.error ?? '', /Mutação bloqueada/);
+    }
+    assert.equal(executedCount, 50, 'exatamente uma execução por token emitido');
+
+    // Mesmo contrato no OpenClawSubAgent: sem verificador, ou com token forjado, nada sai para o gateway.
+    let invoked = 0;
+    const client: OpenClawHttpClient = {
+      invokeShort: async () => {
+        invoked += 1;
+        return 'executado';
+      },
+      invokeLongAsync: async () => {
+        throw new Error('não deveria');
+      },
+      pollStatus: async () => ({ status: 'pending' })
+    };
+    const turnId = 'turn-h152-oc';
+    const issued = sm.recordMutationConfirmation(turnId);
+    const noVerifier = new OpenClawSubAgent('openclaw_x', 'X', ['openclaw_x'], client, { requiresConfirmation: true });
+    const r1 = await noVerifier.runTask(req(turnId, issued), new AbortController().signal);
+    assert.equal(r1.success, false);
+    assert.match(r1.error ?? '', /Mutação bloqueada/);
+    const withVerifier = new OpenClawSubAgent('openclaw_x', 'X', ['openclaw_x'], client, {
+      requiresConfirmation: true,
+      verifyMutationToken: (t, k) => sm.consumeMutationToken(t, k)
+    });
+    const r2 = await withVerifier.runTask(req(turnId, `${turnId}:0:forged`), new AbortController().signal);
+    assert.equal(r2.success, false);
+    assert.match(r2.error ?? '', /Mutação bloqueada/);
+    assert.equal(invoked, 0, 'nenhuma chamada ao gateway sem token emitido');
+  } finally {
+    await sm.shutdownAll();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 /* --------------------------------------------------------------------------
