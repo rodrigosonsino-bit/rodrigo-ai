@@ -199,7 +199,7 @@ Estado local relevante (verificado): o `.env` do usuário usa `TTS_ENGINE=gemini
 | V | **Visão da tela** (inserida pelo usuário) | plano v3 aprovado com ajustes (`docs/phase-vision-v3.md`); **fatias 1, 2 e 3 feitas e auditadas** (fatia 3: `ce48a79`+`99e6fbc`, Kimi K3, 5 achados, todos procedentes); **fatias 4 e 5 pendentes** — ver §6b e §6c |
 | 14 | Ciclo completo de notas, lembretes e memórias por voz | plano auditado: **aprovado com ajustes** (`docs/audits/phase-14-plan-audit-r1.md`); v2 em `docs/phase-14-v2.md`; **FECHADA em 2026-10-11** (H14.1 120/120, H14.2 0 violações, H14.4 30/30) — ver §6d |
 | 15 | Orquestrador autônomo, coordenador de todos os subagentes (inclui a ponte com o OpenClaw) | plano `docs/phase-15-v3.md` aprovado com ressalvas (auditoria r3). Fatias 1–3 e 5 commitadas (D15 = ponte HTTP ao gateway OpenClaw; `RODRIGO_WEB_SEARCH`; tarefas assíncronas persistidas; suíte H15 em `6e88e5a`). Auditoria de fechamento (`docs/audits/f15-fechamento-lingxi-engineer-bot.md`, fonte própria) achou falta de integração; **Fatia 4 (integração) mergeada no PR #1 (`9cb5bdb`)**. Falta a **Fatia 4b** (decompositor multi-passo + rota de voz até o OpenClaw/especialistas) — ver §6d |
-| 16 | Conhecimento pessoal (Teologia/Virtologia/novas bases, ex. Neurociência) | plano `docs/phase-16-v3.md` aprovado com ressalvas; **bloqueio**: o algoritmo de dedupe/merge (`conflictResolver`) e as fixtures (60–180 cenários) ainda não foram escritos |
+| 16 | Conhecimento pessoal (Teologia/Virtologia/novas bases, ex. Neurociência) | plano `docs/phase-16-v3.md` aprovado com ressalvas; `conflictResolver` implementado e integrado em `resolveConflicts()`/`memoryBlock.ts`, com fixture de 60 cenários (`phase16-memory-scenarios.json`), no commit `eba54e5`; faltam as demais lacunas da F16 |
 | 17 | Qualificação 1.0 | não iniciada |
 
 ## 6. Fase 13a em detalhe (a mais recente — leia `docs/phase-13a-v3.md` e `docs/implementation-phase-13a.md`)
@@ -263,7 +263,7 @@ Commits novos em `main` desde o §6b (`git rev-list --count origin/main..HEAD` n
 ## 6d. Sessões de 2026-10-10 e 2026-10-11 — o que mudou (resumo; detalhes em `HANDOFF-2026-10-11-noite.md`, não versionado, e em `docs/orquestracao/ESTADO.md`)
 
 - **O build voltou a compilar** e o trabalho de F14/F15/F16 foi commitado e empurrado. **F14 FECHADA** (H14.1 120/120, H14.2 0 violações, H14.4 30/30).
-- **F15**: plano v3 aprovado com ressalvas; D15 decidido (Opção A, ponte HTTP ao gateway OpenClaw). Commits `8e18138` (canal `RODRIGO_WEB_SEARCH` + gate `openclaw_web`), `a8c3e7c` (persistência de tarefas assíncronas + recuperação na subida), `f5844b0` (gatekeeper de mutação + orçamento por turno), `6e88e5a` (Fatia 5: suíte de estresse H15 + `docs/phase-15-h15-recalibration.md`).
+- **F15**: plano v3 aprovado com ressalvas; D15 decidido (Opção A, ponte HTTP ao gateway OpenClaw). Commits `8e18138` (ponte HTTP ao OpenClaw, Fatia 3), `a8c3e7c` (canal `RODRIGO_WEB_SEARCH` + gate `openclaw_web`), `e49accf` (persistência de tarefas assíncronas + recuperação na subida), `f5844b0` (gatekeeper de mutação + orçamento por turno), `6e88e5a` (Fatia 5: suíte de estresse H15 + `docs/phase-15-h15-recalibration.md`).
 - **Auditoria de fechamento da F15** (2026-10-11, só leitura): veredito **não fecha** — o `runTurn` nunca chamava o coordenador (`runSubAgentDelegation` só nos testes), o H15.2 aceitava token forjado com o prefixo certo (50 de 200 cenários), a mutação pós-"sim" pulava o gatekeeper, H15.4 sem rota, aviso de estouro sumia com turno em andamento, H15.3 com agente falso.
 - **F15 Fatia 4 (integração)** — plano `docs/plan/f15-fatia4-integracao.md` (fonte própria), aprovado pelo usuário com P1 (Fatia 4b separada), P2 (H15.3 aceita só cancelamento local — o OpenClaw não tem API de cancelamento) e R3 (o coordenador é do processo; "o que você fez?" pode citar uma sessão anterior). Commits `3d567aa` (token comparado com o emitido, uso único), `3d584eb` (`runTurn` delega ferramentas pelo coordenador), `47b93fa` (mutação pós-SIM pelo gatekeeper), `d3e1cdd` (fala de estouro dentro do turno), `49cb0eb` (trace com pendentes e "o que você fez?"), `bdfdc9e` (ESTADO.md). **Mergeado na `main` pelo PR #1 (`9cb5bdb`)** com aval do usuário. O token forjado agora dá 0 execuções.
 - **Ordem de trabalho mudada pelo usuário em 2026-10-11** (registrada em `docs/roadmap-2026-10-09.md`): F15 Fatia 4 primeiro (feita), **depois Fase V Fatia 5** (imagem ao Gemini só com autorização por voz + cartão de privacidade). A "Fatia 5" é a da Fase V — a da F15 (suíte H15) já está em `6e88e5a`. Antes, conferir o estado real da Fase V Fatia 4 (o commit `41f2941` cita "Fase V fatia 4").
@@ -364,6 +364,11 @@ docs_bundle("15-roteiro-oficial-e-planos-f14-f16.md", "Roteiro oficial vigente (
 # ---------------------------------------------------------------- 30..33 orquestração, auditoria e plano da F15 Fatia 4 (cópias literais)
 shutil_copy("docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md", "30-plano-de-orquestracao-2026-10-11.md")
 shutil_copy("docs/orquestracao/ESTADO.md", "31-estado-da-orquestracao.md")
+docs_bundle("34-auto-melhoria-e-conhecimento.md", "Auto-melhoria, lições e base de conhecimento por área (2026-10-12)",
+    "Plano de auto-melhoria (Fases 1 e 2), registro de incidentes, lições, índices das 7 áreas de conhecimento, briefs por papel dos agentes e evidências da Fase 2. As sínteses por área ficam no repo (`docs/conhecimento/*/sinteses/`) e não entram aqui; o material de `docs/research/` nunca entra.",
+    ["docs/orquestracao/PLANO-AUTO-MELHORIA.md", "docs/orquestracao/INCIDENTES.md", "docs/orquestracao/LICOES.md", "docs/orquestracao/evidencias/fase2-notebooks.md", "docs/conhecimento/README.md"]
+    + sorted(str(x.relative_to(ROOT)) for x in (ROOT / "docs/conhecimento").glob("*/INDICE.md"))
+    + sorted(str(x.relative_to(ROOT)) for x in (ROOT / "docs/conhecimento/briefs").glob("*.md")))
 shutil_copy("docs/audits/f15-fechamento-lingxi-engineer-bot.md", "32-auditoria-fechamento-f15.md")
 shutil_copy("docs/plan/f15-fatia4-integracao.md", "33-plano-f15-fatia4.md")
 
@@ -393,7 +398,7 @@ bundle("28-testes-da-fase-V.md", "Testes da Fase V (visão da tela), fatias 1 e 
        ["src/backend/__tests__/fvScreen.test.ts", "scripts/worker/test_cancel_queue.py"])
 
 bundle("29-testes-das-fases-14-a-16.md", "Testes das Fases 14, 15 e 16 (estado de 2026-10-11, após o PR #1)",
-       "F14 fechada (teste da fase + estresse). F15: esqueleto original, suíte de estresse H15 (corrigida na Fatia 4: token forjado dá 0 execuções), gate de orçamento, ponte OpenClaw, persistência assíncrona e busca web. F16: esqueleto e teste do conflictResolver (o algoritmo ainda não está escrito).",
+       "F14 fechada (teste da fase + estresse). F15: esqueleto original, suíte de estresse H15 (corrigida na Fatia 4: token forjado dá 0 execuções), gate de orçamento, ponte OpenClaw, persistência assíncrona e busca web. F16: esqueleto, teste do conflictResolver e fixture de 60 cenários (algoritmo implementado em `eba54e5`).",
        ["src/backend/tools/__tests__/phase14.test.ts", "src/backend/tools/__tests__/phase14Stress.test.ts",
         "src/backend/__tests__/phase15.test.ts", "src/backend/__tests__/phase15.h15.test.ts", "src/backend/__tests__/phase15BudgetGate.test.ts",
         "src/backend/__tests__/phase15OpenClaw.test.ts", "src/backend/__tests__/phase15AsyncPersistence.test.ts", "src/backend/__tests__/phase15WebSearch.test.ts",
