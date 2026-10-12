@@ -870,6 +870,39 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
     await teardownHarness(h);
   });
 
+  it('F15 Fatia 4 (C1): ferramenta HORA no runTurn passa pelo coordenador e fica no ExecutionTrace', async (t) => {
+    const h = await setupHarness(null, createSystemTools());
+    let sse: ReturnType<typeof readSse> | null = null;
+    t.after(async () => {
+      sse?.close();
+      await teardownHarness(h);
+    });
+
+    h.engine.fixedTranscript = 'Que horas são agora?';
+    h.engine.toolToReturn = 'HORA';
+
+    const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+    const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+    sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+    await sse.waitFor(1);
+
+    const audioRes = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+      body: buildTestWav(1)
+    });
+    const { turnId } = (await audioRes.json()) as { turnId: string };
+    await sse.waitFor(8, 5000);
+
+    const trace = h.sessionManager.coordinator.getTrace(turnId);
+    assert.ok(trace, 'o turno da ferramenta deve ter ExecutionTrace');
+    assert.equal(trace.tasks.length, 1);
+    assert.equal(trace.tasks[0].subAgentId, 'tool_hora');
+    assert.equal(trace.tasks[0].isMutation, false);
+    assert.equal(trace.tasks[0].status, 'completed');
+    assert.equal(h.engine.generateCalls.length, 0);
+  });
+
   it('Fase 5b (H6): execute() que lança sintetiza TOOL_FAILURE_TEXT sem chamar modelo', async () => {
     const brokenTool: ITool = {
       name: 'HORA',

@@ -426,6 +426,30 @@ export class SessionManager {
     return { ok: true, result };
   }
 
+  /**
+   * Fatia 4 (§2.3): ferramenta do turno via coordenador — orçamento, trace, gatekeeper e sinal do turno.
+   * Sem sessionId/sessionToken: a fala de estouro não sai fora do turno. `text: null` = falha.
+   */
+  private async delegateToolInTurn(
+    turn: ActiveTurn,
+    transcript: string,
+    tool: ITool | IMutatingTool,
+    action: IntentName,
+    content: string | null,
+    isMutation: boolean
+  ): Promise<{ text: string | null; error?: string }> {
+    const r = await this.runSubAgentDelegation({
+      turnId: turn.turnId,
+      query: transcript,
+      subAgentId: `tool_${tool.name.toLowerCase()}`,
+      prompt: content ?? '',
+      isMutation,
+      signal: turn.abortController.signal,
+      context: { action }
+    });
+    return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
+  }
+
   private async speakBudgetExceeded(
     sessionId: string | undefined,
     sessionToken: string | undefined,
@@ -850,13 +874,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           } else if (isQueryName(action)) {
             // Fase 14 (achado 1 da auditoria r1): *_CONSULTAR é LEITURA, nunca mutação — executa
             // direto e fala o resultado, sem preview()/armedMutation/confirmação por voz.
-            let text: string;
-            try {
-              text = tool.execute(action, content);
-            } catch (err) {
-              text = MUTATION_FAILURE_TEXT;
-              console.error('[query] execução falhou:', err);
-            }
+            const r = await this.delegateToolInTurn(turn, transcript, tool, action, content, false);
+            if (session.activeTurn !== turn) return;
+            const text = r.text ?? MUTATION_FAILURE_TEXT;
+            if (r.text === null) console.error('[query] execução falhou:', r.error);
 
             this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
             this.emit(session, { type: 'state', state: 'falando' });
@@ -931,14 +952,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
         const tool = selectToolByName(detected, this.tools);
         if (tool) {
-          let text: string;
-          try {
-            text = tool.execute();
-          } catch (err) {
-            // §4.3: falha FECHADA e determinística — o modelo não volta ao caminho.
-            text = TOOL_FAILURE_TEXT;
-            console.error('[tool] execução falhou:', err);
-          }
+          const r = await this.delegateToolInTurn(turn, transcript, tool, detected as IntentName, null, false);
+          if (session.activeTurn !== turn) return;
+          // §4.3: falha FECHADA e determinística — o modelo não volta ao caminho.
+          const text = r.text ?? TOOL_FAILURE_TEXT;
+          if (r.text === null) console.error('[tool] execução falhou:', r.error);
           console.log(`[tool] turno=${turn.turnId} ferramenta=${tool.name}`);
 
           this.emit(session, {

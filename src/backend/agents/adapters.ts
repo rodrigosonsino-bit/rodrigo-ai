@@ -101,7 +101,7 @@ export class ToolSubAgent implements ISubAgent {
       // ficava morto: tsc hoje acusa `Expected 2 arguments, but got 0` bem aqui).
       if ('preview' in this.tool) {
         const actionName = (req.context?.action as IntentName | undefined) ?? 'NENHUMA';
-        output = this.tool.execute(actionName, req.prompt);
+        output = this.tool.execute(actionName, req.prompt === '' ? null : req.prompt); // '' volta a null (contrato da ferramenta)
       } else {
         output = this.tool.execute();
       }
