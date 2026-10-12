@@ -71,3 +71,6 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 ## Último passo / próximo passo
 - Último: PRs #2, #3 e #4 mergeados; agentes OpenClaw em kimi-k3; skill `agent-catalog` com as filas reais; NotebookLM atualizado a partir do `main`.
 - Próximo: **Fase V Fatia 5**, plano curto antes do código, numa sessão nova do `orquestrador-de-voz`; nenhum código antes do aval do Rodrigo.
+
+## Handoffs de sessões
+- 2026-10-12, Claude Sonnet (reserva, container na nuvem): `docs/orquestracao/handoffs/2026-10-12-claude-sonnet-nuvem.md`. Cobre os PRs #7–#12, as decisões do pacote de 2026-10-12, a lista de sensíveis, o critério de "difícil" e as pendências para o Grok/Mac (auditorias agy/Codex, `fvScreen` 10×, NotebookLM). Não altera a trava nem as atribuições.
