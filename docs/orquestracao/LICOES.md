@@ -15,3 +15,5 @@
 - **L13:** "Free plans can only use Auto" no Cursor **provavelmente** indica autenticação errada (hipótese ainda não confirmada; ver incidente 13), não falta de cota. Conferir a conta antes de mexer nas filas, sem descartar outras causas.
 - **L14:** provedor externo que dá timeout duas vezes seguidas não recebe terceira tentativa manual na mesma hora; seguir a fila.
 - **L15:** registrar avisos de estabilidade do gateway mesmo quando o reinício conclui. Se passarem de 5 por semana, investigar.
+- **L16:** trocar o modelo ou provedor de qualquer agente que possa receber dados do usuário é **dependência externa nova**: exige plano, auditoria e aval do Rodrigo, e o cartão de privacidade e o README §7 são atualizados antes. Consertar algo quebrado não dispensa essa regra.
+- **L17:** agente em nuvem de terceiros nunca recebe `docs/research/`. Só sínteses de `docs/conhecimento/` revisadas por humano.

@@ -6,12 +6,12 @@
 > `docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md` (aceito pelo Rodrigo em 2026-10-11; no git a partir do PR do branch `docs-estado-pos-merge`).
 > O gerador do NotebookLM (`scripts/notebooklm/build_sources.py`) copia este arquivo para a fonte 00 (§2b) e para a fonte 31: o estado escrito à mão mora só aqui.
 
-- **Atualizado em:** 2026-10-12 08:20 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
+- **Atualizado em:** 2026-10-12 08:35 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
 
 ## Trava (lease)
 - titular: ORQUESTRADOR_GROK (Grok Bot, com voz em tempo real)
-- desde: 2026-10-11 22:45 BRT (renovada 2026-10-12 08:20 BRT)
-- expira_em: 2026-10-12 12:20 BRT
+- desde: 2026-10-11 22:45 BRT (renovada 2026-10-12 08:35 BRT)
+- expira_em: 2026-10-12 12:35 BRT
 - duração: 4 h, renovada a cada atualização. Aceita pelo Rodrigo em 2026-10-11 como ponto de partida; **revisar depois de uma semana de uso (~2026-10-18)**.
 - reserva: Claude Code Sonnet (`~/.local/bin/claude`). Login e cota **não testados** — o Rodrigo pediu para não testar agora.
 
@@ -36,6 +36,11 @@
   - Os 2 "Psicoterapeuta" (5cddc991, 082c057a) foram **mantidos**: o conteúdo difere. Fica para o Rodrigo decidir.
   - As evidências estão em `docs/orquestracao/evidencias/fase2-notebooks.md`.
 - Rotina semanal de revisão (seg 08:00 BRT): o Rodrigo cria; prompt no relatório do orquestrador.
+
+## Decisões de privacidade (2026-10-12) — `DECISOES-PRIVACIDADE-ESPECIALISTAS.md`
+- **D-P1:** Kimi/NVIDIA é provedor de nuvem de terceiros novo. O app **não encaminha texto do usuário** a agentes do OpenClaw em nuvem até plano + auditoria + aval atualizarem `privacyText.ts` e o README §7. **Não ligar `RODRIGO_WEB_SEARCH=1`** até a fatia de follow-up (fixar o agente/modelo do gateway, atualizar o cartão, teste de consistência).
+- **D-P2:** agentes em nuvem leem só `docs/conhecimento/` revisado, nunca `docs/research/`. As skills `especialista-<área>` estão **bloqueadas**.
+- Critérios de aceite C3–C9 em `PLANO-ESPECIALISTAS-UNIFICADOS.md` §7. As pré-condições da Fase V Fatia 5 (diagnóstico do `fvScreen`, `RODRIGO_CLOUD_VISION` desligado por padrão, auditor de outra família) estão no roteiro.
 
 ## Prioridades (em ordem) — registradas em `docs/roadmap-2026-10-09.md` (2026-10-11)
 1. ~~**F15 Fatia 4 (integração)**~~ — **mergeada (PR #1, `9cb5bdb`)**. Token comparado com o emitido e de uso único (o token forjado do H15.2 agora dá 0 execuções); ferramentas do `runTurn` pelo coordenador; mutação pós-SIM pelo gatekeeper; fala de estouro dentro do turno; pendentes com id e "o que você fez?". Testes primeiro, nenhum teste afrouxado.

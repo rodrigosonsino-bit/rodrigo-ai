@@ -62,11 +62,13 @@ Hoje o conhecimento por área existe em três lugares que não conversam:
 
 ### 3.4 Skills `especialista-<área>` no OpenClaw
 
+> **Emenda de 2026-10-12 (D-P2, `DECISOES-PRIVACIDADE-ESPECIALISTAS.md`):** as skills apontam **só para `docs/conhecimento/`** (sínteses revisadas por humano), nunca para `docs/research/`. **A instalação fica bloqueada** até a D-P1 ser resolvida e as sínteses usadas passarem por revisão humana (critério C5, §7).
+
 - Ficam em `~/.openclaw/skills/especialista-<área>/SKILL.md`, geradas a partir de `docs/conhecimento/<área>/INDICE.md` e do brief do papel.
 - Cada SKILL.md traz:
   - o escopo da área;
   - os notebooks e como consultar (`notebooklm ask -n <id> --json`, sem `--new`);
-  - os caminhos `docs/research/…`;
+  - os caminhos de `docs/conhecimento/<área>/` (sínteses revisadas e índice). **Nunca `docs/research/`** (D-P2);
   - as regras de citação, o rótulo de Virtologia e a fronteira clínica;
   - o formato de resposta.
 - **Anexação por papel**, conforme a matriz (E = skill ativa; C = só referência no AGENTS.md):
@@ -77,6 +79,8 @@ Hoje o conhecimento por área existe em três lugares que não conversam:
 - Antes de qualquer mudança de configuração do OpenClaw, faço backup com data e hora (`openclaw.json.bak-<ts>`) e depois testo cada agente com um prompt curto.
 
 ### 3.5 Integração com a Fatia 4b
+
+> **Emenda de 2026-10-12 (D-P1):** enquanto o cartão de privacidade e o README §7 não declararem o provedor Kimi/NVIDIA (plano + auditoria + aval), a Fatia 4b **não pode** encaminhar texto do usuário a agentes do OpenClaw em modelos de nuvem.
 
 - A Fatia 4b (decompositor multi-passo e rota de voz até o OpenClaw) consulta o `ROTEAMENTO.md`. Uma pergunta de área que pede **pesquisa ou texto longo** vai para o agente OpenClaw do papel certo, com a skill da área (por exemplo, pesquisador + `especialista-exegese`). Uma **resposta curta por voz** fica no especialista interno do app.
 - O `openClawSubAgent.ts`/`adapters.ts` recebe a área e o papel vindos da tabela. A tabela não é duplicada em código: é gerada como JSON a partir do `ROTEAMENTO.md` por um script, e um teste confere que os dois estão sincronizados.
@@ -107,6 +111,18 @@ A Fase V Fatia 5 continua como **próxima prioridade do roteiro**. Os passos 2 e
 | Modelo do OpenClaw cair (sem chave, cota) | L8: testar cada agente depois de mudanças; fallback documentado |
 | Virtologia sem validação independente | rótulo obrigatório verificado pelo gerador |
 | Direitos autorais | `docs/research/` fora do git; o repo guarda só sínteses |
+
+## 7. Critérios de aceite (revisão do Claude de 2026-10-12, registrados por decisão do Rodrigo)
+
+| # | Critério | Quando se aplica |
+|---|---|---|
+| C3 | As áreas novas do classificador (hermenêutica, exegese, psicanálise) precisam de **matriz de frases reais e coloquiais**, com áudio real e não só `FakeVoiceEngine`, com limiar de acerto definido no plano (proposta: ≥ 90% por área e ≤ 5% de confusão entre pares próximos). Verificar também a queda do AMBÍGUO para o Geral nesses pares | Passo 5 (corpus de 6 áreas no app) |
+| C4 | `fvScreen.test` intermitente (HTTP 409 em vez de 200/400 em 7 de 8 execuções; suspeita de corrida no token de captura de uso único) precisa ser **diagnosticado antes da Fase V Fatia 5**, e `RODRIGO_CLOUD_VISION` precisa vir **desligado por padrão** (hoje é `true` em `privacy.ts`) | Pré-condição da Fase V Fatia 5 (registrado no roteiro) |
+| C5 | **Revisão humana obrigatória:** síntese gerada por LLM não vira canônica nem é ativada (profile-source, skill, corpus) sem revisão do Rodrigo, marcada no arquivo (`Revisado por: … em …`). Conferir também a visibilidade do repo (hoje privado) e o risco de direito autoral das paráfrases | Passos 2, 3 e 5 |
+| C6 | **Auditor de outra família de modelo:** trabalho crítico de privacidade ou mutação tem pelo menos um auditor de família diferente da usada na implementação (hoje OpenClaw e auditor são todos Kimi), por exemplo Gemini, Claude ou GPT | Toda auditoria adversarial de plano/código sensível |
+| C7 | **Revisão semanal honesta:** declarar a janela real dos dados (a de 2026-10-12 cobriu ~29 h, não 7 dias), separar chamadas de teste (`teste: true`) e não chamar de "tendência" o que for amostra pequena | Rotina semanal |
+| C8 | **Fallback Claude Code Sonnet:** testar login e cota **só quando o Rodrigo aprovar** (D3 de 2026-10-11: "não testar o Claude Code"). Até lá, o fallback continua não verificado | Quando o Rodrigo liberar |
+| C9 | **Trava:** quem não for o titular da trava não muda `ESTADO.md` nem dá ordens. A renovação é registrada com data e hora | Sempre |
 
 ## 6. Decisões pendentes do Rodrigo
 
