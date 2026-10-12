@@ -10,3 +10,8 @@
 - **L8:** ao configurar um agente, conferir se o provedor do modelo tem chave no gateway (`openclaw agent --agent <id> --message "OK"`). O modelo funcional hoje é `nvidia/moonshotai/kimi-k3`.
 - **L9:** quando mudar as filas do `delegar`, atualizar no mesmo passo a skill `agent-catalog` do OpenClaw.
 - **L10:** depois de executar uma fase, atualizar o status e o inventário do plano na mesma mudança. Documento que diz "proposta" sobre algo já feito engana os outros agentes.
+- **L11:** tarefa de código precisa de timeout de pelo menos 600 s por agente, e a fila deve pôr primeiro quem falha rápido (cota) ou quem tem cota garantida (`auto`), nunca vários modelos lentos sem cota em série.
+- **L12:** agente que não está instalado, responde vazio ou está sem cota sai da fila no mesmo dia. Conferir com `command -v` e com um "OK" de teste, além do que diz a L2.
+- **L13:** "Free plans can only use Auto" no Cursor **provavelmente** indica autenticação errada (hipótese ainda não confirmada; ver incidente 13), não falta de cota. Conferir a conta antes de mexer nas filas, sem descartar outras causas.
+- **L14:** provedor externo que dá timeout duas vezes seguidas não recebe terceira tentativa manual na mesma hora; seguir a fila.
+- **L15:** registrar avisos de estabilidade do gateway mesmo quando o reinício conclui. Se passarem de 5 por semana, investigar.
