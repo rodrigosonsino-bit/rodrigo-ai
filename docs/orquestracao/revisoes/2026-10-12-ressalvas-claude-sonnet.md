@@ -20,6 +20,8 @@ Lido: `ESTADO.md`, `PLANO-AUTO-MELHORIA.md`, `PLANO-ESPECIALISTAS-UNIFICADOS.md`
 - **Não verifiquei** se a rota do OpenClaw respeita `RODRIGO_CLOUD=0` e `RODRIGO_SEND_HISTORY=0`. Se não respeitar, é um furo.
 - Pelo `CLAUDE.md`, dependência externa nova exige plano, aval do Rodrigo e auditoria.
 
+> **Atualização (2026-10-12, depois de ler o código e as respostas do Grok):** no item 1, o texto acima diz que o cartão está incompleto "hoje". Com os padrões atuais **nada sai para o OpenClaw**: só `openclaw_web` está ligado, exige `RODRIGO_WEB_SEARCH=1` (padrão `0`) e nenhum caminho de voz o aciona; além disso o endpoint `/v1/chat/completions` do OpenClaw está desligado. O risco é **latente** até a Fatia 4b. Detalhes e correções em `docs/plan/privacidade-openclaw-v2.md` (PR #10). O resto do item (provedor não declarado, conteúdo sem contrato) continua válido.
+
 ### 2. Alta: o plano de especialistas manda agentes de nuvem lerem `docs/research/`
 
 - O `CLAUDE.md` diz que `docs/research/` nunca vai a terceiros. No app, `RODRIGO_SEND_KNOWLEDGE` é desligado por padrão, por decisão do Rodrigo (D1).
