@@ -8,6 +8,8 @@
 
 - **Atualizado em:** 2026-10-12 08:35 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
 
+> **Protocolo "final de sessão" (regra permanente, 2026-10-12):** quando o Rodrigo disser "final de sessão", o Claude/orquestrador registra a sessão no `CLAUDE.md` (`## Registro de sessões`), atualiza o notebook 803ea045 e escreve `docs/handoff-AAAA-MM-DD.md`, referenciado na seção "Último passo / próximo passo" abaixo. Checklist completo no `CLAUDE.md`.
+
 ## Trava (lease)
 - titular: ORQUESTRADOR_GROK (Grok Bot, com voz em tempo real)
 - desde: 2026-10-11 22:45 BRT (renovada 2026-10-12 08:35 BRT)
