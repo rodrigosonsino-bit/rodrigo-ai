@@ -6,12 +6,12 @@
 > `docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md` (aceito pelo Rodrigo em 2026-10-11; no git a partir do PR do branch `docs-estado-pos-merge`).
 > O gerador do NotebookLM (`scripts/notebooklm/build_sources.py`) copia este arquivo para a fonte 00 (§2b) e para a fonte 31: o estado escrito à mão mora só aqui.
 
-- **Atualizado em:** 2026-10-12 08:15 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
+- **Atualizado em:** 2026-10-12 08:20 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
 
 ## Trava (lease)
 - titular: ORQUESTRADOR_GROK (Grok Bot, com voz em tempo real)
-- desde: 2026-10-11 22:45 BRT (renovada 2026-10-12 08:00 BRT)
-- expira_em: 2026-10-12 12:00 BRT
+- desde: 2026-10-11 22:45 BRT (renovada 2026-10-12 08:20 BRT)
+- expira_em: 2026-10-12 12:20 BRT
 - duração: 4 h, renovada a cada atualização. Aceita pelo Rodrigo em 2026-10-11 como ponto de partida; **revisar depois de uma semana de uso (~2026-10-18)**.
 - reserva: Claude Code Sonnet (`~/.local/bin/claude`). Login e cota **não testados** — o Rodrigo pediu para não testar agora.
 
@@ -22,7 +22,7 @@
 - Não rastreados (não commitar nem apagar): arquivos de persona OpenClaw (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `DREAMS.md`), `HANDOFF-*.md`, `.openclaw-cli-images/`.
 
 ## NotebookLM ("Rodrigo AI (orquestrador de voz)", `803ea045-d8fb-4a59-9caa-872d91a51124`)
-- Atualizado em 2026-10-11 após o PR #1: **30 fontes**, todas prontas. Trocadas as 6 que mudaram (00, 15, 20, 21, 27, 29) e reenviada a 06, que estava com erro.
+- **31 fontes**, todas prontas, atualizadas a partir do `main` a cada merge. Em 2026-10-12, as fontes 00, 31 e 34 são trocadas a cada mudança relevante. Histórico: 30 fontes em 2026-10-11, depois do PR #1.
 - Novas: 30 plano de orquestração (`930ad4e8`), 31 estado da orquestração = este arquivo (id atual em `notebooklm source list`; o antigo `d8a2168d` foi substituído por `2c09d0c8` em 2026-10-11 e é trocado a cada reenvio), 32 auditoria de fechamento da F15 (`008ad12c`), 33 plano da F15 Fatia 4 (`461564f4`).
 
 ## Auto-melhoria e conhecimento (2026-10-12, PRs #3 e #4)
@@ -66,7 +66,7 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 | `orquestrador-de-voz` (OpenClaw) | Fase V Fatia 5 (plano primeiro) | 2026-10-11 | A sessão `ios-a7f5350f` (kimi-k3) **saturou o contexto** (saída ilegível ao planejar a Fatia 4) — **não usar**; usar uma sessão nova |
 | `coordenador`, `pesquisador`, `redator`, `revisor`, `operador`, `social` | — | — | Livres. **Modelo `nvidia/moonshotai/kimi-k3`** desde 2026-10-12, os 6 testados com "OK" (backup `~/.openclaw/openclaw.json.bak-20261012-0803-kimi`). `main` e `orquestrador-de-voz` continuam com `anthropic/*` (sessões novas usam `--model kimi-k3`); a troca fica para o Rodrigo decidir |
 | Cursor CLI / cloud agents | — | — | Plano Pro: "Outros modelos" 100% usado até 11/11, on-demand desligado; `auto`/Composer/Grok OK; precisa de `--trust` |
-| `delegar` | — | — | **Consertado.** Filas: `antigravity-gemini-3.1-pro` primeiro; Opus/Sonnet fora até 11/11; tempo de código 600 s |
+| `delegar` | — | — | Filas: `antigravity-gemini-3.1-pro` primeiro. **Código desde 2026-10-12 (revisão semanal): gemini-3.1-pro → cursor-composer25 → cursor-auto**; codex, agy e gpt5-codex-high saíram da fila, mas continuam em AGENTES. Opus/Sonnet fora até 11/11. Log com `tarefa`, `modelo` e `teste`; cooldown de 1 h após erro de cota (`--sem-cooldown` ignora). Backup: `~/.local/bin/delegar.bak-20261012-0817-revisao`. Validado: py_compile, `--help`, `--lista`, uma tarefa real com `--teste` (OK em 9 s, registrada no log) e teste unitário do cooldown |
 
 ## Último passo / próximo passo
 - Último: PRs #2, #3 e #4 mergeados; agentes OpenClaw em kimi-k3; skill `agent-catalog` com as filas reais; NotebookLM atualizado a partir do `main`.
