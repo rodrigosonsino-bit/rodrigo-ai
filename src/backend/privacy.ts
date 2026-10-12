@@ -24,7 +24,7 @@ export interface PrivacyConfig {
   readonly cloudTts: boolean;
   /** Fase 13a, decisão D-b — RODRIGO_TTS_DICTATED: confirmações que repetem conteúdo ditado (prévia de nota/lembrete/memória) também vão à voz em nuvem. */
   readonly ttsDictated: boolean;
-  /** Fase V — RODRIGO_CLOUD_VISION: envio da imagem da tela ao Gemini sob autorização explícita na fala. */
+  /** Fase V — RODRIGO_CLOUD_VISION (padrão DESLIGADO, como todo canal de nuvem novo): imagem da tela ao Gemini só com este canal ligado E autorização explícita na fala. */
   readonly cloudVision: boolean;
   /**
    * Fase 15 — RODRIGO_WEB_SEARCH: leitura externa/nuvem autônoma (busca web via OpenClaw).
@@ -118,7 +118,7 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false),
     cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),
     ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true),
-    cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', true),
+    cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', false),
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false)
   };
 }
@@ -137,7 +137,9 @@ export function workerPrivacyEnv(cfg: PrivacyConfig): Record<string, string> {
   return {
     RODRIGO_CLOUD: cfg.cloud ? '1' : '0',
     RODRIGO_CLOUD_INTENT: cfg.cloud && cfg.cloudIntent ? '1' : '0',
-    RODRIGO_CLOUD_TTS: ttsCloudEffective(cfg) ? '1' : '0'
+    RODRIGO_CLOUD_TTS: ttsCloudEffective(cfg) ? '1' : '0',
+    // Fase V: o worker recebe o valor JÁ resolvido aqui (mestre + canal), nunca lê um padrão próprio: os dois lados não divergem.
+    RODRIGO_CLOUD_VISION: cfg.cloud && cfg.cloudVision ? '1' : '0'
   };
 }
 

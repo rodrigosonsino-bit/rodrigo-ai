@@ -80,6 +80,14 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
     stays.push('A busca na web está desligada porque a nuvem está desligada.');
   }
 
+  if (status.sends.visionImage) {
+    goes.push(
+      'A imagem da tela só vai ao Gemini quando você autoriza na própria fala, naquele pedido (canal RODRIGO_CLOUD_VISION ligado).'
+    );
+  } else {
+    stays.push('A imagem da tela não é enviada ao Gemini (RODRIGO_CLOUD_VISION desligado, que é o padrão).');
+  }
+
   if (status.tts.cloud) {
     goes.push(
       'O texto de cada frase que o assistente vai falar vai ao Gemini para virar voz (o seu áudio nunca vai). Isso inclui frases que você interromper antes de ouvir até o fim.'

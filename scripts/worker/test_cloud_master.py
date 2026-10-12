@@ -69,4 +69,83 @@ logs = run_intent("1")
 assert not any("RODRIGO_CLOUD=0" in m for m in logs), "controle positivo: com o mestre ligado o motivo é outro"
 assert any("GEMINI_API_KEY ausente" in m for m in logs), logs
 
+
+# --- Fase V: imagem da tela. RODRIGO_CLOUD_VISION desligado (PADRÃO) => a imagem NUNCA vai ao Gemini, mesmo com o mestre ligado
+# e com a autorização falada. Ligado => vai (controle positivo). O Node repassa o valor já resolvido; o padrão do worker é "0".
+import tempfile  # noqa: E402
+import types as _pytypes  # noqa: E402
+
+
+class Recorder:
+    """Cliente Gemini falso que registra a chamada de geração (= a imagem saindo)."""
+    sent = False
+
+    def __init__(self):
+        self.models = SimpleNamespace(generate_content=self._gen)
+
+    def _gen(self, **_kw):
+        Recorder.sent = True
+        return SimpleNamespace(text="descricao de teste")
+
+
+def run_describe_screen(vision_env, master: str = "1", authorized: bool = True) -> tuple[list[dict], bool]:
+    os.environ["RODRIGO_CLOUD"] = master
+    os.environ["GEMINI_API_KEY"] = "chave-sintetica-de-teste"
+    if vision_env is None:
+        os.environ.pop("RODRIGO_CLOUD_VISION", None)
+    else:
+        os.environ["RODRIGO_CLOUD_VISION"] = vision_env
+    Recorder.sent = False
+    # google.genai pode não estar instalado onde o teste roda: módulos falsos mínimos
+    google_mod = _pytypes.ModuleType("google")
+    genai_mod = _pytypes.ModuleType("google.genai")
+    types_mod = _pytypes.ModuleType("google.genai.types")
+    types_mod.Part = SimpleNamespace(from_bytes=lambda data, mime_type: ("img", len(data), mime_type))  # type: ignore[attr-defined]
+    genai_mod.types = types_mod  # type: ignore[attr-defined]
+    google_mod.genai = genai_mod  # type: ignore[attr-defined]
+    saved = {k: sys.modules.get(k) for k in ("google", "google.genai", "google.genai.types")}
+    sys.modules.update({"google": google_mod, "google.genai": genai_mod, "google.genai.types": types_mod})
+    events: list[dict] = []
+    worker.emit = lambda ev: events.append(ev)  # type: ignore[assignment]
+    worker.log_diag = lambda *_a, **_k: None  # type: ignore[assignment]
+    rec = Recorder()
+    stub = SimpleNamespace(
+        _current_lock=threading.Lock(), _current=None, _cancelled_turns=OrderedDict(),
+        _gemini_client_for=lambda genai, timeout_ms: rec,
+        _turn_cancelled=lambda _t: False,
+        _vlm_model=None,
+        _mx=None,
+    )
+    stub._set_current = lambda h: worker.Worker._set_current(stub, h)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as img:
+            img.write(b"\xff\xd8\xff\xe0 jpeg de teste")
+            img.flush()
+            worker.Worker.handle_describe_screen(stub, {
+                "reqId": "r", "turnId": "t", "epoch": 1, "imagePath": img.name,
+                "question": "o que tem na tela?", "cloudAuthorized": authorized})
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+    return events, Recorder.sent
+
+
+ev, sent = run_describe_screen(None)  # variável AUSENTE = padrão do worker
+assert sent is False, "padrão (RODRIGO_CLOUD_VISION ausente): a imagem não pode ir ao Gemini"
+assert not any(e.get("event") == "screen_sent" for e in ev), ev
+ev, sent = run_describe_screen("0")
+assert sent is False and not any(e.get("event") == "screen_sent" for e in ev), "RODRIGO_CLOUD_VISION=0"
+ev, sent = run_describe_screen("1", master="0")
+assert sent is False, "mestre desligado vence o canal de visão"
+ev, sent = run_describe_screen("1", authorized=False)
+assert sent is False, "sem autorização falada nada vai, mesmo com o canal ligado"
+# controle positivo: canal ligado + mestre + autorização => a imagem É enviada (prova que o teste enxerga o envio)
+ev, sent = run_describe_screen("1")
+assert sent is True, "controle positivo: com o canal ligado, a imagem deve ser enviada"
+assert any(e.get("event") == "screen_sent" for e in ev), ev
+os.environ.pop("RODRIGO_CLOUD_VISION", None)
+
 print("ok: test_cloud_master")

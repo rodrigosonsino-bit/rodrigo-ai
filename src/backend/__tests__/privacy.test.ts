@@ -12,7 +12,7 @@ import { findViolations } from './privacyClaims.js';
 import type { ConversationMessage } from '../../shared/voiceProtocol.js';
 
 describe('parsePrivacyConfig (Fase 12)', () => {
-  it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1)', () => {
+  it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1), a imagem da tela (Fase V) e a busca web', () => {
     assert.deepEqual(DEFAULT_PRIVACY, {
       cloud: true,
       cloudIntent: true,
@@ -22,7 +22,7 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       sendKnowledge: false,
       cloudTts: true,
       ttsDictated: true,
-      cloudVision: true,
+      cloudVision: false,
       webSearch: false
     });
   });
@@ -44,9 +44,24 @@ describe('parsePrivacyConfig (Fase 12)', () => {
   });
 
   it('workerPrivacyEnv: mestre desligado força a intenção desligada no worker', () => {
-    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloud: false }), { RODRIGO_CLOUD: '0', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '0' });
-    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloudIntent: false }), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '1' });
-    assert.deepEqual(workerPrivacyEnv(DEFAULT_PRIVACY), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '1', RODRIGO_CLOUD_TTS: '1' });
+    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloud: false }), { RODRIGO_CLOUD: '0', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '0', RODRIGO_CLOUD_VISION: '0' });
+    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloudIntent: false }), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '1', RODRIGO_CLOUD_VISION: '0' });
+    assert.deepEqual(workerPrivacyEnv(DEFAULT_PRIVACY), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '1', RODRIGO_CLOUD_TTS: '1', RODRIGO_CLOUD_VISION: '0' });
+  });
+
+  it('imagem da tela (Fase V): desligada por padrão; o worker recebe o valor JÁ resolvido (mestre + canal), nunca um padrão próprio', () => {
+    assert.equal(parsePrivacyConfig({}).cloudVision, false, 'padrão de produção = desligado');
+    assert.equal(parsePrivacyConfig({ RODRIGO_CLOUD_VISION: '' }).cloudVision, false, 'vazio = padrão');
+    assert.equal(parsePrivacyConfig({ RODRIGO_CLOUD_VISION: '1' }).cloudVision, true);
+    for (const bad of ['true', 'on', '2', '01']) {
+      assert.throws(() => parsePrivacyConfig({ RODRIGO_CLOUD_VISION: bad }), /RODRIGO_CLOUD_VISION/, bad);
+    }
+    const on = parsePrivacyConfig({ RODRIGO_CLOUD_VISION: '1' });
+    assert.equal(workerPrivacyEnv(on).RODRIGO_CLOUD_VISION, '1');
+    assert.equal(workerPrivacyEnv({ ...on, cloud: false }).RODRIGO_CLOUD_VISION, '0', 'mestre desligado vence o canal');
+    assert.equal(effectivePrivacy({ GEMINI_API_KEY: 'x' }).sends.visionImage, false, 'padrão: a imagem da tela não sai');
+    assert.equal(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_CLOUD_VISION: '1' }).sends.visionImage, true);
+    assert.equal(effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_CLOUD_VISION: '1' }).sends.visionImage, false);
   });
 });
 
@@ -144,7 +159,7 @@ describe('Linha de estado da voz (Fase 13a)', () => {
 
 describe('effectivePrivacy (Fase 12)', () => {
   it('com tudo ligado reflete exatamente o gabarito escrito à mão (não circular)', () => {
-    const st = effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_KNOWLEDGE: '1' });
+    const st = effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_CLOUD_VISION: '1' });
     const gabarito: PrivacyStatus = {
       mode: 'cloud',
       intent: 'gemini',
@@ -159,7 +174,7 @@ describe('effectivePrivacy (Fase 12)', () => {
   });
 
   it('mestre desligado: nada sai, mesmo com os sub-controles ligados', () => {
-    const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1', RODRIGO_WEB_SEARCH: '1' });
+    const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1', RODRIGO_WEB_SEARCH: '1', RODRIGO_CLOUD_VISION: '1' });
     assert.equal(st.mode, 'local-only');
     assert.equal(st.intent, 'local');
     assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false, visionImage: false, webSearch: false });
@@ -266,6 +281,16 @@ describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 1
     assert.ok(off.goes.some((l) => /entendidos neste computador/.test(l)));
     assert.ok(off.goes.some((l) => /não são enviados ao Gemini/.test(l)), 'trecho de pesquisa não enviado por padrão (D1)');
     assert.ok(!flat(off).includes('últimas'));
+  });
+
+  it('imagem da tela (Fase V): o cartão diz que NÃO sai por padrão e muda de frase quando o canal é ligado', () => {
+    const off = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x' }));
+    assert.ok(off.stays.some((l) => /imagem da tela não é enviada ao Gemini/.test(l)), 'padrão: declarada como não enviada');
+    assert.ok(!off.goes.some((l) => /imagem da tela/.test(l)));
+    const on = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_CLOUD_VISION: '1' }));
+    assert.ok(on.goes.some((l) => /imagem da tela só vai ao Gemini quando você autoriza na própria fala/.test(l)));
+    assert.ok(!on.stays.some((l) => /imagem da tela/.test(l)));
+    for (const t of [off, on]) assert.deepEqual(findViolations(flat(t)), []);
   });
 
   it('divulgação do nível gratuito: aparece sempre que algo vai ao Gemini e NUNCA no modo sem nuvem', () => {
