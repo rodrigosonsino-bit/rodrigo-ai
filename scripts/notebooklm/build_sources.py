@@ -68,6 +68,8 @@ loc = sh("echo \"backend TS: $(find src/backend -name '*.ts' ! -path '*__tests__
 ports = sh("lsof -iTCP:3000 -sTCP:LISTEN -n -P | awk 'NR>1{print \"app na porta 3000, pid \" $2}'") or "(nada escutando na 3000 agora)"
 ttsstat = sh("curl -s -m 4 http://127.0.0.1:3000/api/voice/tts-status") or "(app fora do ar)"
 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+tsc_rc = subprocess.run("npx tsc -p tsconfig.server.json --noEmit", shell=True, cwd=ROOT, capture_output=True, timeout=300).returncode
+estado = read("docs/orquestracao/ESTADO.md") if (ROOT / "docs/orquestracao/ESTADO.md").is_file() else "(docs/orquestracao/ESTADO.md não encontrado)"
 
 handoff = f"""# LEIA PRIMEIRO — Rodrigo AI: passagem de bastão para outro agente ({now})
 
@@ -108,7 +110,11 @@ Os 4 arquivos não rastreados acima (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `USE
 Estado do que está rodando (comandos agora): {ports}
 `GET /api/voice/tts-status` -> `{ttsstat}`
 
-**Testes: ESTADO QUEBRADO, verificado agora (`npx tsc -p tsconfig.server.json --noEmit`, 2026-10-09).** `npm test` não roda — falha já no `tsc` do `tsconfig.server.json`, antes de chegar em `node --test`: **177 erros, todos em `src/backend/voice/sessionManager.ts`**, primeiro erro na linha 591 (`'catch' or 'finally' expected`). É sintaxe quebrada (chave de bloco try/chave-abre/chave-fecha desencontrada em algum ponto do arquivo, não um erro de tipo), consistente com uma edição não commitada em andamento (ver `git status` no §2 — este arquivo está entre os 9 modificados). **Nenhuma contagem de teste anterior a isto deve ser usada**; a última vez que a suíte rodou de verdade e passou foi em 2026-10-08 após o commit `a1f12ab` (646 de 646), mas o estado do arquivo mudou desde então. `npm run typecheck` também falha pelo mesmo motivo. Testes Python do worker (`.runtime/.venv/bin/python scripts/worker/test_*.py`) não foram reverificados nesta rodada.
+**Build do servidor, verificado agora:** `npx tsc -p tsconfig.server.json --noEmit` -> exit {tsc_rc} ({'compila' if tsc_rc == 0 else 'NÃO COMPILA'}). A suíte (`npm test`) não é rodada por este gerador; a última contagem registrada, as prioridades e quem coordena estão no §2b, copiado de `docs/orquestracao/ESTADO.md` no momento da geração (o estado escrito à mão mora só lá, para não envelhecer aqui).
+
+## 2b. Estado vivo da orquestração (cópia de `docs/orquestracao/ESTADO.md`, fonte única)
+
+{estado}
 
 Arquivos de teste Node:
 ```
@@ -191,9 +197,9 @@ Estado local relevante (verificado): o `.env` do usuário usa `TTS_ENGINE=gemini
 | 13a | **Voz natural: TTS do Gemini com `say` de reserva** | implementado (`e617497`); **código auditado em 2026-10-08** (Kimi K3, 9 achados: 6 corrigidos em `fe7736e`, 1 falso positivo, 2 sem ação; `docs/audits/f13a-code-audit-kimi-k3-2026-10-08.md`); **H13a.10 (o usuário ouvir) ainda PENDENTE** — ver §6 |
 | 13b | Conversa natural (latência/escuta) | começada: log `[timing]` por etapa (`af05e1e`); fim de fala aos **1,0 s** de silêncio (era 0,7 s; `e9ef641`, decisão do usuário). Plano de juntar fragmentos no servidor (`docs/phase-13b-v1.md`) **reprovado** pelo Codex (REFAZER) e substituído por essa decisão. Latência ainda não atacada |
 | V | **Visão da tela** (inserida pelo usuário) | plano v3 aprovado com ajustes (`docs/phase-vision-v3.md`); **fatias 1, 2 e 3 feitas e auditadas** (fatia 3: `ce48a79`+`99e6fbc`, Kimi K3, 5 achados, todos procedentes); **fatias 4 e 5 pendentes** — ver §6b e §6c |
-| 14 | Ciclo completo de notas, lembretes e memórias por voz | plano auditado: **aprovado com ajustes** (`docs/audits/phase-14-plan-audit-r1.md`); v2 em `docs/phase-14-v2.md`; **implementação em andamento, NÃO COMMITADA — e o build está QUEBRADO agora** (ver §2 e §6c) |
-| 15 | Orquestrador autônomo, coordenador de todos os subagentes (inclui a ponte com o OpenClaw) | plano v1 **REFAZER** (`docs/audits/phase-15-plan-audit-r1.md`: busca web como leitura autônoma não classificada = vazamento de dado pra nuvem); v2 (`docs/phase-15-v2.md`) **autodeclara** "Aprovado para implementação" — **não encontrei auditoria da rodada 2 confirmando isso de forma independente**, tratar como pendente de confirmação; arquivos novos não commitados da interface `ISubAgent` (`subAgent.ts`, `adapters.ts`, `openClawSubAgent.ts`) e teste esqueleto — ver §6c |
-| 16 | Conhecimento pessoal (Teologia/Virtologia/novas bases, ex. Neurociência) | mesma situação da F15: v1 **REFAZER** (`docs/audits/phase-16-plan-audit-r1.md`), v2 (`docs/phase-16-v2.md`) autodeclarado aprovado, sem auditoria r2 encontrada; teste esqueleto bem mais fino (24 linhas) que o da F15 — ver §6c |
+| 14 | Ciclo completo de notas, lembretes e memórias por voz | plano auditado: **aprovado com ajustes** (`docs/audits/phase-14-plan-audit-r1.md`); v2 em `docs/phase-14-v2.md`; **FECHADA em 2026-10-11** (H14.1 120/120, H14.2 0 violações, H14.4 30/30) — ver §6d |
+| 15 | Orquestrador autônomo, coordenador de todos os subagentes (inclui a ponte com o OpenClaw) | plano `docs/phase-15-v3.md` aprovado com ressalvas (auditoria r3). Fatias 1–3 e 5 commitadas (D15 = ponte HTTP ao gateway OpenClaw; `RODRIGO_WEB_SEARCH`; tarefas assíncronas persistidas; suíte H15 em `6e88e5a`). Auditoria de fechamento (`docs/audits/f15-fechamento-lingxi-engineer-bot.md`, fonte própria) achou falta de integração; **Fatia 4 (integração) mergeada no PR #1 (`9cb5bdb`)**. Falta a **Fatia 4b** (decompositor multi-passo + rota de voz até o OpenClaw/especialistas) — ver §6d |
+| 16 | Conhecimento pessoal (Teologia/Virtologia/novas bases, ex. Neurociência) | plano `docs/phase-16-v3.md` aprovado com ressalvas; **bloqueio**: o algoritmo de dedupe/merge (`conflictResolver`) e as fixtures (60–180 cenários) ainda não foram escritos |
 | 17 | Qualificação 1.0 | não iniciada |
 
 ## 6. Fase 13a em detalhe (a mais recente — leia `docs/phase-13a-v3.md` e `docs/implementation-phase-13a.md`)
@@ -230,7 +236,7 @@ Todos os commits abaixo estão em `main` e **ainda não foram empurrados** ao Gi
 
 **Próximo passo (fatia 3):** botão "Compartilhar tela" (`getDisplayMedia`), `screen_request`/`captureId` de uso único, rota `POST .../screen` que autentica e consome ANTES de gravar, JPEG ≤ 3 MiB validado, limpeza em todas as saídas. Depois: fatia 4 (visão local no worker, `mlx-vlm` com revisão fixada no setup, carga/descarga, prazo de 90 s), fatia 5 (Gemini por autorização + `RODRIGO_CLOUD_VISION` + cartão). Critérios HV.1–HV.14 em `docs/phase-vision-v3.md` §7 e §10.
 
-## 6c. Sessão de 2026-10-09 — o que foi feito, em ordem (e o que está quebrado agora)
+## 6c. Sessão de 2026-10-09 — o que foi feito, em ordem (e o que estava quebrado naquele dia; resolvido em 2026-10-10/11, ver §6d)
 
 Commits novos em `main` desde o §6b (`git rev-list --count origin/main..HEAD` no §2 mostra quantos ainda não foram empurrados):
 - `ac09d4f`, `6e19437` NotebookLM do projeto atualizado (24 fontes do commit `6e19437`; README da pasta documenta a armadilha do `/tmp` symlink).
@@ -240,7 +246,7 @@ Commits novos em `main` desde o §6b (`git rev-list --count origin/main..HEAD` n
 - `307f695` roteiro passa a registrar a cadência de teste do usuário (tudo no final da fase, não fase a fase).
 
 **Planejamento de F14/F15/F16 (ver `docs/audits/phase-14-plan-audit-r1.md`, `phase-15-plan-audit-r1.md`, `phase-16-plan-audit-r1.md` e a fonte 15 deste notebook):**
-- **F14**: plano v1 → auditoria r1 → **APROVADO COM AJUSTES** → v2 (`docs/phase-14-v2.md`) incorpora os ajustes. Implementação já começou: `git status` (§2) mostra `mutatingTools.ts`, `privacy.ts`, `specialistAgents.ts`, `corpus.ts`, `worker.py`, `mlxWorkerEngine.ts`, `sessionManager.ts`, `types.ts`, `voiceProtocol.ts` modificados, mais o teste `src/backend/tools/__tests__/phase14.test.ts`. **Nada disso está commitado, e o `tsc` do servidor NÃO COMPILA agora** (§4: 177 erros, todos em `sessionManager.ts`, a partir da linha 591 — sintaxe quebrada, não lógica). Antes de continuar ou de confiar em qualquer medição desta fase, esse arquivo precisa ser consertado.
+- **F14**: plano v1 → auditoria r1 → **APROVADO COM AJUSTES** → v2 (`docs/phase-14-v2.md`) incorpora os ajustes. Implementação já começou: `git status` (§2) mostra `mutatingTools.ts`, `privacy.ts`, `specialistAgents.ts`, `corpus.ts`, `worker.py`, `mlxWorkerEngine.ts`, `sessionManager.ts`, `types.ts`, `voiceProtocol.ts` modificados, mais o teste `src/backend/tools/__tests__/phase14.test.ts`. **Nada disso está commitado, e o `tsc` do servidor NÃO COMPILAVA naquele dia** (§4: 177 erros, todos em `sessionManager.ts`, a partir da linha 591 — sintaxe quebrada, não lógica). Antes de continuar ou de confiar em qualquer medição desta fase, esse arquivo precisa ser consertado.
 - **F15**: plano v1 → auditoria r1 → **REFAZER** (achado principal: a camada de "leitura autônoma" incluía busca na web sem classificar como saída de dado pra nuvem — viola a política de privacidade; precisa separar Leitura Local Autônoma de Leitura Externa sob Aprovação). v2 (`docs/phase-15-v2.md`, 111 linhas) foi escrito e **se autodeclara** "Estado: Aprovado para implementação" — quem gerou esta fonte não achou o arquivo de auditoria da rodada 2 que confirme isso de forma independente; tratar como pendente até achar esse relatório ou rodar a auditoria. Arquivos novos não commitados: `src/backend/agents/subAgent.ts` (interface `ISubAgent`), `adapters.ts`, `openClawSubAgent.ts` (a ponte com o OpenClaw), teste `src/backend/__tests__/phase15.test.ts` (77 linhas).
 - **F16**: mesmo padrão da F15 — v1 REFAZER (`docs/audits/phase-16-plan-audit-r1.md`), v2 (`docs/phase-16-v2.md`) autodeclarado aprovado, sem auditoria r2 encontrada. Teste `src/backend/__tests__/phase16.test.ts` existe mas é só um esqueleto (24 linhas, contra 77 do da F15) — a F16 está visivelmente menos adiantada que a F15.
 
@@ -252,7 +258,17 @@ Commits novos em `main` desde o §6b (`git rev-list --count origin/main..HEAD` n
 
 **Duas pendências de processo, não só de código:**
 1. O protocolo do projeto (§7) exige auditoria adversarial do plano antes de implementar. F14 tem essa auditoria documentada (r1, aprovado com ajustes). F15 e F16 só têm a auditoria do v1 (REFAZER); o v2 de ambas se autodeclara aprovado sem um relatório de rodada 2 que este gerador tenha encontrado. Confirmar com o usuário onde (ou se) essa auditoria aconteceu antes de tratar `subAgent.ts`/`adapters.ts`/`openClawSubAgent.ts` como implementação autorizada.
-2. O build do servidor não compila agora (ver §4 e a linha de F14 acima). Isso bloqueia `npm test`, `npm run build` e `npm start` até ser corrigido.
+2. (Resolvido em 2026-10-10/11.) Naquele dia o build do servidor não compilava, o que bloqueava `npm test`, `npm run build` e `npm start`; o estado atual do build está no §2.
+
+## 6d. Sessões de 2026-10-10 e 2026-10-11 — o que mudou (resumo; detalhes em `HANDOFF-2026-10-11-noite.md`, não versionado, e em `docs/orquestracao/ESTADO.md`)
+
+- **O build voltou a compilar** e o trabalho de F14/F15/F16 foi commitado e empurrado. **F14 FECHADA** (H14.1 120/120, H14.2 0 violações, H14.4 30/30).
+- **F15**: plano v3 aprovado com ressalvas; D15 decidido (Opção A, ponte HTTP ao gateway OpenClaw). Commits `8e18138` (canal `RODRIGO_WEB_SEARCH` + gate `openclaw_web`), `a8c3e7c` (persistência de tarefas assíncronas + recuperação na subida), `f5844b0` (gatekeeper de mutação + orçamento por turno), `6e88e5a` (Fatia 5: suíte de estresse H15 + `docs/phase-15-h15-recalibration.md`).
+- **Auditoria de fechamento da F15** (2026-10-11, só leitura): veredito **não fecha** — o `runTurn` nunca chamava o coordenador (`runSubAgentDelegation` só nos testes), o H15.2 aceitava token forjado com o prefixo certo (50 de 200 cenários), a mutação pós-"sim" pulava o gatekeeper, H15.4 sem rota, aviso de estouro sumia com turno em andamento, H15.3 com agente falso.
+- **F15 Fatia 4 (integração)** — plano `docs/plan/f15-fatia4-integracao.md` (fonte própria), aprovado pelo usuário com P1 (Fatia 4b separada), P2 (H15.3 aceita só cancelamento local — o OpenClaw não tem API de cancelamento) e R3 (o coordenador é do processo; "o que você fez?" pode citar uma sessão anterior). Commits `3d567aa` (token comparado com o emitido, uso único), `3d584eb` (`runTurn` delega ferramentas pelo coordenador), `47b93fa` (mutação pós-SIM pelo gatekeeper), `d3e1cdd` (fala de estouro dentro do turno), `49cb0eb` (trace com pendentes e "o que você fez?"), `bdfdc9e` (ESTADO.md). **Mergeado na `main` pelo PR #1 (`9cb5bdb`)** com aval do usuário. O token forjado agora dá 0 execuções.
+- **Ordem de trabalho mudada pelo usuário em 2026-10-11** (registrada em `docs/roadmap-2026-10-09.md`): F15 Fatia 4 primeiro (feita), **depois Fase V Fatia 5** (imagem ao Gemini só com autorização por voz + cartão de privacidade). A "Fatia 5" é a da Fase V — a da F15 (suíte H15) já está em `6e88e5a`. Antes, conferir o estado real da Fase V Fatia 4 (o commit `41f2941` cita "Fase V fatia 4").
+- **Orquestração**: o usuário definiu que um único agente coordena todos os outros. Plano em `docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md` e estado em `docs/orquestracao/ESTADO.md` (no git): titular da trava = ORQUESTRADOR_GROK (Grok Bot, antes chamado Lingxi's Engineer Bot, com voz em tempo real); reserva = Claude Code Sonnet (login/cota não testados, por decisão do usuário); trava de 4 h renovada a cada atualização. **Quem for agir no projeto lê o `ESTADO.md` primeiro e não dá ordens sem deter a trava.**
+- Pontos de atenção na Fase V levantados em 2026-10-11: `RODRIGO_CLOUD_VISION` vem ligado por padrão; `mlx-vlm` não está nos scripts de setup; o modelo de visão padrão não é o que o plano prevê.
 
 ## 7. Como se trabalha neste projeto (regras do usuário)
 
@@ -270,9 +286,9 @@ Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a audit
 
 - D-b (§6): manter a voz do Gemini nas confirmações que repetem o que ele ditou, ou deixá-las na voz do sistema.
 - Ouvir a voz nova (H13a.10) e colar as linhas `[timing]`.
-- **Build quebrado**: `sessionManager.ts` não compila (ver §4, §6c) — provavelmente precisa de conserto antes de qualquer outra coisa.
-- **F15/F16**: confirmar se a auditoria da rodada 2 dos planos v2 (ambos autodeclarados "Aprovado para implementação") de fato aconteceu, ou se falta rodá-la antes de confiar na implementação já começada (`subAgent.ts` etc.) — ver §6c.
-- **Trabalho não commitado** (9 arquivos modificados + ~16 novos, entre F14/F15/F16): decidir quando commitar, mesmo em passos intermediários, para não arriscar perder.
+- Revisar `docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md` (modelo de orquestração) e a trava de 4 h depois de uma semana de uso (~2026-10-18).
+- **F15**: aprovar o plano da Fatia 4b quando for escrito; aprovação nominal da busca web autônoma.
+- HV.14 (10 perguntas reais sobre a tela) depois da Fase V.
 - Se vale pagar o Nível 2 do Google (US$ 100 + 3 dias) para sair do limite de 100 pedidos/dia; ele disse "nivel 1" e achou o custo mensal "caro" (estimativa: ~US$ 5 a 11/mês a 20 min de fala por dia com o modelo escolhido).
 - Os 4 arquivos de agente na raiz: apagar ou ignorar no git.
 - Dívidas 5b/5c e F11 (alvos de cobertura abertos) e a medição com voz real da F11.
@@ -287,6 +303,8 @@ Material pessoal: `docs/research/` e o `.env` nunca vão a terceiros nem a audit
 6. Planos e relatórios de implementação por fase; planos finais; auditorias da 13a; **Fase V (visão da tela) e 13b com auditorias** (fonte 14).
 7. **`docs/roadmap-2026-10-09.md` (roteiro oficial vigente) e os planos/auditorias de F14, F15 e F16** (fonte 15) — use esta fonte, não a 5 ou a 6, para a ordem e o objetivo de cada fase a partir daqui.
 8. Código: backend de voz, núcleo do backend, worker Python, frontend e shared, scripts e configuração, testes da Fase 13a, testes da Fase V (fonte 28), testes das Fases 14–16 em andamento (fonte 29), lista de todos os testes.
+
+9. **Fontes 30–33 (2026-10-11)**: plano de orquestração (aceito pelo usuário), estado da orquestração (`ESTADO.md`, fonte única de quem coordena e das prioridades), auditoria de fechamento da F15 e plano da F15 Fatia 4 (mergeado no PR #1).
 
 Para o estado de cada decisão, o `CLAUDE.md` e `docs/implementation-phase-13a.md` valem mais que um plano antigo; planos `vN` antigos de uma fase são história (as rodadas de auditoria que os derrubaram estão nos relatórios).
 """
@@ -335,11 +353,19 @@ docs_bundle("14-fase-V-visao-e-13b.md", "Fase V (visão da tela) e Fase 13b — 
      "docs/audits/fv3-code-kimi-k3-2026-10-08.md"])
 
 docs_bundle("15-roteiro-oficial-e-planos-f14-f16.md", "Roteiro oficial vigente (2026-10-09) e planos/auditorias de F14, F15 e F16",
-    "`docs/roadmap-2026-10-09.md` substitui o §7 do prompt de continuação como referência de objetivo e ordem das fases; vale até o usuário mudar. F14: v1->v2, auditoria r1 (aprovado com ajustes), implementacao ja comecada (ver handoff §6c). F15 e F16: v1 (REFAZER) e v2 (autodeclarado aprovado — ver handoff §6c sobre a falta de uma auditoria r2 confirmada).",
+    "`docs/roadmap-2026-10-09.md` substitui o §7 do prompt de continuação como referência de objetivo e ordem das fases; vale até o usuário mudar. Inclui o aviso de mudança de ordem do usuário em 2026-10-11 (F15 Fatia 4 primeiro, depois Fase V Fatia 5). F14: v1->v2, auditoria r1; fase FECHADA em 2026-10-11. F15 e F16: v1 (REFAZER), v2 e v3 (aprovado com ressalvas) e auditorias.",
     ["docs/roadmap-2026-10-09.md",
      "docs/phase-14-v1.md", "docs/phase-14-v2.md", "docs/audits/phase-14-plan-audit-r1.md",
+     "docs/phase-15-v3.md", "docs/audits/phase-15-plan-audit-r3.md", "docs/audits/phase-15-plan-audit-r2.md", "docs/phase-15-h15-recalibration.md",
      "docs/phase-15-v1.md", "docs/phase-15-v2.md", "docs/audits/phase-15-plan-audit-r1.md",
+     "docs/phase-16-v3.md", "docs/audits/phase-16-plan-audit-r3.md", "docs/audits/phase-16-plan-audit-r2.md",
      "docs/phase-16-v1.md", "docs/phase-16-v2.md", "docs/audits/phase-16-plan-audit-r1.md"])
+
+# ---------------------------------------------------------------- 30..33 orquestração, auditoria e plano da F15 Fatia 4 (cópias literais)
+shutil_copy("docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md", "30-plano-de-orquestracao-2026-10-11.md")
+shutil_copy("docs/orquestracao/ESTADO.md", "31-estado-da-orquestracao.md")
+shutil_copy("docs/audits/f15-fechamento-lingxi-engineer-bot.md", "32-auditoria-fechamento-f15.md")
+shutil_copy("docs/plan/f15-fatia4-integracao.md", "33-plano-f15-fatia4.md")
 
 # ---------------------------------------------------------------- código
 def listing(patterns):
@@ -366,9 +392,12 @@ bundle("26-testes-da-fase-13a.md", "Testes da Fase 13a (TTS)", "Orçamento, prov
 bundle("28-testes-da-fase-V.md", "Testes da Fase V (visão da tela), fatias 1 e 2", "Cancelamento de comandos na fila do worker (Python) e turno de tela isolado do Gemini (Node).",
        ["src/backend/__tests__/fvScreen.test.ts", "scripts/worker/test_cancel_queue.py"])
 
-bundle("29-testes-das-fases-14-a-16.md", "Testes das Fases 14, 15 e 16 — em andamento, não commitados",
-       "F14 tem o teste mais desenvolvido; F15 tem um esqueleto maior (77 linhas) que o da F16 (24 linhas). Nenhuma das tres fases tem implementacao madura ainda, e o build do servidor nao compila agora (ver handoff §4 e §6c) — tratar como rascunho, nao como cobertura validada.",
-       ["src/backend/tools/__tests__/phase14.test.ts", "src/backend/__tests__/phase15.test.ts", "src/backend/__tests__/phase16.test.ts"])
+bundle("29-testes-das-fases-14-a-16.md", "Testes das Fases 14, 15 e 16 (estado de 2026-10-11, após o PR #1)",
+       "F14 fechada (teste da fase + estresse). F15: esqueleto original, suíte de estresse H15 (corrigida na Fatia 4: token forjado dá 0 execuções), gate de orçamento, ponte OpenClaw, persistência assíncrona e busca web. F16: esqueleto e teste do conflictResolver (o algoritmo ainda não está escrito).",
+       ["src/backend/tools/__tests__/phase14.test.ts", "src/backend/tools/__tests__/phase14Stress.test.ts",
+        "src/backend/__tests__/phase15.test.ts", "src/backend/__tests__/phase15.h15.test.ts", "src/backend/__tests__/phase15BudgetGate.test.ts",
+        "src/backend/__tests__/phase15OpenClaw.test.ts", "src/backend/__tests__/phase15AsyncPersistence.test.ts", "src/backend/__tests__/phase15WebSearch.test.ts",
+        "src/backend/__tests__/phase16.test.ts", "src/backend/__tests__/phase16ConflictResolver.test.ts"])
 
 # lista de todos os títulos de teste (para o agente saber o que já está coberto)
 titles = ["# Lista de todos os testes Node (títulos)\n\nGerada por `grep` nos arquivos `*.test.ts`. Serve para saber o que já está coberto antes de escrever um teste novo.\n"]
