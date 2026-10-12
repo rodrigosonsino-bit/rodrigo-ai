@@ -1460,6 +1460,69 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
       assert.equal(h.sessionManager.peekMutationConfirmationToken(simTurnId), undefined, 'token consumido pelo gatekeeper');
     });
 
+    it('F15 Fatia 4 (A3): estouro de orçamento durante o turno do SIM é falado no próprio turno', async (t) => {
+      const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
+      const h = await setupHarness(null, [], mutatingTools);
+      currentH = h;
+      let sse: ReturnType<typeof readSse> | null = null;
+      t.after(async () => {
+        sse?.close();
+        await teardownHarness(h);
+      });
+
+      // Os 2 slots assíncronos já ocupados; o subagente do lembrete adia (async_deferred) -> estoura max_async.
+      const coordinator = h.sessionManager.coordinator;
+      assert.ok(coordinator.tryAcquireAsyncSlot('ocupado-1'));
+      assert.ok(coordinator.tryAcquireAsyncSlot('ocupado-2'));
+      coordinator.register({
+        id: 'tool_lembrete',
+        name: 'LEMBRETE',
+        capabilities: ['test'],
+        async runTask() {
+          return { success: true, output: '', kind: 'async_deferred', asyncTaskId: 'async-a3' };
+        }
+      });
+
+      h.engine.fixedTranscript = 'Lembrete: lavar o carro';
+      h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'lavar o carro'];
+
+      const createRes = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+      const { sessionId, token } = (await createRes.json()) as { sessionId: string; token: string };
+      sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      currentSse = sse;
+      await sse.waitFor(1);
+
+      const audioRes1 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: turnId1 } = (await audioRes1.json()) as { turnId: string };
+      await sse.waitFor(8, 5000);
+      await fetch(`${h.baseUrl}/api/voice/session/played`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId: turnId1, text: emittedText(sse) })
+      });
+
+      h.engine.fixedTranscript = 'Pode sim, obrigado';
+      const audioRes2 = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(1)
+      });
+      const { turnId: simTurnId } = (await audioRes2.json()) as { turnId: string };
+      await sse.waitFor(15, 5000);
+
+      const audioEvent = sse.events
+        .filter((e) => (e as { type: string }).type === 'sentence_audio_ready')
+        .pop() as { type: 'sentence_audio_ready'; turnId: string; text: string };
+      assert.equal(audioEvent.turnId, simTurnId);
+      assert.match(audioEvent.text, /Não consegui terminar/);
+      assert.ok(h.tts.synthesizeCalls.some((s) => /Não consegui terminar/.test(s)), 'a fala de estouro passa pelo TTS do turno');
+      assert.equal(coordinator.getTrace(simTurnId)?.budgetExceeded, 'max_async');
+    });
+
     it('Fase 5c v9 (achado 5 da auditoria de código, Hermes): SIM da Camada 0 nunca aciona o gate nem detectConfirmation', async (t) => {
       const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
       const h = await setupHarness(null, [], mutatingTools);

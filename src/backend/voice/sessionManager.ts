@@ -428,7 +428,8 @@ export class SessionManager {
 
   /**
    * Fatia 4 (§2.3): ferramenta do turno via coordenador — orçamento, trace, gatekeeper e sinal do turno.
-   * Sem sessionId/sessionToken: a fala de estouro não sai fora do turno. `text: null` = falha.
+   * Sem sessionId/sessionToken: a fala de estouro não sai fora do turno — vira o texto do próprio turno
+   * (§2.4, A3). `text: null` = falha.
    */
   private async delegateToolInTurn(
     turn: ActiveTurn,
@@ -447,6 +448,7 @@ export class SessionManager {
       signal: turn.abortController.signal,
       context: { action }
     });
+    if (r.budgetExceeded && r.speech) return { text: r.speech };
     return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
   }
 
