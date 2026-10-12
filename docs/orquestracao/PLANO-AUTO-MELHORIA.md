@@ -136,8 +136,7 @@ Ordem sugerida das áreas (começa pelo que já tem acervo local): neurociência
 1. Aprovar a matriz de treino (seção 6).
 2. Aprovar cadência e ordem das áreas (seção 7).
 3. Quais notebooks entram como fonte em cada área (ex.: livros pessoais, CURSOTERAPIA, Epigenética).
-4. Criar notebook de teoria de engenharia de software? Exportar o acervo de psicanálise?
-5. Os 3 notebooks sem título e os 2 "Psicoterapeuta" duplicados.
+4. Consolidar ou não os 2 notebooks "Psicoterapeuta" (5cddc991, 082c057a), cujo conteúdo é parecido mas não idêntico. Já resolvido na Fase 2: notebook de engenharia criado, psicanálise exportada e os 3 notebooks vazios deletados.
 
 ## 10. Adendo — Fase 2 (após implementar com as fontes existentes)
 

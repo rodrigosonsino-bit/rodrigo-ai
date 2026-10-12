@@ -6,7 +6,7 @@
 > `docs/orquestracao/PLANO-ORQUESTRADOR-PROPOSTA.md` (aceito pelo Rodrigo em 2026-10-11; no git a partir do PR do branch `docs-estado-pos-merge`).
 > O gerador do NotebookLM (`scripts/notebooklm/build_sources.py`) copia este arquivo para a fonte 00 (§2b) e para a fonte 31: o estado escrito à mão mora só aqui.
 
-- **Atualizado em:** 2026-10-12 08:00 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
+- **Atualizado em:** 2026-10-12 08:15 BRT, por ORQUESTRADOR_GROK (Grok Bot; antes chamado Lingxi's Engineer Bot)
 
 ## Trava (lease)
 - titular: ORQUESTRADOR_GROK (Grok Bot, com voz em tempo real)
@@ -16,8 +16,8 @@
 - reserva: Claude Code Sonnet (`~/.local/bin/claude`). Login e cota **não testados** — o Rodrigo pediu para não testar agora.
 
 ## Estado do repo
-- `main` = `origin/main` = `d94575b`: **PR #2 mergeado** em 2026-10-12, com aval do Rodrigo (ESTADO pós-merge, gerador do NotebookLM, documentos de orquestração). Antes: `9cb5bdb`, que é o PR #1 da F15 Fatia 4.
-- Branch `docs-plano-auto-melhoria` (PR #3, aberto, sem merge): plano de auto-melhoria (Fases 1 e 2), `INCIDENTES.md`, `LICOES.md`, `docs/conhecimento/` (7 áreas: índice, sínteses com citação e briefs por papel), evidências da Fase 2. Também corrige no gerador os 2 apontamentos do review do PR #2: o estado da F16 (o `conflictResolver` já existe, em `eba54e5`) e os hashes dos commits da F15. Acrescenta a fonte 34.
+- `main`: **PRs #2 (`d94575b`), #3 (`6720acd`) e #4 mergeados** em 2026-10-12, com aval do Rodrigo. Antes: `9cb5bdb`, que é o PR #1 da F15 Fatia 4.
+- PR #3 (mergeado): plano de auto-melhoria (Fases 1 e 2), `INCIDENTES.md`, `LICOES.md`, `docs/conhecimento/` (7 áreas: índice, sínteses com citação e briefs por papel), evidências da Fase 2. Também corrige no gerador os 2 apontamentos do review do PR #2: o estado da F16 (o `conflictResolver` já existe, em `eba54e5`) e os hashes dos commits da F15. Acrescenta a fonte 34.
 - Suíte: em `main` 739/740 a 740/740; na branch da Fatia 4, 743/745 a 745/745. As únicas falhas são de `fvScreen.test.js` (HV.3 ×2 e "auditoria Kimi K3 achado 5"), **intermitentes e pré-existentes** (0 a 3 falhas por execução também antes da Fatia 4). `tsc` verde.
 - Não rastreados (não commitar nem apagar): arquivos de persona OpenClaw (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `DREAMS.md`), `HANDOFF-*.md`, `.openclaw-cli-images/`.
 
@@ -25,7 +25,8 @@
 - Atualizado em 2026-10-11 após o PR #1: **30 fontes**, todas prontas. Trocadas as 6 que mudaram (00, 15, 20, 21, 27, 29) e reenviada a 06, que estava com erro.
 - Novas: 30 plano de orquestração (`930ad4e8`), 31 estado da orquestração = este arquivo (id atual em `notebooklm source list`; o antigo `d8a2168d` foi substituído por `2c09d0c8` em 2026-10-11 e é trocado a cada reenvio), 32 auditoria de fechamento da F15 (`008ad12c`), 33 plano da F15 Fatia 4 (`461564f4`).
 
-## Auto-melhoria e conhecimento (2026-10-12, PR #3)
+## Auto-melhoria e conhecimento (2026-10-12, PRs #3 e #4)
+- PR #4: `PLANO-ESPECIALISTAS-UNIFICADOS.md` (proposta; próximos passos: `ROTEAMENTO.md` + gerador de profile-sources, depois skills `especialista-<área>` no OpenClaw).
 - Fase 1: `INCIDENTES.md` (7 incidentes reais), `LICOES.md` (L1–L7), `docs/conhecimento/<área>/INDICE.md` para as 7 áreas (Virtologia sempre rotulada "segundo Casarotto") e 12 briefs por papel em `docs/conhecimento/briefs/`.
 - Sínteses (NotebookLM, só fontes dos notebooks, com citação): neurociência, virtologia, hermenêutica, teologia (NT e AT), exegese, psicanálise e engenharia de software.
 - Fase 2:
@@ -63,10 +64,10 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 |---|---|---|---|
 | ORQUESTRADOR_GROK (Grok Bot) | Orquestrador (titular da trava) | 2026-10-11 | este arquivo |
 | `orquestrador-de-voz` (OpenClaw) | Fase V Fatia 5 (plano primeiro) | 2026-10-11 | A sessão `ios-a7f5350f` (kimi-k3) **saturou o contexto** (saída ilegível ao planejar a Fatia 4) — **não usar**; usar uma sessão nova |
-| `coordenador`, `pesquisador`, `redator`, `revisor` | — | — | Livres (modelos `anthropic/*`, sem chave no gateway) |
+| `coordenador`, `pesquisador`, `redator`, `revisor`, `operador`, `social` | — | — | Livres. **Modelo `nvidia/moonshotai/kimi-k3`** desde 2026-10-12, os 6 testados com "OK" (backup `~/.openclaw/openclaw.json.bak-20261012-0803-kimi`). `main` e `orquestrador-de-voz` continuam com `anthropic/*` (sessões novas usam `--model kimi-k3`); a troca fica para o Rodrigo decidir |
 | Cursor CLI / cloud agents | — | — | Plano Pro: "Outros modelos" 100% usado até 11/11, on-demand desligado; `auto`/Composer/Grok OK; precisa de `--trust` |
 | `delegar` | — | — | **Consertado.** Filas: `antigravity-gemini-3.1-pro` primeiro; Opus/Sonnet fora até 11/11; tempo de código 600 s |
 
 ## Último passo / próximo passo
-- Último: PR #2 mergeado (`d94575b`); auto-melhoria Fases 1 e 2 no PR #3; NotebookLM atualizado com as fontes 00, 15, 29, 31 e a nova 34.
+- Último: PRs #2, #3 e #4 mergeados; agentes OpenClaw em kimi-k3; skill `agent-catalog` com as filas reais; NotebookLM atualizado a partir do `main`.
 - Próximo: **Fase V Fatia 5**, plano curto antes do código, numa sessão nova do `orquestrador-de-voz`; nenhum código antes do aval do Rodrigo.
