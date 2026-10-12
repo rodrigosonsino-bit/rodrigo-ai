@@ -138,3 +138,14 @@ Ordem sugerida das áreas (começa pelo que já tem acervo local): neurociência
 3. Quais notebooks entram como fonte em cada área (ex.: livros pessoais, CURSOTERAPIA, Epigenética).
 4. Criar notebook de teoria de engenharia de software? Exportar o acervo de psicanálise?
 5. Os 3 notebooks sem título e os 2 "Psicoterapeuta" duplicados.
+
+## 10. Adendo — Fase 2 (após implementar com as fontes existentes)
+
+> A Fase 2 só começa depois que o plano estiver implementado com as fontes que já existem. Nenhuma tarefa abaixo foi executada ainda.
+
+1. **Engenharia de software (backend e frontend)**: pesquisar as melhores fontes (ACM DL, IEEE Xplore, arXiv cs.SE, RFCs IETF, OWASP, MDN/W3C, livros de referência via ISBN), criar um notebook NotebookLM dedicado a elas e compor os markdowns-fonte no Mac em `docs/research/` (pasta gitignored).
+2. **Psicanálise**: exportar para markdown, em `docs/research/`, os notebooks Acervo Psicanálise (4d6ff1c2), LIVROS_FREUD, LACAN e outros (4b9a4517), Psicopatologia (64beea89), TRANSTORNOS (09ff14d7) e Psicoterapeuta (5cddc991 / 082c057a).
+3. **Duplicados "Psicoterapeuta Rodrigo Sonsino"** (5cddc991, 082c057a): comparar as listas de fontes (título e quantidade). Se forem realmente iguais, deletar a duplicata. Se forem diferentes, manter os dois e relatar as diferenças.
+4. **Notebooks sem título** (deb98c1c, d6421dc7, 91c4cf62): verificar se têm fontes. Se tiverem, descobrir o tema e dar um nome. Se estiverem vazios, deletar.
+
+**Regra para deleções:** só são executadas na Fase 2 e somente depois de gravar um log de evidências em `docs/orquestracao/evidencias/fase2-notebooks.md`. O log registra, para cada notebook, o id, o título, a lista completa de fontes, a comparação feita e a decisão tomada, com data e hora (PT). Sem log não há deleção.
