@@ -1,6 +1,6 @@
 # Plano de Auto-Melhoria, Auto-Correção e Ensino de Agentes
 
-> Status: **PROPOSTA para revisão do Rodrigo** — nada implementado ainda.
+> Status: **Fase 1 e Fase 2 EXECUTADAS** em 2026-10-12, aprovadas pelo Rodrigo e mergeadas no PR #3 (`6720acd`). Continua proposta só a rotina semanal (seção 4), que o Rodrigo vai criar.
 > Autor: ORQUESTRADOR_GROK · Data: 2026-10-12 · Fonte única de estado: `docs/orquestracao/ESTADO.md`.
 
 ## 1. Objetivo
@@ -56,15 +56,15 @@ docs/conhecimento/
 
 Formato de citação: `[NB:<id-curto> · <título da fonte>]` para notebooks; `[DOI:…]`, `[ISBN:…]` ou `[URL · acesso AAAA-MM-DD]` para externos.
 
-### 5.2 Inventário atual (2026-10-12)
+### 5.2 Inventário (2026-10-12, depois da Fase 2)
 
 | Área | Notebooks do Rodrigo (id curto) | Markdown local em `rodrigo-ai/docs/research/` |
 |---|---|---|
-| Eng. de software (backend/frontend) | Rodrigo AI 803ea045; PsicoApp f96a5ea7; Projeto App Virtologia c7b355ab; FinApp 3c67426f; App de Sermões 79a6bb5d; Ditado Local d4c56d93; Baixar/Transcrever db03c1d4; WhatsApp Scheduler 5e97294f; App Temperamento 174a1682; ENGENHEIRO DE PROMPT c9a154fc | só Projeto App Virtologia (9 md, 172K). **Lacuna**: não há notebook de teoria de engenharia (só notebooks de projeto) |
+| Eng. de software (backend/frontend) | Rodrigo AI 803ea045; PsicoApp f96a5ea7; Projeto App Virtologia c7b355ab; FinApp 3c67426f; App de Sermões 79a6bb5d; Ditado Local d4c56d93; Baixar/Transcrever db03c1d4; WhatsApp Scheduler 5e97294f; App Temperamento 174a1682; ENGENHEIRO DE PROMPT c9a154fc | ENGENHARIA DE SOFTWARE d7378de8 (17 fontes, criado na Fase 2) → `ENGENHARIA_SOFTWARE/` (17 md); Projeto App Virtologia (9 md) |
 | Teologia bíblica | TEOLOGIA DO NT 8900978e; ANTIGO TESTAMENTO 47cd9dfe; JESUS COMO O MESSIAS 1e67f622; TIAGO 1381c94b; CANTARES c0dcd1be; MASCULINIDADE BÍBLICA 1d90947f; Wright e Rutledge c2997708; MEU LIVRO O Evangelho Revelado 1cac19d0; Aconselhando biblicamente 5cf0aaed (viewer) | NT 186 md (204M); AT 259 md (226M) |
 | Hermenêutica (histórico-gramatical) | HERMENÊUTICA d3a27cae; RTM_MÓDULO HERMENÊUTICA f098a450 | 11 md (7.4M); 14 md (160K) |
 | Exegese bíblica | GRAMÁTICA GREGA 9c0c786a; GRAMÁTICA HEBRAICO 0d184fbf; Estudando GREGO-ERIKE 30bc5c35; DICIONÁRIOS e LÉXICOS ae6b7e85 | Dicionários 15 md (6.9M) |
-| Psicanálise | Acervo Psicanálise (Freud, Winnicott, Klein, A. Freud, Lacan) 4d6ff1c2; LIVROS_FREUD, LACAN 4b9a4517; Psicoterapeuta R. Sonsino 5cddc991 / 082c057a (duplicados?) ; Psicopatologia 64beea89; TRANSTORNOS 09ff14d7 | Psicoterapeuta: pastas vazias (4K). **Lacuna**: acervo psicanalítico ainda não exportado |
+| Psicanálise | Acervo Psicanálise (Freud, Winnicott, Klein, A. Freud, Lacan) 4d6ff1c2; LIVROS_FREUD, LACAN 4b9a4517; Psicoterapeuta R. Sonsino 5cddc991 / 082c057a (conteúdo difere; mantidos) ; Psicopatologia 64beea89; TRANSTORNOS 09ff14d7 | Exportado na Fase 2: Acervo 42, LIVROS 47, Psicopatologia 6, TRANSTORNOS 27, Psicoterapeuta 1+1 (124 md) |
 | Virtologia (Eduardo Casarotto) | VIRTOLOGIA 8d140628; As 53 Necessidades Humanas na Virtuologia 03ada306; Biologia da Crença a3392509; Projeto App Virtologia c7b355ab | 177 md (16M); 53 Necessidades (32K); Biologia da Crença 9 md (368K) |
 | Neurociência do comportamento e emoções | Neurociência 6b0557e3; Psiconeuroimunologia fa79b5f8; Psiconutrição db6472eb; Epigenética e10593f7 | 78 md (19M); 55 md (4.2M); 12 md (504K) |
 
@@ -129,19 +129,18 @@ Ordem sugerida das áreas (começa pelo que já tem acervo local): neurociência
 | Auto-alteração descontrolada | mudanças em skills/filas só via PR aprovado; backup antes de editar scripts |
 | Custo/cota (Cursor Pro, NotebookLM) | rodízio de áreas, modelos `auto`, limites por rotina |
 | Auth NotebookLM expira | detectar "CSRF token not found" e pedir `notebooklm login --browser-cookies chrome` ao Rodrigo |
-| Notebooks duplicados/sem título (5cddc991/082c057a; deb98c1c, d6421dc7, 91c4cf62) | Rodrigo decide se consolida |
+| Notebooks duplicados/sem título | Resolvido na Fase 2: 3 vazios deletados; os 2 "Psicoterapeuta" mantidos (conteúdo difere); o Rodrigo decide se consolida |
 
 ## 9. Decisões pendentes do Rodrigo
 
 1. Aprovar a matriz de treino (seção 6).
 2. Aprovar cadência e ordem das áreas (seção 7).
 3. Quais notebooks entram como fonte em cada área (ex.: livros pessoais, CURSOTERAPIA, Epigenética).
-4. Criar notebook de teoria de engenharia de software? Exportar o acervo de psicanálise?
-5. Os 3 notebooks sem título e os 2 "Psicoterapeuta" duplicados.
+4. Consolidar ou não os 2 notebooks "Psicoterapeuta" (5cddc991, 082c057a), cujo conteúdo é parecido mas não idêntico. Já resolvido na Fase 2: notebook de engenharia criado, psicanálise exportada e os 3 notebooks vazios deletados.
 
 ## 10. Adendo — Fase 2 (após implementar com as fontes existentes)
 
-> A Fase 2 só começa depois que o plano estiver implementado com as fontes que já existem. Nenhuma tarefa abaixo foi executada ainda.
+> **Executada em 2026-10-12.** Resultados e evidências: `docs/orquestracao/evidencias/fase2-notebooks.md`. Os 3 notebooks vazios foram deletados; os 2 "Psicoterapeuta" foram mantidos porque o conteúdo difere.
 
 1. **Engenharia de software (backend e frontend)**: pesquisar as melhores fontes (ACM DL, IEEE Xplore, arXiv cs.SE, RFCs IETF, OWASP, MDN/W3C, livros de referência via ISBN), criar um notebook NotebookLM dedicado a elas e compor os markdowns-fonte no Mac em `docs/research/` (pasta gitignored).
 2. **Psicanálise**: exportar para markdown, em `docs/research/`, os notebooks Acervo Psicanálise (4d6ff1c2), LIVROS_FREUD, LACAN e outros (4b9a4517), Psicopatologia (64beea89), TRANSTORNOS (09ff14d7) e Psicoterapeuta (5cddc991 / 082c057a).
