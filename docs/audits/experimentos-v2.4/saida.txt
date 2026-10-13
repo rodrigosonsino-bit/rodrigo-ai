@@ -1,0 +1,64 @@
+# Saída dos experimentos (v2.4 e v2.6) — 2026-10-13, Claude, macOS, Python 3.12.13 do .runtime
+
+Segredos são falsos (SEGREDO-FALSO); tudo em pasta temporária. Reproduzir: .runtime/.venv/bin/python3 <script>.
+
+## t2_openat_escrita.py
+=== (a) TOCTOU: abertura por componente com dir_fd + O_NOFOLLOW ===
+controle (sem troca)           : {'bytes': 11, 'err': None, 'path': '<tmp>/t2exp-457rludr/data/dir/note.txt'}
+troca do ARQUIVO por symlink   : {'bytes': 0, 'err': 'ELOOP', 'path': None}
+troca do DIRETÓRIO PAI symlink : {'bytes': 0, 'err': 'ENOTDIR', 'path': None}
+--- mutações (uma barreira por vez) ---
+M1 sem O_NOFOLLOW, com classif.: {'bytes': 0, 'err': 'RECUSADO pela classificação', 'path': '<tmp>/t2exp-457rludr/secret/.env'}
+M2 com O_NOFOLLOW, sem classif.: {'bytes': 0, 'err': 'ELOOP', 'path': None}
+M3 sem O_NOFOLLOW E sem classif: {'bytes': 14, 'err': None, 'path': '<tmp>/t2exp-457rludr/secret/.env'}
+--- controle positivo: check-then-open (realpath e depois open do caminho) ---
+check-then-open                : LEU: SEGREDO-FALSO
+--- hard link (nome inofensivo, mesmo inode do arquivo sensível) ---
+hard link, com lista de inodes : {'bytes': 0, 'err': 'RECUSADO pela classificação', 'path': '<tmp>/t2exp-457rludr/data/dir/link.txt'}
+hard link, SEM lista de inodes : {'bytes': 14, 'err': None, 'path': '<tmp>/t2exp-457rludr/data/dir/link.txt'}
+F_GETPATH do hard link         : link.txt (o nome do link, não do original)
+
+=== (b) MODO DE ESCRITA: tmp O_CREAT|O_EXCL|O_NOFOLLOW + rename ===
+escrita ingênua por symlink     : segredo agora = 'SOBRESCRITO\n'
+escrita segura sobre symlink    : segredo = 'SEGREDO-FALSO\n' | note.txt é symlink? False | conteúdo = 'DADO NOVO\n'
+diretório pai é symlink         : recusado, ENOTDIR
+arquivos no dir secreto depois  : ['.env']
+
+## t4_duas_fases.py
+S1 falha ao gravar a intenção                      -> MUTAÇÃO RECUSADA (intenção não gravada) | no store: False
+S2 crash após a intenção, antes da mutação         -> CRASH depois da intenção, antes da mutação | no store: False
+S3 falha ao gravar a conclusão                     -> mutação FEITA, conclusão não gravada (aviso falado) | no store: True
+S4 crash após a mutação, antes da conclusão        -> CRASH depois da mutação, antes da conclusão | no store: True
+
+recuperação na v2.2/v2.3 (marca 'sem conclusão', não olha o store):
+   S2 sem conclusão | realmente no store: False
+   S3 sem conclusão | realmente no store: True
+   S4 sem conclusão | realmente no store: True
+
+recuperação proposta (cruza a intenção com o store por id):
+   S2 NÃO aplicada
+   S3 APLICADA, conclusão perdida
+   S4 APLICADA, conclusão perdida
+
+## t4b_store_real_exclusao.py
+estado final do store (itens): ['C']
+
+RECUPERAÇÃO v2.5 (heurística por item):
+  criar,  crash antes da mutação     -> aplicada?
+  criar,  crash depois da mutação    -> aplicada?
+  editar, crash antes da mutação     -> aplicada?
+  editar, crash depois da mutação    -> aplicada?
+  apagar, crash antes da mutação     -> AMBÍGUO (item sumiu: apagado agora ou antes?)
+  apagar, crash depois da mutação    -> AMBÍGUO (item sumiu: apagado agora ou antes?)
+
+RECUPERAÇÃO v2.6 (marcador 'applied' na mesma gravação):
+  criar,  crash antes da mutação     -> NÃO aplicada
+  criar,  crash depois da mutação    -> APLICADA
+  editar, crash antes da mutação     -> NÃO aplicada
+  editar, crash depois da mutação    -> APLICADA
+  apagar, crash antes da mutação     -> NÃO aplicada
+  apagar, crash depois da mutação    -> APLICADA
+
+## t2b_escrita_recusa_symlink.py
+destino já é symlink            : RECUSADO (destino é symlink) | segredo: 'SEGREDO-FALSO\n' | ainda symlink: True
+symlink plantado entre lstat e rename: escrito | segredo: 'SEGREDO-FALSO\n' | note.txt agora é symlink? False | conteúdo: 'NOVO\n'
