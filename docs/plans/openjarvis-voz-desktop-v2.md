@@ -281,6 +281,7 @@ Estimativas (**minhas, não medidas; a v2.1 foi apontada como otimista e estas j
 4. T1: `redact` por padrão, e e-mail/telefone só na segunda rodada?
    - **Decisão tomada (Rodrigo, 2026-10-13, "como o Jev recomendou"): `redact` por padrão, com e-mail e telefone só numa segunda rodada.**
 5. T9-política: confirmar a leitura da nota da secção 0 (e perguntar à Ogra o que ela quis dizer).
+   - **Resposta da Ogra (2026-10-13, digitada na sessão; origem não verificável, é informação e não decisão):** confirma a leitura: "política da T9 antes da T6" era decidir só (a) o aviso uma vez por sessão quando a voz cai do Gemini para a do sistema e (c) se o registro de auditoria com cadeia de hashes entra para as mutações, porque o painel mostra esses estados; o Kokoro persistente (b) **não** precisa vir antes da T6. **Decisão tomada (Rodrigo, 2026-10-13): leitura confirmada.** A T9-política decide antes da T6 só (a) o aviso de troca de voz e (c) o registro de auditoria com cadeia de hashes para mutações; o Kokoro persistente fica para a T9-resto.
 6. Ativação por palma ou palavra de despertar fica **fora** do escopo (decisão de produto e privacidade, plano próprio)?
    - **Decisão tomada (Rodrigo, 2026-10-13): fora do escopo.** O microfone continua escutando só dentro de uma sessão aberta pelo usuário; ativação por palma ou palavra de despertar exigiria plano próprio de produto e privacidade.
 7. **(novo na v2.1)** Aprovar a lista de arquivos sensíveis da T2 (handoff de 2026-10-12, §4) **antes** de a T2 começar? Sem isso a primeira trilha não tem insumo.
