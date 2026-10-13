@@ -54,7 +54,8 @@ describe('doctor (T5a): cada verificação tem um caso de sucesso e um de falha'
     const on = byId(doctor({ GEMINI_API_KEY: 'k' }), 'cloud-channels');
     assert.match(on!.detail, /intenção/);
     assert.match(on!.detail, /histórico/);
-    assert.match(on!.detail, /visão/);
+    assert.doesNotMatch(on!.detail, /visão/, 'visão é opt-in (decisão 10): fora da lista por padrão');
+    assert.match(byId(doctor({ GEMINI_API_KEY: 'k', RODRIGO_CLOUD_VISION: '1' }), 'cloud-channels')!.detail, /visão/);
     assert.equal(byId(doctor({ RODRIGO_CLOUD: '0' }), 'cloud-channels'), undefined);
   });
 
@@ -68,8 +69,9 @@ describe('doctor (T5a): cada verificação tem um caso de sucesso e um de falha'
   it('risk-knowledge, risk-vision, risk-web-search, risk-tts-dictated: aparecem só quando o canal está efetivamente ligado', () => {
     assert.equal(byId(doctor({}), 'risk-knowledge'), undefined, 'conhecimento é padrão 0');
     assert.equal(byId(doctor({ RODRIGO_SEND_KNOWLEDGE: '1' }), 'risk-knowledge')?.severity, 'warn');
-    assert.equal(byId(doctor({}), 'risk-vision')?.severity, 'warn', 'visão é padrão ligado hoje (a decisão 10 muda isso na T1)');
-    assert.equal(byId(doctor({ RODRIGO_CLOUD_VISION: '0' }), 'risk-vision'), undefined);
+    assert.equal(byId(doctor({}), 'risk-vision'), undefined, 'visão é padrão desligado (decisão 10)');
+    assert.equal(byId(doctor({ RODRIGO_CLOUD_VISION: '1' }), 'risk-vision')?.severity, 'warn');
+    assert.equal(byId(doctor({ RODRIGO_CLOUD_VISION: '1', RODRIGO_CLOUD: '0' }), 'risk-vision'), undefined);
     assert.equal(byId(doctor({}), 'risk-web-search'), undefined, 'busca web é padrão 0');
     assert.equal(byId(doctor({ RODRIGO_WEB_SEARCH: '1' }), 'risk-web-search')?.severity, 'warn');
     assert.equal(byId(doctor({}), 'risk-tts-dictated')?.severity, 'warn');

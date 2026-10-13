@@ -136,7 +136,7 @@ export function runDoctor(input: DoctorInput): DoctorReport {
       checks.push(check('risk-knowledge', 'Trecho de conhecimento segue ao Gemini', 'warn', 'RODRIGO_SEND_KNOWLEDGE=1: um trecho de docs/research/ (material pessoal) vai ao prompt de geração.'));
     }
     if (cfg.cloud && cfg.cloudVision) {
-      checks.push(check('risk-vision', 'Canal de visão ligado', 'warn', 'A imagem da tela pode ir ao Gemini sob autorização falada; nenhum guarda de texto cobre imagem. A decisão 10 do plano muda o padrão para desligado.'));
+      checks.push(check('risk-vision', 'Canal de visão ligado', 'warn', 'A imagem da tela pode ir ao Gemini sob autorização falada; nenhum guarda de texto cobre imagem. O canal é opt-in (RODRIGO_CLOUD_VISION=1); desligado por padrão.'));
     }
     if (webSearchEffective(cfg)) {
       checks.push(check('risk-web-search', 'Busca web autônoma ligada', 'warn', 'RODRIGO_WEB_SEARCH=1: leitura externa na nuvem sem autorização por pedido.'));
