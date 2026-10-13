@@ -258,11 +258,13 @@ Estimativas (**minhas, não medidas; a v2.1 foi apontada como otimista e estas j
 ## 6. Decisões do Rodrigo (pendentes)
 
 1. Aprovar a **nova ordem v2.3** e, **por partes** (o Jev apontou 0,38 para aprovar tudo de uma vez), as trilhas T1, T2-0 e T5a primeiro?
+   - **Decisão tomada (Rodrigo, 2026-10-13): aprovar só T1, T2-0 e T5a.** As demais trilhas e a ordem completa **não** foram aprovadas. "Aprovar" aqui significa **entrar no ciclo de plano de implementação detalhado, auditoria de outro modelo e autorização**; **nenhum código foi autorizado**. A T2 segue bloqueada pela decisão 7.
 2. T6: aceitar o spike C como **T6-0 (1–2 h no Mac) + harness (6–10 h) + captura do Chrome (2–4 h) + 1 semana de uso**, sabendo que a **T6-0 pode cortar a trilha** (ela pode não existir) e com o critério de saída acima?
 3. T7: aceitar G5 e a regra do "modo papo" sem ferramentas, em máquina dele?
 4. T1: `redact` por padrão, e e-mail/telefone só na segunda rodada?
 5. T9-política: confirmar a leitura da nota da secção 0 (e perguntar à Ogra o que ela quis dizer).
 6. Ativação por palma ou palavra de despertar fica **fora** do escopo (decisão de produto e privacidade, plano próprio)?
+   - **Decisão tomada (Rodrigo, 2026-10-13): fora do escopo.** O microfone continua escutando só dentro de uma sessão aberta pelo usuário; ativação por palma ou palavra de despertar exigiria plano próprio de produto e privacidade.
 7. **(novo na v2.1)** Aprovar a lista de arquivos sensíveis da T2 (handoff de 2026-10-12, §4) **antes** de a T2 começar? Sem isso a primeira trilha não tem insumo.
    - **Estado, em três partes:** (i) **decisão processual tomada** (confirmada pelo Rodrigo no chat em 2026-10-13, seguindo o parecer do Jev): **não aprovar a lista antes de revisá-la**, comparando-a com o repositório; (ii) **revisão feita** (seção 6.3); (iii) **aprovação substantiva da lista: pendente**, a T2 não começa antes dela.
 8. **(novo na v2.1)** Aprovar os limiares numéricos da T8 que o Claude propuser? Sem eles a T8 não é critério mensurável.
