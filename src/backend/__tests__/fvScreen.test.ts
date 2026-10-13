@@ -145,6 +145,19 @@ async function postScreenUnavailable(
   });
 }
 
+/**
+ * Prazo longo o bastante para o pedido de captura NUNCA vencer durante um teste que precisa dele pendente: com 300 ms
+ * o intervalo entre o `screen_request` e o POST (poll de 8 ms + fetch) estourava sob carga e a rota devolvia 409 no
+ * lugar do 400/413 esperado. Os testes encerram o turno de forma determinística com `settlePendingCapture`.
+ */
+const SCREEN_HOLD_MS = 30_000;
+
+/** Resolve o pedido real ainda pendente (e prova que ele sobreviveu intacto à rejeição anterior). */
+async function settlePendingCapture(h: H, s: { sessionId: string; token: string }, captureId: string): Promise<void> {
+  const res = await postScreenUnavailable(h, s, captureId);
+  assert.equal(res.status, 200, 'o pedido real devia continuar pendente depois da rejeição');
+}
+
 const screenRequestCaptureId = async (s: { sse: ReturnType<typeof readSse> }): Promise<string> => {
   await waitFor(() => s.sse.events.some((e) => e.type === 'screen_request'), 'screen_request');
   const ev = s.sse.events.find((e) => e.type === 'screen_request') as { captureId?: string } | undefined;
@@ -489,7 +502,7 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
   });
 
   it('auditoria Kimi K3 (achado 5): o JSON de unavailable usa SÓ o captureId do corpo, nunca cai para o da query', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: SCREEN_HOLD_MS } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -523,15 +536,16 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
   });
 
   it('HV.3: captureId errado é rejeitado com 409 e NUNCA escreve nada em disco', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: SCREEN_HOLD_MS } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
-    await screenRequestCaptureId(s); // garante que o pedido já existe
+    const captureId = await screenRequestCaptureId(s); // garante que o pedido já existe
     const res = await postScreenJpeg(h, s, 'captureId-que-nao-existe', makeJpeg(100, 100));
     assert.equal(res.status, 409);
     assert.equal(findScreenFiles(h.tmp).length, 0, 'captureId inválido nunca aloca armazenamento (achado 7)');
-    await waitFor(() => done(s.sse), 'turn_done'); // o pedido real ainda está pendente: espera o timeout
+    await settlePendingCapture(h, s, captureId); // o pedido real ainda está pendente: encerra o turno sem esperar prazo
+    await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
 
@@ -567,7 +581,7 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
   });
 
   it('HV.3: assinatura inválida (não é JPEG) é rejeitada com 400, sem escrever nada', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: SCREEN_HOLD_MS } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -575,12 +589,13 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     const res = await postScreenJpeg(h, s, captureId, Buffer.from('isto não é um jpeg'));
     assert.equal(res.status, 400);
     assert.equal(findScreenFiles(h.tmp).length, 0);
-    await waitFor(() => done(s.sse), 'turn_done'); // o pedido segue pendente: o teste espera o timeout dar frase fixa
+    await settlePendingCapture(h, s, captureId); // o pedido segue pendente: encerra o turno sem esperar prazo
+    await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
 
   it('HV.3: dimensão acima do limite é rejeitada com 400, sem escrever nada', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: SCREEN_HOLD_MS } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -588,12 +603,13 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     const res = await postScreenJpeg(h, s, captureId, makeJpeg(1601, 900));
     assert.equal(res.status, 400);
     assert.equal(findScreenFiles(h.tmp).length, 0);
+    await settlePendingCapture(h, s, captureId);
     await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
 
   it('HV.3: corpo maior que o limite é rejeitado com 413, sem escrever nada', async () => {
-    h = await setup({ tuning: { screenCaptureTimeoutMs: 300 } });
+    h = await setup({ tuning: { screenCaptureTimeoutMs: SCREEN_HOLD_MS } });
     h.engine.fixedTranscript = 'o que tem na minha tela?';
     const s = await startSession(h);
     await speak(h, s);
@@ -602,6 +618,7 @@ describe('Fase V — captura de tela (fatia 3, §4, HV.3/HV.4)', () => {
     const res = await postScreenJpeg(h, s, captureId, big);
     assert.equal(res.status, 413);
     assert.equal(findScreenFiles(h.tmp).length, 0);
+    await settlePendingCapture(h, s, captureId);
     await waitFor(() => done(s.sse), 'turn_done');
     s.sse.close();
   });
