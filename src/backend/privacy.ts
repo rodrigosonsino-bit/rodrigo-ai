@@ -1,5 +1,6 @@
 import type { PrivacyStatus } from '../shared/types.js';
 import { VOICE_LIMITS } from '../shared/voiceProtocol.js';
+import { isOutboundGuardMode, type OutboundGuardMode } from './privacy/outboundGuard.js';
 
 /**
  * Fase 12 (docs/phase-12-v2.md §2.1): um controle por canal de saída para o Gemini.
@@ -31,6 +32,8 @@ export interface PrivacyConfig {
    * Padrão 0 — nunca autônoma sem ligar o canal explicitamente (docs/phase-15-v3.md §5).
    */
   readonly webSearch: boolean;
+  /** T1 — RODRIGO_OUTBOUND_GUARD: off | warn | redact | block (padrão redact). Varre o TEXTO que sai para a nuvem. */
+  readonly outboundGuard: OutboundGuardMode;
 }
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
@@ -59,6 +62,10 @@ export function ttsOffReason(cfg: PrivacyConfig): TtsOffReason | null {
 export function ttsDictatedViaCloud(cfg: PrivacyConfig): boolean {
   return ttsCloudEffective(cfg) && cfg.ttsDictated && cfg.sendMemories;
 }
+
+/** T1: fala usada quando o modo block impede o envio do prompt (nada saiu; texto fixo, sem eco do conteúdo). */
+export const OUTBOUND_BLOCKED_TEXT =
+  'Detectei um dado sensível na conversa e, pela configuração de privacidade, não enviei esse pedido à nuvem.';
 
 export const GENERATION_DISABLED_TEXT =
   'A geração de respostas em nuvem está desligada. Posso usar só as ferramentas locais, como hora, data, lembretes e notas.';
@@ -94,6 +101,14 @@ function parseFlag(env: Env, name: string, defaultValue: boolean): boolean {
   throw new Error(`Configuração inválida: ${name} deve ser exatamente "0" ou "1". Valor recebido: "${raw}"`);
 }
 
+function parseGuardMode(env: Env, name: string, defaultValue: OutboundGuardMode): OutboundGuardMode {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const v = raw.trim();
+  if (isOutboundGuardMode(v)) return v;
+  throw new Error(`Configuração inválida: ${name} deve ser exatamente "off", "warn", "redact" ou "block". Valor recebido: "${raw}"`);
+}
+
 function parseTurns(env: Env, name: string, max: number): number {
   const raw = env[name];
   if (raw === undefined || raw.trim() === '') return max;
@@ -119,7 +134,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),
     ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true),
     cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', false),
-    webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false)
+    webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
+    outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact')
   };
 }
 
@@ -174,6 +190,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
     },
     tts: { cloud: ttsOn, reason: ttsOffReason(cfg), dictatedViaCloud: ttsDictatedViaCloud(cfg) },
     webSearch: { enabled: webOn, reason: webSearchOffReason(cfg) },
-    neverSends: ['audio']
+    neverSends: ['audio'],
+    outboundGuard: cfg.outboundGuard
   };
 }

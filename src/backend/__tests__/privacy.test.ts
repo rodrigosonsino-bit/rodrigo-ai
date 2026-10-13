@@ -23,7 +23,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       cloudTts: true,
       ttsDictated: true,
       cloudVision: false,
-      webSearch: false
+      webSearch: false,
+      outboundGuard: 'redact'
     });
   });
 
@@ -34,6 +35,18 @@ describe('parsePrivacyConfig (Fase 12)', () => {
     assert.equal(parsePrivacyConfig({ RODRIGO_CLOUD: ' 0 ' }).cloud, false);
     assert.equal(parsePrivacyConfig({ RODRIGO_SEND_KNOWLEDGE: '1' }).sendKnowledge, true);
     assert.equal(parsePrivacyConfig({ RODRIGO_SEND_HISTORY: '' }).sendHistory, true, 'vazio = padrão');
+  });
+
+  it('RODRIGO_OUTBOUND_GUARD (T1): aceita off|warn|redact|block; vazio = redact; qualquer outro valor LANÇA', () => {
+    for (const m of ['off', 'warn', 'redact', 'block'] as const) {
+      assert.equal(parsePrivacyConfig({ RODRIGO_OUTBOUND_GUARD: m }).outboundGuard, m);
+    }
+    assert.equal(parsePrivacyConfig({ RODRIGO_OUTBOUND_GUARD: ' block ' }).outboundGuard, 'block');
+    assert.equal(parsePrivacyConfig({ RODRIGO_OUTBOUND_GUARD: '' }).outboundGuard, 'redact');
+    assert.equal(parsePrivacyConfig({}).outboundGuard, 'redact');
+    for (const bad of ['REDACT', 'on', '1', 'true', 'mask', 'redact,block']) {
+      assert.throws(() => parsePrivacyConfig({ RODRIGO_OUTBOUND_GUARD: bad }), /RODRIGO_OUTBOUND_GUARD/, `valor ${JSON.stringify(bad)}`);
+    }
   });
 
   it('HISTORY_TURNS: inteiro 1..MAX, sem zero à esquerda, sem texto', () => {
@@ -168,7 +181,8 @@ describe('effectivePrivacy (Fase 12)', () => {
       models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
       webSearch: { enabled: false, reason: 'channel-off' },
-      neverSends: ['audio']
+      neverSends: ['audio'],
+      outboundGuard: 'redact'
     };
     assert.deepEqual(st, gabarito);
   });

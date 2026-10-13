@@ -32,6 +32,9 @@ export interface AppConfig {
  * Declarativa (derivada das variáveis de ambiente); a medição do tráfego real é o teste H12.2.
  * Nunca contém segredos: só se a chave existe, jamais valor ou tamanho.
  */
+/** T1: modo do guarda de saída (RODRIGO_OUTBOUND_GUARD). */
+export type OutboundGuardModeName = 'off' | 'warn' | 'redact' | 'block';
+
 export interface PrivacyStatus {
   mode: 'cloud' | 'local-only';
   intent: 'gemini' | 'local';
@@ -62,6 +65,10 @@ export interface PrivacyStatus {
     reason: 'master-off' | 'channel-off' | null;
   };
   neverSends: readonly ['audio'];
+  /** T1: modo do guarda que varre o TEXTO antes de sair (não varre imagem). */
+  outboundGuard: OutboundGuardModeName;
+  /** T1: contadores por TIPO de achado desde que o app iniciou; nunca o conteúdo. Preenchido só pela rota. */
+  outboundGuardCounts?: Record<string, number>;
 }
 
 /**

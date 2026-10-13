@@ -103,6 +103,17 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
     stays.push('As respostas são faladas com a voz do sistema, neste computador (RODRIGO_CLOUD_TTS=0).');
   }
 
+  // T1: o guarda de saída varre o TEXTO antes de enviar. Não varre imagem (ver o canal de visão acima).
+  if (status.outboundGuard === 'redact') {
+    goes.push('Antes de enviar texto ao Gemini, o app procura chaves de API, senhas ditadas, CPF, CNPJ e cartão e troca cada achado por um aviso (RODRIGO_OUTBOUND_GUARD=redact). Imagens não são varridas.');
+  } else if (status.outboundGuard === 'block') {
+    goes.push('Se o app encontrar chave de API, senha ditada, CPF, CNPJ ou cartão no texto, ele não envia nada ao Gemini e avisa (RODRIGO_OUTBOUND_GUARD=block). Imagens não são varridas.');
+  } else if (status.outboundGuard === 'warn') {
+    warnings.push('O guarda de saída está só avisando (RODRIGO_OUTBOUND_GUARD=warn): chaves, senhas ditadas, CPF, CNPJ e cartão são contados, mas ainda são enviados ao Gemini.');
+  } else {
+    warnings.push('O guarda de saída está desligado (RODRIGO_OUTBOUND_GUARD=off): nada varre o texto antes de ele ir ao Gemini.');
+  }
+
   warnings.push(FREE_TIER_NOTICE);
   if (!status.keyPresent) {
     warnings.push('Não há chave do Gemini configurada (GEMINI_API_KEY): as respostas geradas em nuvem não vão funcionar.');
