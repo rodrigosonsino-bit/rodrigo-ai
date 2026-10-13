@@ -114,7 +114,20 @@ Notebook "Rodrigo AI (orquestrador de voz) — Arquitetura, Memória e Contexto"
 
 ## 10. Registro no NotebookLM
 
-(preenchido ao final da sessão, abaixo)
+**[verificado agora]** `notebooklm auth check --test` = "Authentication is valid"; `notebooklm source add ... --type file` e `notebooklm source list --json` mostram **11 fontes novas, todas `ready`** (a lista passou de 31 para 42 fontes). Fontes acrescentadas (numeração continua a das fontes 00 a 34 existentes; a prévia do título de algumas aparece como nome de arquivo, o conteúdo é o certo):
+
+| Fonte | Conteúdo |
+|---|---|
+| 35 | este handoff (versão final, ver nota abaixo) |
+| 36 | plano OpenJarvis v2.6 (como mergeado na `main`, PR #17) |
+| 37 | T2-0: inventário de arquivos e contrato de IPC (da branch `t2-0-inventario-e-contrato`) |
+| 38 a 41 | registros das auditorias v2.1 (Codex), v2.2 (`agy`), v2.3 (Kimi), v2.5 (Codex `gpt-6-luna`) |
+| 42 | saída dos experimentos de código |
+| 43, 44 | código da T1: `outboundGuard.ts` e `outbound_guard.py` (branch `t1-outbound-guard`) |
+| 45 | código da T5a: `doctor.ts` (branch `t5a-doctor`) |
+
+**Não** foram enviados: `docs/research/`, `.env`, chaves, `memory/`, `media/` e o material pessoal listado na seção 2. Antes de subir, varri os arquivos por padrões de chave (`AIza…`, `nvapi-`, `gsk_`): os únicos acertos eram os prefixos dentro dos regex do próprio guarda, não chaves.
+**Nota:** o notebook é um retrato estático. Os arquivos de código das fontes 43 a 45 são das **branches locais não enviadas** (seção 1): se a branch mudar, a fonte fica desatualizada.
 
 ## 11. Primeiro passo da próxima sessão
 
