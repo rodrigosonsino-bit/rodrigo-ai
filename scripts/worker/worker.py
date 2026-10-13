@@ -1134,7 +1134,7 @@ class Worker:
         self._set_current(handle)
 
         cloud_master = os.environ.get("RODRIGO_CLOUD", "1") == "1"
-        cloud_vision = os.environ.get("RODRIGO_CLOUD_VISION", "1") == "1"
+        cloud_vision = os.environ.get("RODRIGO_CLOUD_VISION", "0") == "1"  # padrão desligado (Fase V): o Node repassa o valor resolvido
 
         prefix = ""
         if cloud_authorized and (not cloud_master or not cloud_vision):

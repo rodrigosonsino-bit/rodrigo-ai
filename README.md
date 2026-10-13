@@ -213,6 +213,7 @@ rodrigo-ai/
 | Texto da conversa recente (as últimas `RODRIGO_HISTORY_TURNS` trocas, 8 por padrão): o que você disse e o que o assistente respondeu, **inclusive conteúdo de notas ou memórias repetido na conversa** | em toda resposta gerada | `RODRIGO_SEND_HISTORY=0` (só a fala atual vai) |
 | Memórias salvas | junto com cada resposta | `RODRIGO_SEND_MEMORIES=0` |
 | Trecho de `docs/research/` (Teologia/Virtologia) | só se ligado; **desligado por padrão** | `RODRIGO_SEND_KNOWLEDGE=1` liga |
+| **Imagem da tela** (Fase V) | só se o canal estiver ligado **e** você autorizar na própria fala, naquele pedido; **desligado por padrão** | `RODRIGO_CLOUD_VISION=1` liga; `0` (padrão) mantém a imagem fora do Gemini |
 | Texto da fala atual, para entender o pedido (hora, data, lembretes, notas) | falas que parecem esses pedidos | `RODRIGO_CLOUD_INTENT=0` |
 | **Texto de cada frase que o assistente vai falar**, para virar áudio (Fase 13a). Só o texto: sem histórico, sem instrução de estilo, sem áudio seu. Inclui frases que você interromper antes de ouvir até o fim | em toda resposta falada com a voz do Gemini | `RODRIGO_CLOUD_TTS=0` (ou `TTS_ENGINE=say`); desligado automaticamente com `RODRIGO_SEND_HISTORY=0` |
 | Confirmações que repetem o que você ditou (prévia de lembrete, nota ou memória) | quando a voz do Gemini está ligada | `RODRIGO_TTS_DICTATED=0` ou `RODRIGO_SEND_MEMORIES=0` (ficam na voz do sistema) |
