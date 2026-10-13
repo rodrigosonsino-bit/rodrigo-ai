@@ -6,6 +6,7 @@ import {
   MAX_MEMORY_BLOCK_CHARS
 } from '../memory/index.js';
 import type { StoredItem } from '../storage/jsonStore.js';
+import { UNTRUSTED_NOTICE, UNTRUSTED_OPEN, UNTRUSTED_CLOSE } from '../memory/untrustedData.js';
 
 describe('buildMemoryBlock (Fase 7 — H2)', () => {
   it('retorna string vazia quando não há itens', () => {
@@ -22,9 +23,11 @@ describe('buildMemoryBlock (Fase 7 — H2)', () => {
     assert.ok(block.startsWith('[Fatos que o usuário pediu para você lembrar entre sessões'));
     // Mais recente primeiro: item 2 antes de item 1
     const expected =
-      '[Fatos que o usuário pediu para você lembrar entre sessões — use-os naturalmente na conversa, nunca liste-os como uma lista para o usuário a menos que ele peça explicitamente]\n' +
+      `[Fatos que o usuário pediu para você lembrar entre sessões — use-os naturalmente na conversa, nunca liste-os como uma lista para o usuário a menos que ele peça explicitamente. ${UNTRUSTED_NOTICE}]\n` +
+      `${UNTRUSTED_OPEN}\n` +
       '- prefere café sem açúcar\n' +
-      '- seu nome é Rodrigo';
+      '- seu nome é Rodrigo\n' +
+      UNTRUSTED_CLOSE;
     assert.equal(block, expected);
   });
 
