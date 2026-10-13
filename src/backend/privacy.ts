@@ -155,7 +155,9 @@ export function workerPrivacyEnv(cfg: PrivacyConfig): Record<string, string> {
     RODRIGO_CLOUD_INTENT: cfg.cloud && cfg.cloudIntent ? '1' : '0',
     RODRIGO_CLOUD_TTS: ttsCloudEffective(cfg) ? '1' : '0',
     // Fase V: o worker recebe o valor JÁ resolvido aqui (mestre + canal), nunca lê um padrão próprio: os dois lados não divergem.
-    RODRIGO_CLOUD_VISION: cfg.cloud && cfg.cloudVision ? '1' : '0'
+    RODRIGO_CLOUD_VISION: cfg.cloud && cfg.cloudVision ? '1' : '0',
+    // T1: o worker aplica o mesmo modo do guarda de saída (camada em profundidade).
+    RODRIGO_OUTBOUND_GUARD: cfg.outboundGuard
   };
 }
 

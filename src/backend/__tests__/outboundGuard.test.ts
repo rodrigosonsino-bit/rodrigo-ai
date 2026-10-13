@@ -1,5 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { effectivePrivacy } from '../privacy.js';
 import { describePrivacy } from '../../shared/privacyText.js';
 import {
@@ -207,5 +209,20 @@ describe('cartão de privacidade mostra o modo do guarda (T1)', () => {
   it('modo sem nuvem não fala do guarda (nada sai)', () => {
     const c = describePrivacy(effectivePrivacy({ RODRIGO_CLOUD: '0' }));
     assert.equal([...c.goes, ...c.warnings, ...c.stays].some((l) => /guarda de saída|RODRIGO_OUTBOUND_GUARD/.test(l)), false);
+  });
+});
+
+describe('paridade TypeScript x Python (T1): a fixture compartilhada é a referência', () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'src', 'backend', '__tests__', 'fixtures', 'outbound-cases.json'), 'utf-8')
+  ) as { cases: Array<{ text: string; redacted: string; kinds: string[] }> };
+
+  it('cada caso da fixture dá exatamente o resultado gravado (se mudar o TypeScript, a fixture e o Python mudam juntos)', () => {
+    assert.ok(fixture.cases.length >= 20);
+    for (const c of fixture.cases) {
+      const r = guardText(c.text, 'redact');
+      assert.equal(r.text, c.redacted, JSON.stringify(c.text));
+      assert.deepEqual(r.findings.map((f) => f.kind), c.kinds, JSON.stringify(c.text));
+    }
   });
 });

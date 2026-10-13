@@ -57,9 +57,9 @@ describe('parsePrivacyConfig (Fase 12)', () => {
   });
 
   it('workerPrivacyEnv: mestre desligado força a intenção desligada no worker', () => {
-    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloud: false }), { RODRIGO_CLOUD: '0', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '0', RODRIGO_CLOUD_VISION: '0' });
-    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloudIntent: false }), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '1', RODRIGO_CLOUD_VISION: '0' });
-    assert.deepEqual(workerPrivacyEnv(DEFAULT_PRIVACY), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '1', RODRIGO_CLOUD_TTS: '1', RODRIGO_CLOUD_VISION: '0' });
+    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloud: false }), { RODRIGO_CLOUD: '0', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '0', RODRIGO_CLOUD_VISION: '0', RODRIGO_OUTBOUND_GUARD: 'redact' });
+    assert.deepEqual(workerPrivacyEnv({ ...DEFAULT_PRIVACY, cloudIntent: false }), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '0', RODRIGO_CLOUD_TTS: '1', RODRIGO_CLOUD_VISION: '0', RODRIGO_OUTBOUND_GUARD: 'redact' });
+    assert.deepEqual(workerPrivacyEnv(DEFAULT_PRIVACY), { RODRIGO_CLOUD: '1', RODRIGO_CLOUD_INTENT: '1', RODRIGO_CLOUD_TTS: '1', RODRIGO_CLOUD_VISION: '0', RODRIGO_OUTBOUND_GUARD: 'redact' });
   });
 
   it('imagem da tela (Fase V): desligada por padrão; o worker recebe o valor JÁ resolvido (mestre + canal), nunca um padrão próprio', () => {
