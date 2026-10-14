@@ -6,6 +6,7 @@ import type { AppConfig } from '../shared/types.js';
 import { isAllowedHost } from './hostValidator.js';
 import { handleHealthRequest } from './routes/health.js';
 import { handlePrivacyRequest } from './routes/privacy.js';
+import { handleDoctorRequest } from './routes/doctor.js';
 import { handleVoiceRoute, type VoiceRouteDeps } from './voice/routes.js';
 
 const MIME_TYPES: Record<string, string> = {
@@ -68,6 +69,12 @@ export function createRequestHandler(
 
       if (pathname === '/api/privacy') {
         handlePrivacyRequest(req, res);
+        return;
+      }
+
+      if (pathname === '/api/doctor') {
+        // T5a: só configuração declarada; raiz do projeto = cwd, como em index.ts (createVoiceRuntime).
+        handleDoctorRequest(req, res, process.cwd());
         return;
       }
 
