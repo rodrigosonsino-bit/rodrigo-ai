@@ -25,6 +25,7 @@ import {
   NO_ACTION_CLAIM_TEXT,
   type MutationName
 } from '../../shared/voiceProtocol.js';
+import { freePort } from './helpers/freePort.js';
 
 function buildTestWav(durationSeconds = 0.1, sampleRate = 16000): Buffer {
   const totalSamples = Math.round(durationSeconds * sampleRate);
@@ -75,9 +76,8 @@ interface Harness {
   tmpDir: string;
 }
 
-let portCounter = 28000 + Math.floor(Math.random() * 5000);
-function getNextPort(): number {
-  return portCounter++;
+async function getNextPort(): Promise<number> {
+  return freePort();
 }
 
 const allHarnesses: Harness[] = [];
@@ -86,7 +86,7 @@ async function setupHarness(
   mutatingTools: readonly IMutatingTool[] = [],
   tools: readonly ITool[] = []
 ): Promise<Harness> {
-  const port = getNextPort();
+  const port = await getNextPort();
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'f11-harness-'));
   const engine = new FakeVoiceEngine();

@@ -12,6 +12,7 @@ import { startServer } from '../server.js';
 import { AudioStore } from '../voice/audioStore.js';
 import { FakeVoiceEngine } from '../voice/fakeEngine.js';
 import { SessionManager } from '../voice/sessionManager.js';
+import { freePort } from './helpers/freePort.js';
 
 /** T9-política (a): o aviso de troca de voz chega ao cliente no máximo UMA vez por sessão, e é informativo (não é erro). */
 function wav(): Buffer {
@@ -43,7 +44,7 @@ describe('T9-política (a): aviso de troca de voz', () => {
   });
 
   async function boot(): Promise<{ engine: FakeVoiceEngine }> {
-    const port = 29000 + Math.floor(Math.random() * 900);
+    const port = await freePort();
     const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't9-notice-'));
     const engine = new FakeVoiceEngine();

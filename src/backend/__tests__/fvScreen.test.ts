@@ -18,6 +18,7 @@ import { mightBeScreenQuery, screenCloudAuthorized } from '../tools/screenQuery.
 import { SCREEN_NOT_READY_TEXT, SCREEN_SHARE_NEEDED_TEXT, type ConversationMessage } from '../../shared/voiceProtocol.js';
 import type { SessionTuning } from '../voice/sessionManager.js';
 import { parseJpegHeader } from '../voice/image.js';
+import { freePort } from './helpers/freePort.js';
 
 /**
  * Fase V, fatia 2 (docs/phase-vision-v3.md §3, §5.3, §10.1–10.2): reconhecer a pergunta sobre a tela, decidir a proveniência
@@ -82,7 +83,7 @@ interface H {
 }
 
 async function setup(opts: { mutating?: readonly IMutatingTool[]; tuning?: SessionTuning } = {}): Promise<H> {
-  const port = 25000 + Math.floor(Math.random() * 4000);
+  const port = await freePort();
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'f13-session-'));
   const engine = new FakeVoiceEngine();

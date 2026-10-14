@@ -21,6 +21,7 @@ import { createSystemTools, TOOL_FAILURE_TEXT, HoraAtualTool } from '../tools/in
 import { createMutatingTools } from '../tools/index.js';
 import { JsonStore, type StoredItem } from '../storage/jsonStore.js';
 import { VOICE_LIMITS, MUTATION_FAILURE_TEXT, MUTATION_CANCELLED_TEXT, GENERATION_FAILURE_TEXT } from '../../shared/voiceProtocol.js';
+import { freePort } from './helpers/freePort.js';
 
 function buildTestWav(durationSeconds = 0.2, sampleRate = 16000): Buffer {
   const totalSamples = Math.round(durationSeconds * sampleRate);
@@ -82,7 +83,7 @@ async function setupHarness(
   const testConfig: AppConfig = { port: 0, host: '127.0.0.1', clientPort: 0 };
   // porta 0 -> o SO escolhe uma porta livre; startServer atual exige config.port fixo,
   // então usamos uma porta alta fixa por teste para simplicidade e paralelismo seguro.
-  const port = 20000 + Math.floor(Math.random() * 5000);
+  const port = await freePort();
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-voice-test-'));

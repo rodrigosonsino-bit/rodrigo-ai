@@ -12,6 +12,7 @@ import type { AppConfig } from '../../shared/types.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { ClaudeCodeRunner, ClaudeDelegateTool, CLAUDE_STARTED_TEXT, type ClaudeJob } from '../agents/claudeCode.js';
 import { CLAUDE_CODE_DISABLED_TEXT } from '../privacy.js';
+import { freePort } from './helpers/freePort.js';
 import { JsonStore } from '../storage/jsonStore.js';
 import { startServer } from '../server.js';
 import { AudioStore } from '../voice/audioStore.js';
@@ -52,7 +53,7 @@ describe('Fase 17: fluxo de voz ponta a ponta', () => {
   });
 
   async function boot(channelOn: boolean): Promise<{ runner: ClaudeCodeRunner; finished: ClaudeJob[] }> {
-    const port = 29600 + Math.floor(Math.random() * 90);
+    const port = await freePort();
     const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'f17-flow-'));
     engine = new FakeVoiceEngine(); voice = new Voice();

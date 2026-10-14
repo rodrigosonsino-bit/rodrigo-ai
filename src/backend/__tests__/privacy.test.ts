@@ -10,6 +10,7 @@ import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import type { AppConfig, PrivacyStatus, TtsStatus } from '../../shared/types.js';
 import { findViolations } from './privacyClaims.js';
 import type { ConversationMessage } from '../../shared/voiceProtocol.js';
+import { freePort } from './helpers/freePort.js';
 
 describe('parsePrivacyConfig (Fase 12)', () => {
   it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1), a imagem da tela (Fase V), a busca web e o Claude Code (Fase 17)', () => {
@@ -230,7 +231,7 @@ describe('windowHistory (Fase 12)', () => {
 
 describe('GET /api/privacy (Fase 12)', () => {
   async function withServer(fn: (base: string) => Promise<void>): Promise<void> {
-    const port = 26000 + Math.floor(Math.random() * 2000);
+    const port = await freePort();
     const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
     const server: http.Server = await startServer(config);
     try {
