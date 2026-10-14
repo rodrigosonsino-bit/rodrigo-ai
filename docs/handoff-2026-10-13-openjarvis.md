@@ -2,6 +2,19 @@
 
 Escrito para ser lido **por inteiro** antes da primeira ação da próxima sessão. Quem o escreveu foi o Claude Sonnet 5.5 (sessão local do app, projeto `rodrigo-ai`, grupo "ORQUESTRADOR DE VOZ"). A sessão seguinte não tem acesso à conversa; tudo o que pesa está aqui ou nos arquivos citados.
 
+## ATUALIZAÇÃO (mesma noite, depois da escrita): leia antes das seções 1 a 3
+
+**[verificado agora]** (`gh pr view`, `git rev-list`, `git log origin/main`): as seções 1 e 3 abaixo descrevem o estado **anterior** e estão superadas.
+
+- O PR #9 (visão desligada por padrão) foi mergeado primeiro (`352c307`); a T1 foi rebaseada em cima dele, descartando a parte duplicada (`worker.py`, texto do cartão, README); ficou só o `test_cloud_vision.py` do worker.
+- Mergeados no `main`, nesta ordem: PR #18 (T1), PR #19 (T5a, com o texto e os testes do `doctor` ajustados à decisão 10) e PR #20 (T2-0, com 3 correções vindas da revisão do Codex: itens 8b/8c de `routes.ts`, item 17 do `transcribe` e classificação do destino final antes do temporário na escrita). `origin/main` = `d1d0e3f`.
+- Antes dos merges, a integração T1 + T5a sobre o `main` passou **798 de 798** testes (`npm test`), e o app buildado respondeu 200 em `/api/health`, `/api/doctor` e `/api/privacy`.
+- O PR #8 (intermitência do `fvScreen`) e os PRs #10 a #15 e #6/#7 continuam abertos, de outras sessões; não foram tocados.
+- **Nada disso foi auditado em código** (decisão do Rodrigo). A auditoria de T1 e T5a pelo agy continua pendente.
+- A branch local `integracao-local` é descartável (só existe neste Mac).
+
+As seções 4 em diante continuam valendo como registro do que foi feito. A sequência do que falta está no plano v2.6, seção 3.
+
 ## 0. Proveniência (leia antes de confiar em qualquer frase)
 
 Três classes, sempre marcadas:
