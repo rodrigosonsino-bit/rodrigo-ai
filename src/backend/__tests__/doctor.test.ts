@@ -6,11 +6,11 @@ import { startServer } from '../server.js';
 import type { AppConfig } from '../../shared/types.js';
 
 const ROOT = '/projeto-de-teste';
-const ALL_EXIST = () => true;
+const ALL_EXIST = (_p?: string): boolean => true;
 const NONE_EXIST = () => false;
 const FIXED_NOW = () => new Date('2026-10-13T12:00:00.000Z');
 
-function doctor(env: Record<string, string | undefined>, exists = ALL_EXIST): DoctorReport {
+function doctor(env: Record<string, string | undefined>, exists: (p: string) => boolean = ALL_EXIST): DoctorReport {
   return runDoctor({ env, rootDir: ROOT, exists, now: FIXED_NOW });
 }
 function byId(r: DoctorReport, id: string) {
@@ -76,6 +76,15 @@ describe('doctor (T5a): cada verificação tem um caso de sucesso e um de falha'
     assert.equal(byId(doctor({ RODRIGO_WEB_SEARCH: '1' }), 'risk-web-search')?.severity, 'warn');
     assert.equal(byId(doctor({}), 'risk-tts-dictated')?.severity, 'warn');
     assert.equal(byId(doctor({ RODRIGO_TTS_DICTATED: '0' }), 'risk-tts-dictated'), undefined);
+  });
+
+  it('file-policy (T5b): rascunho => aviso; arquivo ausente => erro (falha fechada); nunca abre o conteúdo', () => {
+    const w = byId(doctor({}), 'file-policy');
+    assert.equal(w?.severity, 'warn');
+    assert.match(w!.detail, /RASCUNHO/);
+    const missing = byId(doctor({}, (p) => !p.endsWith('sensitive-files.json')), 'file-policy');
+    assert.equal(missing?.severity, 'error');
+    assert.match(missing!.detail, /falha fechada/);
   });
 
   it('resumo conta as gravidades e o relatório é determinístico com relógio injetado', () => {

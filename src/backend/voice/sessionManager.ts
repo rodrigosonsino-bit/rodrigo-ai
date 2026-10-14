@@ -22,6 +22,7 @@ import {
   VOICE_FALLBACK_NOTICE,
   VOICE_LIMITS
 } from '../../shared/voiceProtocol.js';
+import { CapabilityPolicy, DEFAULT_CAPABILITY_POLICY, type Capability } from '../agents/capabilityPolicy.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
@@ -238,6 +239,8 @@ type CaptureResult =
 export class SessionManager {
   private readonly engine: VoiceEngine;
   private readonly ttsProvider: IVoiceProvider;
+  /** T3: política de capacidades (negar por padrão). Pública só para os testes injetarem uma tabela própria. */
+  capabilityPolicy: CapabilityPolicy = DEFAULT_CAPABILITY_POLICY;
   private readonly audioStore: AudioStore;
   private readonly agents: readonly IAgent[];
   /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
@@ -353,6 +356,8 @@ export class SessionManager {
     isMutation: boolean;
     signal: AbortSignal;
     context?: Record<string, unknown>;
+    /** T3: capacidades que esta operação exige; a política (negar por padrão) é aplicada antes de `runTask`. */
+    needs?: readonly Capability[];
     taskId?: string;
     /** Sessão autorizada — quando presente, a fala de estouro vai por TTS. */
     sessionId?: string;
@@ -389,6 +394,23 @@ export class SessionManager {
       };
     }
 
+    // T3: PONTO ÚNICO de aplicação das capacidades (negar por padrão), imediatamente antes de `runTask`.
+    // Se faltar qualquer capacidade exigida, o agente NEM É INVOCADO.
+    const needs = this.capabilityPolicy.needsFor(agent, { needs: opts.needs, context: opts.context });
+    const verdict = this.capabilityPolicy.check(agent, needs);
+    if (!verdict.allowed) {
+      const error = `Capacidade negada para ${agent.id}: ${verdict.missing.join(', ')}.`;
+      console.warn(`[T3] ${error}`);
+      budget.trace.tasks.push({
+        subAgentId: opts.subAgentId,
+        prompt: opts.prompt,
+        isMutation: opts.isMutation,
+        status: 'failed',
+        result: error
+      });
+      return { ok: false, result: { success: false, output: '', error, kind: 'final' } };
+    }
+
     // Gatekeeper: token só existe se houve SIM neste turnId; nunca inventado aqui.
     let confirmationToken: string | undefined;
     if (opts.isMutation) {
@@ -401,7 +423,8 @@ export class SessionManager {
       prompt: opts.prompt,
       isMutation: opts.isMutation,
       confirmationToken,
-      context: opts.context
+      context: opts.context,
+      needs: opts.needs
     };
 
     const started = this.nowMs();

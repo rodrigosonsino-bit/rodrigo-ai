@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { FILE_ACCESS_REGISTRY, WORKER_ALLOWED_OPENS } from '../fileAccessRegistry.js';
+import { FILE_ACCESS_REGISTRY, SENSITIVE_LIST_APPROVED, WORKER_ALLOWED_OPENS } from '../fileAccessRegistry.js';
 
 /**
  * T2: o inventário é um TESTE, não um documento. Reprova se (a) um arquivo de produção importa `fs` fora do registro,
@@ -79,6 +79,6 @@ describe('T2: inventário de acessos a arquivo (registro de exceções)', () => 
 
   it('o registro declara a lista de sensíveis como rascunho (decisão 7 pendente)', () => {
     const policy = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'sensitive-files.json'), 'utf-8')) as { status: string };
-    assert.match(policy.status, /RASCUNHO/);
+    assert.equal(/RASCUNHO/.test(policy.status), !SENSITIVE_LIST_APPROVED, 'constante e status do JSON precisam concordar');
   });
 });

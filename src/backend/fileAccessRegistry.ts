@@ -34,6 +34,12 @@ export const FILE_ACCESS_REGISTRY: readonly FileAccessEntry[] = [
   { file: 'src/backend/voice/voiceRuntime.ts', cls: 'existence-only', reason: 'só verifica a existência do runtime de voz e do manifesto' }
 ];
 
+/**
+ * Decisão 7: a lista de arquivos sensíveis (`config/sensitive-files.json`) só deixa de ser rascunho quando o Rodrigo a
+ * aprovar. O `doctor` avisa enquanto isto for false; o teste confere que a constante e o `status` do JSON concordam.
+ */
+export const SENSITIVE_LIST_APPROVED = false;
+
 /** Aberturas de arquivo permitidas no worker Python (`scripts/worker/worker.py`): tudo mais passa por `file_policy`. */
 export const WORKER_ALLOWED_OPENS: readonly string[] = [
   'with open(part, "wb") as f:', // write_wav_atomic: o destino é validado por policy_check_writable ANTES

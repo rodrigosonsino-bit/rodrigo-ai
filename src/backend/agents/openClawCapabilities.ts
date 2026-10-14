@@ -12,6 +12,8 @@
  * local de isolamento de ações no lado OpenClaw.
  */
 
+import type { Capability } from './capabilityPolicy.js';
+
 export type OpenClawCapabilityId = 'openclaw_web' | 'openclaw_drive' | 'openclaw_social';
 
 export interface OpenClawCapabilitySpec {
@@ -26,6 +28,8 @@ export interface OpenClawCapabilitySpec {
   readonly requiresConfirmation: boolean;
   /** false = declarável no registro, sem OpenClawHttpClient / sem execução. */
   readonly wired: boolean;
+  /** T3: capacidades tipadas que este domínio declara; precisam coincidir com `EFFECTIVE_GRANTS` (teste de coerência). */
+  readonly grants: readonly Capability[];
 }
 
 export const OPENCLAW_CAPABILITIES: readonly OpenClawCapabilitySpec[] = [
@@ -34,21 +38,24 @@ export const OPENCLAW_CAPABILITIES: readonly OpenClawCapabilitySpec[] = [
     name: 'OpenClaw Web',
     shortTimeoutMs: 15_000,
     requiresConfirmation: false,
-    wired: true
+    wired: true,
+    grants: ['network']
   },
   {
     id: 'openclaw_drive',
     name: 'OpenClaw Drive',
     shortTimeoutMs: 15_000,
     requiresConfirmation: true,
-    wired: false
+    wired: false,
+    grants: ['network', 'read_file']
   },
   {
     id: 'openclaw_social',
     name: 'OpenClaw Social',
     shortTimeoutMs: 15_000,
     requiresConfirmation: true,
-    wired: false
+    wired: false,
+    grants: ['network']
   }
 ];
 
