@@ -96,6 +96,45 @@ describe('GeminiVoiceProvider (Fase 13a)', () => {
     });
   });
 
+  describe('aviso de troca de voz (T9-política a)', () => {
+    const opts = (turnId: string, kind: 'generated' | 'dictated' = 'generated'): SynthesizeOptions => ({ turnId, kind, isFirstOfTurn: true });
+
+    it('falha do serviço na nuvem: avisa com o turno e um código curto (sem texto de frase) e fala pelo `say`', async () => {
+      const p = make();
+      const seen: Array<{ turnId?: string; reason: string }> = [];
+      p.onFallback = (i) => seen.push(i);
+      engine.synthBehavior = async () => fail('server');
+      await p.synthesize('Frase secreta qualquer.', out('f'), undefined, opts('t9a'));
+      assert.deepEqual(seen, [{ turnId: 't9a', reason: 'server' }]);
+      assert.equal(say.calls.length, 1);
+      assert.doesNotMatch(JSON.stringify(seen), /secreta/);
+    });
+
+    it('cota esgotada: avisa com o motivo budget, UMA vez por turno (duas frases do mesmo turno => um aviso)', async () => {
+      const p = make({}, 1, 90);
+      const seen: Array<{ turnId?: string; reason: string }> = [];
+      p.onFallback = (i) => seen.push(i);
+      await p.synthesize('Primeira.', out('c1'), undefined, opts('t9b'));
+      await p.synthesize('Segunda.', out('c2'), undefined, { turnId: 't9b', kind: 'generated', isFirstOfTurn: false });
+      assert.deepEqual(seen, [{ turnId: 't9b', reason: 'budget' }]);
+      assert.equal(say.calls.length, 2, 'as duas frases saem pela voz do sistema');
+    });
+
+    it('voz do sistema por PRIVACIDADE (ditado, guarda em block) ou sem falha NÃO avisa', async () => {
+      const dictated = make({ RODRIGO_TTS_DICTATED: '0' });
+      const blocked = make({ RODRIGO_OUTBOUND_GUARD: 'block' });
+      const calls: string[] = [];
+      dictated.onFallback = () => calls.push('ditado');
+      blocked.onFallback = () => calls.push('block');
+      await dictated.synthesize('Anotei o que você ditou.', out('d1'), undefined, opts('t9c1', 'dictated'));
+      await blocked.synthesize('O cpf é 529.982.247-25.', out('d2'), undefined, opts('t9c2'));
+      const ok = make();
+      ok.onFallback = () => calls.push('ok');
+      await ok.synthesize('Tudo certo.', out('d3'), undefined, opts('t9c3'));
+      assert.deepEqual(calls, [], 'só indisponibilidade da nuvem dispara o aviso');
+    });
+  });
+
   it('caminho feliz: pede ao motor o modelo, a voz e o prazo certos; o `say` não é usado', async () => {
     const p = make();
     await p.synthesize('Olá, tudo bem?', out('a'), undefined, { turnId: 't1', kind: 'generated', isFirstOfTurn: true });

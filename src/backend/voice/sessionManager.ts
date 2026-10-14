@@ -19,6 +19,7 @@ import {
   NO_ACTION_CLAIM_TEXT,
   MUTATION_FAILURE_TEXT,
   PENDING_MUTATION_TTL_MS,
+  VOICE_FALLBACK_NOTICE,
   VOICE_LIMITS
 } from '../../shared/voiceProtocol.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
@@ -186,6 +187,8 @@ interface Session {
   createdAt: number;
   lastActivityAt: number;
   idleTimer: NodeJS.Timeout;
+  /** T9-política (a): o aviso de troca de voz já foi dado nesta sessão. */
+  voiceFallbackNotified: boolean;
   sseRes: ServerResponse | null;
   history: ConversationMessage[];
   activeTurn: ActiveTurn | null;
@@ -285,6 +288,13 @@ export class SessionManager {
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
+    // T9-política (a): no máximo UM aviso por sessão quando a voz em nuvem cai para a do sistema por indisponibilidade.
+    ttsProvider.onFallback = (): void => {
+      const s = this.current;
+      if (!s || s.voiceFallbackNotified) return;
+      s.voiceFallbackNotified = true;
+      this.emit(s, { type: 'voice_notice', code: 'tts_fallback', message: VOICE_FALLBACK_NOTICE });
+    };
     this.audioStore = audioStore;
     this.agents = agents;
     this.retriever = retriever;
@@ -529,6 +539,7 @@ export class SessionManager {
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
         idleTimer: setTimeout(() => {}, 0),
+        voiceFallbackNotified: false,
         sseRes: null,
         history: [],
         activeTurn: null,

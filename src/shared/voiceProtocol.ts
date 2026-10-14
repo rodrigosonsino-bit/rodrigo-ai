@@ -47,6 +47,9 @@ export function isQueryName(v: unknown): v is QueryName {
   return typeof v === 'string' && (QUERY_NAMES as readonly string[]).includes(v);
 }
 
+/** Mensagem fixa do aviso de troca de voz (T9-política a). */
+export const VOICE_FALLBACK_NOTICE = 'A voz do Google ficou indisponível agora; vou falar com a voz do sistema até ela voltar.';
+
 export interface StateEvent {
   type: 'state';
   state: VoiceState;
@@ -99,6 +102,16 @@ export interface ScreenRequestEvent {
   captureId: string;
 }
 
+/**
+ * T9-política (a): aviso INFORMATIVO, no máximo uma vez por sessão, quando a voz do Gemini cai para a do sistema por
+ * indisponibilidade (cota ou falha). Não é erro e não carrega texto de frase: só um código e a mensagem fixa.
+ */
+export interface VoiceNoticeEvent {
+  type: 'voice_notice';
+  code: 'tts_fallback';
+  message: string;
+}
+
 export interface ErrorEvent {
   type: 'error';
   message: string;
@@ -113,6 +126,7 @@ export type VoiceServerEvent =
   | TurnDoneEvent
   | SessionPreemptedEvent
   | ScreenRequestEvent
+  | VoiceNoticeEvent
   | ErrorEvent;
 
 export interface CreateSessionResponse {
