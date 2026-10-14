@@ -32,7 +32,7 @@ describe('painel desktop (T6): fronteiras declaradas', () => {
   });
   it('bloqueia a REDE (fetch/XHR/WebSocket/subrecursos), não só a navegação: regra de conteúdo com exceção só para 127.0.0.1:PORT', () => {
     assert.match(code, /compileContentRuleList/);
-    assert.match(code, /"url-filter":"\^https\?:\/\/"[^}]*\{"type":"block"\}/);
+    assert.match(code, /"url-filter":"\^https\?:\/\/"\},"action":\{"type":"block"\}/);
     assert.match(code, /"url-filter":"\^wss\?:\/\/"/);
     assert.match(code, /ignore-previous-rules/);
     // O WebKit NÃO aceita alternância (|) nas regras: uma regra assim não compila e o bloqueio some em silêncio.
@@ -43,8 +43,10 @@ describe('painel desktop (T6): fronteiras declaradas', () => {
     assert.match(code, /RODRIGO_PARENT_PID/);
   });
   it('não referencia nenhum host externo', () => {
-    const hosts = [...code.matchAll(/https?:\/\/([^\s"/\\)]+)/g)].map((m) => m[1]);
-    for (const h of hosts) assert.match(h, /^127\.0\.0\.1(:|\\|$)/, `host externo no painel: ${h}`);
+    const noRules = code.replace(/"url-filter":"[^"]*"/g, ''); // as regras de bloqueio citam 127.0.0.1 como regex
+    const hosts = [...noRules.matchAll(/https?:\/\/([^\s"/\\)]+)/g)].map((m) => m[1]);
+    // example.com aparece só no diagnóstico (RODRIGO_DESKTOP_DEBUG=1), que TENTA um fetch externo para provar que ele é bloqueado.
+    for (const h of hosts) assert.match(h, /^(127\.0\.0\.1(:|\\|$)|example\.com\/?$)/, `host externo no painel: ${h}`);
   });
   it('o servidor só escuta em loopback (HOST fixo 127.0.0.1 ao iniciar o filho)', () => {
     assert.match(code, /env\["HOST"\]\s*=\s*"127\.0\.0\.1"/);
