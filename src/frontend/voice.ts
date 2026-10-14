@@ -26,6 +26,23 @@ interface QueuedChunk {
   text: string;
 }
 
+export interface ClaudeJobView {
+  id: string;
+  order: string;
+  status: 'running' | 'done' | 'failed' | 'timeout' | 'cancelled' | 'interrupted';
+  startedAt: string;
+  durationMs?: number;
+  result?: string;
+  error?: string;
+}
+export interface ClaudeJobsView {
+  enabled: boolean;
+  busy: boolean;
+  ready: boolean;
+  reason: string | null;
+  jobs: ClaudeJobView[];
+}
+
 export class VoiceController {
   private sessionId: string | null = null;
   private token: string | null = null;
@@ -506,6 +523,22 @@ export class VoiceController {
     this.currentTurnId = null;
     this.recording = false;
     this.setState('idle');
+  }
+
+  /** Fase 17: tarefas delegadas ao Claude Code (exige a sessão ativa). null = sem sessão ou falha de rede. */
+  async fetchClaudeJobs(): Promise<ClaudeJobsView | null> {
+    if (!this.sessionId || !this.token) return null;
+    try {
+      const res = await fetch('/api/voice/claude/jobs', { headers: this.headers() });
+      return res.ok ? ((await res.json()) as ClaudeJobsView) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async cancelClaudeJob(): Promise<void> {
+    if (!this.sessionId || !this.token) return;
+    await fetch('/api/voice/claude/cancel', { method: 'POST', headers: this.headers() }).catch(() => {});
   }
 
   async stop(): Promise<void> {

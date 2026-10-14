@@ -59,7 +59,11 @@ export class ToolSubAgent implements ISubAgent {
     this.id = `tool_${tool.name.toLowerCase()}`;
     this.name = tool.name;
     this.capabilities = ['ferramenta', tool.name.toLowerCase()];
-    this.grants = 'preview' in tool && 'execute' in tool ? ['write_file'] : [];
+    const base: Capability[] = 'preview' in tool && 'execute' in tool ? ['write_file'] : [];
+    // Fase 17: ferramenta que declara capacidades EXTRAS (ex.: a delegação ao Claude usa `shell` e `read_file`). A política
+    // efetiva (EFFECTIVE_GRANTS) continua mandando: declarar aqui sem constar lá não ativa nada.
+    const extra = (tool as { extraGrants?: readonly Capability[] }).extraGrants ?? [];
+    this.grants = [...new Set<Capability>([...base, ...extra])];
   }
 
   async runTask(

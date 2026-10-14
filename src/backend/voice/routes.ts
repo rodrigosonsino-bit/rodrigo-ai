@@ -146,6 +146,22 @@ export async function handleVoiceRoute(
   const sessionId = (req.headers['x-rodrigo-session'] as string) || '';
   const token = (req.headers['x-rodrigo-token'] as string) || '';
 
+  // Fase 17: tarefas delegadas ao Claude Code. Exigem a sessão (o resultado é dado do usuário), nunca token na URL.
+  if (pathname === '/api/voice/claude/jobs' && req.method === 'GET') {
+    const jobs = deps.sessionManager.claudeJobsFor(sessionId, token);
+    if (jobs === null) {
+      sendJson(res, 401, { error: 'Sessão inválida ou expirada.' });
+      return true;
+    }
+    sendJson(res, 200, jobs);
+    return true;
+  }
+  if (pathname === '/api/voice/claude/cancel' && req.method === 'POST') {
+    const out = deps.sessionManager.cancelClaudeJob(sessionId, token);
+    sendJson(res, out === null ? 401 : 200, out === null ? { error: 'Sessão inválida ou expirada.' } : { cancelled: out });
+    return true;
+  }
+
   if (pathname === '/api/voice/session/audio' && req.method === 'POST') {
     let bodyBuffer: Buffer;
     try {

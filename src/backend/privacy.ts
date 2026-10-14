@@ -32,6 +32,11 @@ export interface PrivacyConfig {
    * Padrão 0 — nunca autônoma sem ligar o canal explicitamente (docs/phase-15-v3.md §5).
    */
   readonly webSearch: boolean;
+  /**
+   * Fase 17 — RODRIGO_CLAUDE_CODE (padrão DESLIGADO, como todo canal de nuvem novo): a ordem falada e os arquivos que o
+   * Claude Code ler vão à Anthropic. Só vale com o mestre ligado (ver claudeCodeEffective).
+   */
+  readonly claudeCode: boolean;
   /** T1 — RODRIGO_OUTBOUND_GUARD: off | warn | redact | block (padrão redact). Varre o TEXTO que sai para a nuvem. */
   readonly outboundGuard: OutboundGuardMode;
 }
@@ -90,6 +95,23 @@ export function webSearchOffReason(cfg: PrivacyConfig): WebSearchOffReason | nul
   return null;
 }
 
+/** Fase 17: delegação ao Claude Code só com o mestre ligado E o canal RODRIGO_CLAUDE_CODE=1. */
+export function claudeCodeEffective(cfg: PrivacyConfig): boolean {
+  return cfg.cloud && cfg.claudeCode;
+}
+
+export type ClaudeCodeOffReason = 'master-off' | 'channel-off';
+
+export function claudeCodeOffReason(cfg: PrivacyConfig): ClaudeCodeOffReason | null {
+  if (!cfg.cloud) return 'master-off';
+  if (!cfg.claudeCode) return 'channel-off';
+  return null;
+}
+
+/** Fase 17: fala honesta quando o canal está desligado (mesmo padrão de WEB_SEARCH_DISABLED_TEXT). */
+export const CLAUDE_CODE_DISABLED_TEXT =
+  'A delegação ao Claude está desligada. Para ligar, é preciso ativar RODRIGO_CLAUDE_CODE e configurar uma pasta de leitura.';
+
 type Env = Readonly<Record<string, string | undefined>>;
 
 function parseFlag(env: Env, name: string, defaultValue: boolean): boolean {
@@ -135,6 +157,7 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true),
     cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', false),
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
+    claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
     outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact')
   };
 }
@@ -171,6 +194,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
   const intentOn = cfg.cloud && cfg.cloudIntent;
   const ttsOn = ttsCloudEffective(cfg);
   const webOn = webSearchEffective(cfg);
+  const claudeOn = claudeCodeEffective(cfg);
   return {
     mode: cfg.cloud ? 'cloud' : 'local-only',
     intent: intentOn ? 'gemini' : 'local',
@@ -183,7 +207,8 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       knowledgeSnippet: cfg.cloud && cfg.sendKnowledge,
       ttsText: ttsOn,
       visionImage: cfg.cloud && cfg.cloudVision,
-      webSearch: webOn
+      webSearch: webOn,
+      claudeCode: claudeOn
     },
     models: {
       generation: cfg.cloud ? 'gemini-flash-latest' : null,
@@ -192,6 +217,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
     },
     tts: { cloud: ttsOn, reason: ttsOffReason(cfg), dictatedViaCloud: ttsDictatedViaCloud(cfg) },
     webSearch: { enabled: webOn, reason: webSearchOffReason(cfg) },
+    claudeCode: { enabled: claudeOn, reason: claudeCodeOffReason(cfg) },
     neverSends: ['audio'],
     outboundGuard: cfg.outboundGuard
   };

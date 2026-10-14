@@ -49,6 +49,15 @@ import {
 import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import { ToolSubAgent } from '../agents/adapters.js';
 import {
+  ClaudeCodeRunner,
+  CLAUDE_KIND,
+  CLAUDE_TOOL_NAME,
+  detectClaudeDelegation,
+  isClaudeResultQuery,
+  spokenSummary
+} from '../agents/claudeCode.js';
+import { CLAUDE_CODE_DISABLED_TEXT } from '../privacy.js';
+import {
   PendingAsyncTaskStore,
   parseAsyncTaskTtlHours,
   type PendingAsyncTask
@@ -182,7 +191,7 @@ interface ActiveTurn {
   t0: number;
   marks: [string, number][];
   /** Fase V: decidida logo após a transcrição, ANTES de a fala entrar no histórico (§3). */
-  provenance: 'normal' | 'screen';
+  provenance: 'normal' | 'screen' | 'claude';
 }
 
 interface Session {
@@ -214,7 +223,7 @@ interface Session {
    */
   cancelledTurnIds: Set<string>;
   armedMutation: ArmedMutation | null;
-  emittedSentences?: { turnId: string; items: { text: string; consumed: boolean; origin?: 'screen' }[] };
+  emittedSentences?: { turnId: string; items: { text: string; consumed: boolean; origin?: 'screen' | 'claude' }[] };
   pendingMutation: PendingMutation | null;
   /**
    * Fase V (§4): no máximo UM pedido de captura de tela pendente por sessão. A rota HTTP consome (resolve e
@@ -246,6 +255,8 @@ export class SessionManager {
   capabilityPolicy: CapabilityPolicy = DEFAULT_CAPABILITY_POLICY;
   /** T4: registro de decisões (duas fases) das MUTAÇÕES. NUNCA nulo: por padrão é em memória (testes); em produção o voiceRuntime injeta o arquivo. */
   decisionLog: DecisionLog = DecisionLog.inMemory();
+  /** Fase 17: executor das tarefas delegadas ao Claude Code (null = delegação não montada neste processo). */
+  claudeRunner: ClaudeCodeRunner | null = null;
   private readonly audioStore: AudioStore;
   private readonly agents: readonly IAgent[];
   /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
@@ -889,6 +900,26 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         }
       }
 
+      // Fase 17: "o que o Claude respondeu?" — leitura determinística do último resultado (sem nuvem, sem ferramenta).
+      if (this.claudeRunner && isClaudeResultQuery(transcript)) {
+        const last = this.claudeRunner.latestFinished();
+        const text = last
+          ? spokenSummary(last)
+          : this.claudeRunner.isBusy()
+            ? 'O Claude ainda está trabalhando nisso.'
+            : 'Ainda não tenho nenhuma resposta do Claude para te contar.';
+        await this.speakFixedAndEnd(session, turn, text, last !== undefined);
+        return;
+      }
+
+      // Fase 17: gatilho DETERMINÍSTICO ("pede pro Claude <ordem>"). Sem LLM e sem nuvem na detecção: a ordem só chega à
+      // Anthropic depois da pergunta falada, do "sim" determinístico e do token de uso único (fluxo das mutações).
+      const claudeOrder = detectClaudeDelegation(transcript);
+      if (claudeOrder !== null && !selectMutatingToolByAction(CLAUDE_KIND, this.mutatingTools)) {
+        await this.speakFixedAndEnd(session, turn, CLAUDE_CODE_DISABLED_TEXT);
+        return;
+      }
+
       // Fatia 4 (A2): "o que você fez?" responde pelo ExecutionTrace — só se já houver trace com tarefas (R1);
       // sem isso, a fala segue o caminho normal (inclusive o filtro de afirmação alucinada da F11).
       const lastTrace = WHAT_DID_YOU_DO.test(transcript) ? this.coordinator.latestTraceWithTasks() : undefined;
@@ -913,6 +944,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       // pergunta falada e pelo "sim" determinístico.
       let cloudIntent: IntentDetection | null = null;
       if (
+        claudeOrder === null &&
         this.privacy.cloud &&
         this.privacy.cloudIntent &&
         ((this.mutatingTools.length > 0 && mightBeMutation(transcript)) ||
@@ -936,15 +968,19 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       // Fase 5c: filtro de mutação (só chega aqui sem pending, ou com pending expirado)
       if (
         this.mutatingTools.length > 0 &&
-        (cloudIntent
-          ? (isMutationName(cloudIntent.intent) || isQueryName(cloudIntent.intent)) && cloudIntent.intent !== 'NENHUMA'
-          : mightBeMutation(transcript))
+        (claudeOrder !== null ||
+          (cloudIntent
+            ? (isMutationName(cloudIntent.intent) || isQueryName(cloudIntent.intent)) && cloudIntent.intent !== 'NENHUMA'
+            : mightBeMutation(transcript)))
       ) {
         let detected: [IntentName, string | null] = ['NENHUMA', null];
         try {
-          detected = cloudIntent
-            ? [cloudIntent.intent, cloudIntent.content]
-            : await this.engine.detectMutation(turn.turnId, turn.epoch, transcript);
+          detected =
+            claudeOrder !== null
+              ? [CLAUDE_KIND, claudeOrder]
+              : cloudIntent
+                ? [cloudIntent.intent, cloudIntent.content]
+                : await this.engine.detectMutation(turn.turnId, turn.epoch, transcript);
         } catch (err) {
           detected = ['NENHUMA', null];
           console.error('[mutation] detecção falhou, seguindo pelo caminho normal:', err);
@@ -1130,6 +1166,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       const knowledgeBlock = buildKnowledgeBlock(retrieved);
       const systemPrompt = [
         agent.getSystemPrompt(),
+        this.buildCapabilitiesBlock(),
         memoryBlock,
         knowledgeBlock,
         knowledgeLimitBlock,
@@ -1365,7 +1402,69 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     return `Não consegui falar com o OpenClaw agora (${err instanceof Error ? err.message : 'erro desconhecido'}).`;
   }
 
-  private async speakOutOfTurn(session: Session, text: string): Promise<void> {
+  /** Fase 17: lista (somente leitura) das tarefas do Claude, para a tela. null = sessão inválida. */
+  claudeJobsFor(sessionId: string, token: string): { enabled: boolean; busy: boolean; ready: boolean; reason: string | null; jobs: unknown[] } | null {
+    if (!this.getAuthorized(sessionId, token)) return null;
+    const runner = this.claudeRunner;
+    if (!runner) return { enabled: false, busy: false, ready: false, reason: 'não montado', jobs: [] };
+    const r = runner.readiness();
+    return {
+      enabled: this.mutatingTools.some((t) => t.name === CLAUDE_TOOL_NAME && t.isAvailable()),
+      busy: runner.isBusy(),
+      ready: r.ready,
+      reason: r.ready ? null : r.reason,
+      jobs: runner.jobs().slice(-10).reverse()
+    };
+  }
+
+  /** Fase 17: cancela a tarefa em andamento (botão da tela). null = sessão inválida. */
+  cancelClaudeJob(sessionId: string, token: string): boolean | null {
+    if (!this.getAuthorized(sessionId, token)) return null;
+    return this.claudeRunner?.cancel() ?? false;
+  }
+
+  /** Fase 17: encerra o turno falando um texto fixo (mesmo encerramento dos caminhos de consulta). */
+  private async speakFixedAndEnd(session: Session, turn: ActiveTurn, text: string, untrusted = false): Promise<void> {
+    this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+    this.emit(session, { type: 'state', state: 'falando' });
+    const clean = cleanTextForSpeech(text);
+    // Dado não confiável (resposta do Claude): voz do sistema e fora do histórico enviado ao Gemini.
+    if (untrusted) turn.provenance = 'claude';
+    turn.expectedSentences.add(0);
+    turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, untrusted ? 'untrusted' : 'local'));
+    await Promise.allSettled(turn.pendingSynthesis);
+    if (session.activeTurn === turn) {
+      this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+      this.emit(session, { type: 'state', state: 'ouvindo' });
+      session.activeTurn = null;
+    }
+  }
+
+  /**
+   * Fase 17: fala um aviso proativo (ex.: "o Claude terminou") na sessão corrente, SE houver uma e ela estiver ociosa.
+   * Sem sessão ativa, devolve false: quem chamou usa a notificação do sistema e a tela. Nunca cria sessão.
+   */
+  async announce(text: string, untrusted = false): Promise<boolean> {
+    const session = this.current;
+    if (!session || session.activeTurn || !session.lastTurnId) return false;
+    await this.speakOutOfTurn(session, text, untrusted);
+    return true;
+  }
+
+  /** Fase 17: bloco "o que eu realmente consigo fazer", montado do REGISTRO (nunca escrito à mão por capacidade). */
+  buildCapabilitiesBlock(): string {
+    const claudeOn = this.mutatingTools.some((t) => t.name === CLAUDE_TOOL_NAME && t.isAvailable());
+    const lines = [
+      '[Capacidades reais deste sistema] Por comando de voz você consegue: dizer a hora e a data; criar, editar, apagar e consultar lembretes, notas e memórias (sempre com confirmação falada nas alterações).',
+      claudeOn
+        ? 'Também consegue pedir ao Claude Code uma tarefa de leitura e análise nos arquivos do projeto, quando o usuário disser, por exemplo, "pede pro Claude" seguido da ordem; a ordem é repetida em voz alta e só roda depois do sim.'
+        : 'A delegação de tarefas ao Claude está desligada neste momento.',
+      'Você não tem servidor, webhook, terminal nem qualquer outra ferramenta além das citadas. Se pedirem algo fora disso, diga com franqueza que não consegue, sem inventar como seria feito, e nunca afirme que executou algo que não executou.'
+    ];
+    return lines.join(' ');
+  }
+
+  private async speakOutOfTurn(session: Session, text: string, untrusted = false): Promise<void> {
     const clean = cleanTextForSpeech(text);
     const turnId = session.lastTurnId;
     if (!clean || !turnId || this.current !== session || session.activeTurn) return;
@@ -1380,7 +1479,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     try {
       await this.ttsProvider.synthesize(clean, filePath, controller.signal, {
         turnId,
-        kind: 'local',
+        kind: untrusted ? 'untrusted' : 'local',
         isFirstOfTurn: false
       });
     } catch {
@@ -1399,7 +1498,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     if (!session.emittedSentences || session.emittedSentences.turnId !== turnId) {
       session.emittedSentences = { turnId, items: [] };
     }
-    session.emittedSentences.items.push({ text: clean, consumed: false });
+    session.emittedSentences.items.push(untrusted ? { text: clean, consumed: false, origin: 'claude' } : { text: clean, consumed: false });
     this.emit(session, {
       type: 'sentence_audio_ready',
       turnId,
@@ -1540,7 +1639,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         session.emittedSentences = { turnId: turn.turnId, items: [] };
       }
       session.emittedSentences.items.push(
-        turn.provenance === 'screen' ? { text: ready.text, consumed: false, origin: 'screen' } : { text: ready.text, consumed: false }
+        turn.provenance !== 'normal' ? { text: ready.text, consumed: false, origin: turn.provenance } : { text: ready.text, consumed: false }
       );
       if (session.emittedSentences.items.length === 1) {
         this.mark(turn, 'primeiro_audio');
@@ -1747,11 +1846,11 @@ export function windowHistory(
     // no lugar da pergunta atual (defeito pré-existente) ou, sendo de tela, a pergunta sumia.
     for (let i = history.length - 1; i >= 0; i -= 1) {
       const m = history[i];
-      if (m.role === 'user' && m.origin !== 'screen') return [strip(m)];
+      if (m.role === 'user' && m.origin === undefined) return [strip(m)];
     }
     return [];
   }
-  const windowed = history.filter((m) => m.origin !== 'screen').slice(-(privacy.historyTurns * 2));
+  const windowed = history.filter((m) => m.origin === undefined).slice(-(privacy.historyTurns * 2));
   let start = 0;
   while (start < windowed.length - 1 && windowed[start].role === 'assistant') start += 1;
   return windowed.slice(start).map(strip);

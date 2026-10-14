@@ -51,6 +51,8 @@ export interface PrivacyStatus {
     visionImage: boolean;
     /** Fase 15: busca web autônoma via OpenClaw (mestre + RODRIGO_WEB_SEARCH). */
     webSearch: boolean;
+    /** Fase 17: ordem falada e arquivos lidos pelo Claude Code vão à Anthropic (RODRIGO_CLAUDE_CODE). */
+    claudeCode: boolean;
   };
   models: { generation: string | null; intent: string | null; tts: string | null };
   /** Fase 13a: estado EFETIVO do TTS em nuvem (a flag sozinha não basta; ver ttsCloudEffective). */
@@ -61,6 +63,11 @@ export interface PrivacyStatus {
   };
   /** Fase 15: estado EFETIVO da busca web (mestre + canal; ver webSearchEffective). */
   webSearch: {
+    enabled: boolean;
+    reason: 'master-off' | 'channel-off' | null;
+  };
+  /** Fase 17: estado EFETIVO da delegação ao Claude Code (mestre + canal). */
+  claudeCode: {
     enabled: boolean;
     reason: 'master-off' | 'channel-off' | null;
   };

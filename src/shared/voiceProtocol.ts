@@ -28,6 +28,8 @@ export const MUTATION_NAMES = [
   'MEMORIA_GUARDAR',
   'MEMORIA_EDITAR',
   'MEMORIA_ESQUECER',
+  // Fase 17: delegação ao Claude Code. Só nasce da detecção DETERMINÍSTICA no Node (claudeCode.ts); a nuvem nunca a propõe.
+  'CLAUDE_DELEGAR',
   'NENHUMA'
 ] as const;
 export type MutationName = (typeof MUTATION_NAMES)[number];
@@ -145,10 +147,10 @@ export interface ConversationMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   /**
-   * Fase V (docs/phase-vision-v3.md §5.3): 'screen' = pergunta ou resposta de um turno de tela. Nunca sai para o Gemini em
+   * Fase V (docs/phase-vision-v3.md §5.3): 'screen' = pergunta ou resposta de um turno de tela; 'claude' (Fase 17) = fala que reproduz resposta do Claude Code (dado não confiável). Nunca saem para o Gemini em
    * turnos seguintes — `windowHistory` remove essas mensagens de todo envio.
    */
-  origin?: 'screen';
+  origin?: 'screen' | 'claude';
 }
 
 export const VOICE_LIMITS = {
