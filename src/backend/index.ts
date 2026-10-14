@@ -55,6 +55,20 @@ try {
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // T6: o app de barra de menus (desktop/) define RODRIGO_PARENT_PID. Se ele morrer sem poder encerrar o servidor
+  // (crash, SIGKILL), o servidor percebe a orfandade e sai sozinho em vez de ficar escutando para sempre.
+  const parentPid = Number(process.env['RODRIGO_PARENT_PID']);
+  if (Number.isInteger(parentPid) && parentPid > 1) {
+    setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch {
+        console.log('[Rodrigo AI] Processo pai (app de barra de menus) encerrou; encerrando o servidor.');
+        shutdown();
+      }
+    }, 3000).unref();
+  }
 } catch (error) {
   console.error('[Rodrigo AI] Falha na inicialização:', error instanceof Error ? error.message : error);
   process.exit(1);

@@ -25,15 +25,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var web: WKWebView!
     var server: Process?
     var hotKeyRef: EventHotKeyRef?
+    let showOnStart = ProcessInfo.processInfo.environment["RODRIGO_DESKTOP_SHOW"] == "1"
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        startServerIfNeeded()
         buildPanel()
         buildStatusItem()
         registerHotKey()
-        if ProcessInfo.processInfo.environment["RODRIGO_DESKTOP_SHOW"] == "1" { showPanel() }
-        if debugLog { DispatchQueue.main.asyncAfter(deadline: .now() + 6) { self.probe() } }
+        // O servidor sobe em segundo plano (pode levar segundos): a interface nunca fica bloqueada esperando por ele.
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.startServerIfNeeded()
+            DispatchQueue.main.async {
+                self.web.load(URLRequest(url: URL(string: origin)!))
+                if self.showOnStart { self.showPanel() }
+                if debugLog { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.probe() } }
+            }
+        }
     }
 
     func applicationWillTerminate(_ n: Notification) {
@@ -42,7 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         p.terminate()
         // O servidor pode demorar a encerrar com conexões abertas (SSE/keep-alive): espera um pouco e então força.
         for _ in 0..<20 { if !p.isRunning { return }; Thread.sleep(forTimeInterval: 0.1) }
-        kill(p.processIdentifier, SIGKILL)
+        if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+        if let k = hotKeyRef { UnregisterEventHotKey(k) }
     }
 
     // --- servidor ---
@@ -68,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         p.currentDirectoryURL = URL(fileURLWithPath: repoRoot)
         var env = ProcessInfo.processInfo.environment
         env["PORT"] = String(port); env["HOST"] = "127.0.0.1"
+        env["RODRIGO_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier) // o servidor sai sozinho se este app morrer
         // Um app gráfico não herda o ~/.zshenv: carrega o .env do projeto NÃO é feito aqui (o servidor já lê o .env).
         p.environment = env
         let log = URL(fileURLWithPath: repoRoot).appendingPathComponent(".runtime/desktop-server.log")
@@ -83,6 +92,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .nonPersistent()          // nada da conversa persiste depois do encerramento
         cfg.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // Rede: o delegate só vê NAVEGAÇÕES; fetch/XHR/WebSocket/subrecursos passam por aqui. Bloqueia tudo que não seja
+        // a origem do app (regra geral de bloqueio + exceção para 127.0.0.1:PORT).
+        let rules = """
+        [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
+         {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},
+         {"trigger":{"url-filter":"^ftp://"},"action":{"type":"block"}},
+         {"trigger":{"url-filter":"^http://127\\\\.0\\\\.0\\\\.1:\(port)/"},"action":{"type":"ignore-previous-rules"}},
+         {"trigger":{"url-filter":"^ws://127\\\\.0\\\\.0\\\\.1:\(port)/"},"action":{"type":"ignore-previous-rules"}}]
+        """
+        let sem = DispatchSemaphore(value: 0)
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "rodrigo-loopback-only", encodedContentRuleList: rules) { list, err in
+            if let l = list { cfg.userContentController.add(l) } else { NSLog("Rodrigo AI: regra de rede não compilou: \(String(describing: err))") }
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 5)
         web = WKWebView(frame: .zero, configuration: cfg)
         web.navigationDelegate = self
         web.uiDelegate = self
@@ -99,7 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         panel.contentView = web
-        web.load(URLRequest(url: URL(string: origin)!))
     }
 
     func showPanel() {
@@ -154,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // --- só a origem do app ---
     func allowed(_ url: URL?) -> Bool {
         guard let u = url else { return false }
-        if u.scheme == "about" { return true }
+        if u.absoluteString == "about:blank" { return true }
         return u.scheme == "http" && u.host == "127.0.0.1" && u.port == port
     }
     func webView(_ w: WKWebView, decidePolicyFor a: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -177,6 +200,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func probe() {
         web.evaluateJavaScript("JSON.stringify({title:document.title,secure:window.isSecureContext,md:typeof navigator.mediaDevices,body:document.body.innerText.slice(0,120)})") { r, e in
             dlog("probe: \(String(describing: r)) erro=\(String(describing: e))")
+        }
+        // Rede: fetch externo tem de FALHAR; fetch à própria origem tem de funcionar.
+        let js = """
+        const t = async (u) => { try { const r = await fetch(u, {mode:'no-cors'}); return 'ok' } catch (e) { return 'bloqueado' } };
+        return JSON.stringify({externo: await t('http://example.com/'), externoHttps: await t('https://example.com/'), local: await t('\(origin)/api/health')});
+        """
+        web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { res in
+            dlog("rede: \(res)")
         }
     }
 }

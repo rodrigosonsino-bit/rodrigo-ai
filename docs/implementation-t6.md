@@ -15,7 +15,13 @@ O plano v2.6 (§3.6) aprovava só o **spike C** (janela de app do Chrome + atalh
 ## Fronteiras (teste estrutural `desktopPanel.test.ts`)
 Sem área de transferência; inspetor desligado; armazenamento de dados **não persistente** (a conversa não sobrevive ao encerramento); navegação só para `127.0.0.1:PORT` (resto cancelado, janelas novas negadas); **microfone só para essa origem**, câmera negada; nenhum host externo no código.
 
-## Verificado (execução real, 2026-10-13 22:45)
+## Auditoria (MiMo v2.6-pro, 2026-10-13, saída tratada como rascunho; cada achado conferido)
+- **Aceitos e corrigidos:** C1 (subrecursos de rede passavam sem bloqueio: o delegate só vê navegações) → `WKContentRuleList`; **provado em execução:** `fetch` para `http://` e `https://` externos "bloqueado", para a própria origem "ok". A primeira versão da regra usava `|` e **não compilava** (o WebKit não suporta alternância): só apareceu porque testei em execução, e há teste estrutural contra isso. A2 (main thread bloqueada até ~90 s esperando o servidor) → startup em segundo plano. M1 (servidor órfão se o app morrer por crash/SIGKILL) → o servidor lê `RODRIGO_PARENT_PID` e sai sozinho (provado: SIGKILL no app, servidor saiu em < 8 s). M3 (`about:*` → só `about:blank`), M4 (`kill` só se ainda rodando), B2 (desregistra o atalho).
+- **Rejeitados, com motivo:** A1 (vazamento de ambiente ao filho): o filho é o próprio servidor do app e precisa de HOME, PATH e do venv; uma lista restrita quebraria o worker. M2 (`sleep` de até 2 s ao encerrar): é o que garante o fim do servidor.
+- **Limite declarado (C2):** se **outro processo** já ocupa a porta e responde `/api/health` com `status: ok`, o app o reutiliza sem poder provar quem é. Qualquer processo local capaz de abrir essa porta já roda como o seu usuário; não adicionei token ao servidor. Mitigação por você: não deixar nada além do app na porta 3000 (ou definir `PORT`).
+- Auditoria **não** feita por Codex/agy (a do MiMo é a única até aqui).
+
+## Verificado (execução real, 2026-10-13 22:45 e 23:00)
 Binário em modo diagnóstico, porta 4601: servidor iniciado pelo app; `RegisterEventHotKey status=0`; página carregou no painel (`isSecureContext: true`, `navigator.mediaDevices: object`); captura de tela mostrou o painel no canto superior direito. **Não verificado (depende do Rodrigo):** o prompt de permissão do microfone na primeira vez, uma conversa por voz de ponta a ponta dentro do painel, e se ⌘⇧Espaço conflita com outro atalho seu (Spotlight/Alfred etc.).
 
 ## Como usar

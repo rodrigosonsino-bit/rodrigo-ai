@@ -30,6 +30,18 @@ describe('painel desktop (T6): fronteiras declaradas', () => {
     assert.match(code, /type == \.microphone/);
     assert.match(code, /o\.host == "127\.0\.0\.1"/);
   });
+  it('bloqueia a REDE (fetch/XHR/WebSocket/subrecursos), não só a navegação: regra de conteúdo com exceção só para 127.0.0.1:PORT', () => {
+    assert.match(code, /compileContentRuleList/);
+    assert.match(code, /"url-filter":"\^https\?:\/\/"[^}]*\{"type":"block"\}/);
+    assert.match(code, /"url-filter":"\^wss\?:\/\/"/);
+    assert.match(code, /ignore-previous-rules/);
+    // O WebKit NÃO aceita alternância (|) nas regras: uma regra assim não compila e o bloqueio some em silêncio.
+    const filters = [...code.matchAll(/"url-filter":"([^"]*)"/g)].map((m) => m[1]);
+    for (const f of filters) assert.doesNotMatch(f, /\|/, `alternância não suportada no filtro: ${f}`);
+  });
+  it('o servidor filho encerra sozinho se o app morrer (RODRIGO_PARENT_PID)', () => {
+    assert.match(code, /RODRIGO_PARENT_PID/);
+  });
   it('não referencia nenhum host externo', () => {
     const hosts = [...code.matchAll(/https?:\/\/([^\s"/\\)]+)/g)].map((m) => m[1]);
     for (const h of hosts) assert.match(h, /^127\.0\.0\.1(:|\\|$)/, `host externo no painel: ${h}`);
