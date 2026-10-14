@@ -44,7 +44,12 @@ _RESULT_FIELDS = {
     "commit",
     "source",
     "created_at",
+    "app",
+    "dataset_version",
+    "seed",
+    "metric_units",
 }
+_REQUIRED_RESULT_FIELDS = _RESULT_FIELDS - {"app", "dataset_version", "seed", "metric_units"}
 _GPU_FIELDS = {"name", "available"}
 _SOURCE_FIELDS = {"job_sha256", "dependencies", "dirty"}
 
@@ -119,9 +124,26 @@ def _require_fields(obj: dict[str, Any], expected: set[str], label: str) -> None
 def validate_result(result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise ContractError("result must be a JSON object")
-    _require_fields(result, _RESULT_FIELDS, "result")
+    unknown = set(result) - _RESULT_FIELDS
+    if unknown:
+        raise ContractError(f"result has unknown fields: {sorted(unknown)}")
+    missing_required = _REQUIRED_RESULT_FIELDS - set(result)
+    if missing_required:
+        raise ContractError(f"result is missing fields: {sorted(missing_required)}")
     if result["schema_version"] != 1:
         raise ContractError("unsupported schema_version")
+    evaluation_fields = ("app", "dataset_version", "seed", "metric_units")
+    present = [field in result for field in evaluation_fields]
+    if any(present) and not all(present):
+        raise ContractError("app, dataset_version, seed and metric_units must be provided together")
+    if all(present):
+        validate_identifier(result["app"], "app")
+        validate_identifier(result["dataset_version"], "dataset_version")
+        if not isinstance(result["seed"], int) or isinstance(result["seed"], bool) or not 0 <= result["seed"] <= 2**32 - 1:
+            raise ContractError("seed must be an integer between 0 and 2^32-1")
+        units = result["metric_units"]
+        if not isinstance(units, dict) or any(not isinstance(k, str) or not _METRIC.fullmatch(k) or not isinstance(v, str) for k, v in units.items()):
+            raise ContractError("metric_units must map metric names to unit strings")
     validate_identifier(result["job"], "job")
     validate_identifier(result["run_id"], "run_id")
     if result["status"] not in {"success", "failed"}:
@@ -134,6 +156,8 @@ def validate_result(result: Any) -> dict[str, Any]:
             raise ContractError(f"invalid metric name: {name!r}")
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
             raise ContractError(f"metric {name!r} must be a finite non-negative number")
+        if all(present) and name not in result["metric_units"]:
+            raise ContractError(f"metric {name!r} is missing a unit")
     gpu = result["gpu"]
     if not isinstance(gpu, dict):
         raise ContractError("gpu must be an object")

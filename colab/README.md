@@ -68,6 +68,23 @@ Métricas são números finitos não negativos com nomes documentados pelo job.
 O escritor local usa arquivo temporário e substituição atômica. O leitor não
 resolve caminhos do JSON, não executa notebooks e não baixa dados.
 
+## Avaliações sintéticas dos apps
+
+Os jobs registrados em `colab/lib/registry.py` são harnesses de referência
+offline. Execute um job com um diretório novo por `run_id`:
+
+```bash
+python3 scripts/colab/run-evaluation.py scheduler-reliability --seed 7 \
+  --run-id local-001 --output /tmp/rodrigo-ai-eval/local-001
+python3 scripts/colab/read-result.py /tmp/rodrigo-ai-eval/local-001/result.json
+python3 scripts/colab/compare-results.py old.json new.json
+```
+
+O resultado legado `synthetic-baseline` continua sem os campos de avaliação;
+jobs registrados exigem `app`, `dataset_version`, `seed` e `metric_units`.
+Esses jobs exercitam o contrato e oráculos sintéticos, não representam uma
+integração já existente com os cinco aplicativos.
+
 ## Privacidade e custo
 
 Por padrão, não sobem para o Colab: gravações, documentos pessoais,
