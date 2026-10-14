@@ -195,5 +195,5 @@ export function buildKnowledgeBlock(chunks: RetrievedChunk[]): string {
   if (chunks.length === 0) return '';
   const c = chunks[0];
   // Decisão 11: o corpo vai como DADO NÃO CONFIÁVEL, entre delimitadores que o conteúdo não consegue fechar.
-  return `${PREAMBLE}\n${UNTRUSTED_NOTICE}\n\n[${c.headingPath}]\n${wrapUntrusted(c.body.split('\n').map(neutralizeUntrusted))}`;
+  return `${PREAMBLE}\n${UNTRUSTED_NOTICE}\n\n[${neutralizeUntrusted(c.headingPath)}]\n${wrapUntrusted(c.body.split('\n').map(neutralizeUntrusted))}`;
 }

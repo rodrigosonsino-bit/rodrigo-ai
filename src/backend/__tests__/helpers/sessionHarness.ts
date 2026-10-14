@@ -10,6 +10,7 @@ import { SessionManager } from '../../voice/sessionManager.js';
 import type { IVoiceProvider } from '../../../shared/extensions/voice.js';
 import { createSpecialistAgents } from '../../agents/specialistAgents.js';
 import { createSystemTools } from '../../tools/index.js';
+import { createMutatingTools } from '../../tools/mutatingTools.js';
 import { JsonStore, type StoredItem } from '../../storage/jsonStore.js';
 import { parsePrivacyConfig, type PrivacyConfig } from '../../privacy.js';
 import { buildTestWav } from './egress.js';
@@ -39,7 +40,9 @@ export interface H {
   dir: string;
 }
 
-export async function setup(env: Record<string, string>, withMemory: boolean, memoryText: string = MEMORY_SECRET): Promise<H> {
+/** `withMutatingTools`: sem ferramentas de mutação o SessionManager NUNCA chama detectMutation (auditoria do agy, C2: os laços
+ * que inspecionam detectMutationCalls eram vácuos). Com `true`, lembrete/nota/memória reais entram na sessão. */
+export async function setup(env: Record<string, string>, withMemory: boolean, memoryText: string = MEMORY_SECRET, withMutatingTools = false): Promise<H> {
   const port = 25100 + Math.floor(Math.random() * 3000);
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-guard-test-'));
@@ -52,7 +55,8 @@ export async function setup(env: Record<string, string>, withMemory: boolean, me
     memoriaStore.write({ items: [{ id: 'm1', text: memoryText, createdAt: new Date().toISOString() }] });
   }
   const privacy: PrivacyConfig = parsePrivacyConfig(env);
-  const sm = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), null, createSystemTools(), [], memoriaStore, privacy);
+  const mutatingTools = withMutatingTools ? createMutatingTools(dir).tools : [];
+  const sm = new SessionManager(engine, tts, audioStore, createSpecialistAgents(), null, createSystemTools(), mutatingTools, memoriaStore, privacy);
   const server = await startServer(config, undefined, { config, sessionManager: sm, audioStore });
   return { server, baseUrl: `http://127.0.0.1:${port}`, engine, tts, sm, dir };
 }

@@ -21,6 +21,7 @@ import {
 } from '../privacy.js';
 
 import type { Capability } from './capabilityPolicy.js';
+import { guardText } from '../privacy/outboundGuard.js';
 
 const DEFAULT_SHORT_TIMEOUT_MS = 15_000;
 
@@ -141,6 +142,22 @@ export class OpenClawSubAgent implements ISubAgent {
       }
     }
 
+    // T1 (auditoria do agy, A4): a consulta do agente WEB sai para a internet; passa pelo guarda de saída como os demais
+    // canais. Só o agente web: os outros falam com o gateway local. block => nada é enviado, e o erro NÃO ecoa o conteúdo.
+    let prompt = req.prompt;
+    if (this.capabilities.includes('openclaw_web')) {
+      const g = guardText(req.prompt, this.privacy.outboundGuard);
+      if (g.blocked) {
+        return {
+          success: false,
+          output: '',
+          error: 'Consulta web bloqueada: o texto contém um dado sensível (chave, senha, CPF, CNPJ ou cartão) e não foi enviado.',
+          kind: 'final'
+        };
+      }
+      prompt = g.text;
+    }
+
     if (!this.openClawClient) {
       return {
         success: false,
@@ -155,7 +172,7 @@ export class OpenClawSubAgent implements ISubAgent {
     const combinedSignal = combineSignals(signal, timeoutController.signal);
 
     try {
-      const output = await this.openClawClient.invokeShort(req.prompt, combinedSignal);
+      const output = await this.openClawClient.invokeShort(prompt, combinedSignal);
       return { success: true, output, kind: 'final' };
     } catch (err) {
       if (signal.aborted) {
@@ -169,7 +186,7 @@ export class OpenClawSubAgent implements ISubAgent {
 
       if (timeoutController.signal.aborted) {
         try {
-          const asyncHandle = await this.openClawClient.invokeLongAsync(req.prompt);
+          const asyncHandle = await this.openClawClient.invokeLongAsync(prompt);
           return {
             success: true,
             output: '',
