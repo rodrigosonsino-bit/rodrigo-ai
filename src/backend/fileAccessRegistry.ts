@@ -19,6 +19,7 @@ export interface FileAccessEntry {
 
 export const FILE_ACCESS_REGISTRY: readonly FileAccessEntry[] = [
   { file: 'src/backend/config.ts', cls: 'exception', reason: 'o app lê a PRÓPRIA configuração (.env em process.cwd()); é o arquivo que a política lista como sensível, mas quem o lê é o próprio dono; o conteúdo só vai para process.env' },
+  { file: 'src/backend/audit/decisionLog.ts', cls: 'exception', reason: 'T4: arquivo de auditoria append-only (JSONL com cadeia de hashes) em <dataDir>/audit/decisions.jsonl, sem conteúdo do usuário (lista fechada de campos + guarda em block); modo 0600' },
   { file: 'src/backend/doctor.ts', cls: 'existence-only', reason: 'T5a: só existência de 3 caminhos fixos do runtime; nunca abre .env, notas, memórias nem docs/research' },
   { file: 'src/backend/knowledge/corpus.ts', cls: 'exception', reason: 'lê docs/research/ para a busca BM25 local; o trecho só sai para a nuvem com RODRIGO_SEND_KNOWLEDGE=1 (padrão desligado)' },
   { file: 'src/backend/server.ts', cls: 'exception', reason: 'serve arquivos estáticos públicos de dist/client com guarda de path traversal (hostValidator + testes)' },

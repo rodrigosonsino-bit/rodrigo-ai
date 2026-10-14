@@ -19,10 +19,13 @@ import {
   NO_ACTION_CLAIM_TEXT,
   MUTATION_FAILURE_TEXT,
   PENDING_MUTATION_TTL_MS,
+  AUDIT_CONCLUSION_LOST_TEXT,
+  AUDIT_REFUSED_TEXT,
   VOICE_FALLBACK_NOTICE,
   VOICE_LIMITS
 } from '../../shared/voiceProtocol.js';
 import { CapabilityPolicy, DEFAULT_CAPABILITY_POLICY, type Capability } from '../agents/capabilityPolicy.js';
+import { DecisionLog, normalizeName, withAudit } from '../audit/decisionLog.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
@@ -241,6 +244,8 @@ export class SessionManager {
   private readonly ttsProvider: IVoiceProvider;
   /** T3: política de capacidades (negar por padrão). Pública só para os testes injetarem uma tabela própria. */
   capabilityPolicy: CapabilityPolicy = DEFAULT_CAPABILITY_POLICY;
+  /** T4: registro de decisões (duas fases) das MUTAÇÕES. null = sem registro (testes); em produção o voiceRuntime sempre define. */
+  decisionLog: DecisionLog | null = null;
   private readonly audioStore: AudioStore;
   private readonly agents: readonly IAgent[];
   /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
@@ -478,17 +483,32 @@ export class SessionManager {
     content: string | null,
     isMutation: boolean
   ): Promise<{ text: string | null; error?: string }> {
-    const r = await this.runSubAgentDelegation({
-      turnId: turn.turnId,
-      query: transcript,
-      subAgentId: `tool_${tool.name.toLowerCase()}`,
-      prompt: content ?? '',
-      isMutation,
-      signal: turn.abortController.signal,
-      context: { action }
-    });
-    if (r.budgetExceeded && r.speech) return { text: r.speech };
-    return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
+    const run = async (): Promise<{ text: string | null; error?: string }> => {
+      const r = await this.runSubAgentDelegation({
+        turnId: turn.turnId,
+        query: transcript,
+        subAgentId: `tool_${tool.name.toLowerCase()}`,
+        prompt: content ?? '',
+        isMutation,
+        signal: turn.abortController.signal,
+        context: { action }
+      });
+      if (r.budgetExceeded && r.speech) return { text: r.speech };
+      return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
+    };
+    // T4: SÓ mutações passam pelo protocolo de duas fases (consultas e leituras não alteram nada).
+    if (!isMutation || !this.decisionLog) return run();
+    const audited = await withAudit(
+      this.decisionLog,
+      { mid: crypto.randomUUID(), turnId: turn.turnId, action, tool: normalizeName(tool.name), executor: 'tool', dataClass: 'unknown' },
+      run,
+      (res) => (res.text === null ? 'failed' : 'ok')
+    );
+    if (audited.refused) return { text: AUDIT_REFUSED_TEXT, error: 'auditoria indisponível' };
+    if (audited.conclusionLost && audited.result.text !== null) {
+      return { text: `${audited.result.text} ${AUDIT_CONCLUSION_LOST_TEXT}` };
+    }
+    return audited.result;
   }
 
   private async speakBudgetExceeded(

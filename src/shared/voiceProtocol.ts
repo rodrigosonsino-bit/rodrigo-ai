@@ -190,6 +190,10 @@ export const DETECT_MUTATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_MUTATION_TIMEOUT_M
 export const DETECT_CONFIRMATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_CONFIRMATION_TIMEOUT_MS;
 export const PENDING_MUTATION_TTL_MS = VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
 export const MUTATION_FAILURE_TEXT = 'Não consegui salvar isso agora.';
+/** T4: a intenção não pôde ser registrada, então a mutação NÃO foi executada. */
+export const AUDIT_REFUSED_TEXT = 'Não consegui registrar o que ia fazer, então não executei. Pode tentar de novo.';
+/** T4: a mutação foi feita, mas o registro de conclusão falhou (a ação não é desfeita). */
+export const AUDIT_CONCLUSION_LOST_TEXT = 'Atenção: fiz a ação, mas não consegui registrar a conclusão no histórico de auditoria.';
 export const MUTATION_CANCELLED_TEXT = 'Tudo bem, não fiz nada.';
 /** Idade máxima TOTAL de um pedido de mutação, contada do pedido original (o reprompt não renova). */
 export const MUTATION_MAX_AGE_MS = 120_000;

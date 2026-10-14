@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
 import { workerGeminiEnv } from '../geminiTestEndpoint.js';
 import { prepareProcessTmpDir } from './tmpSweeper.js';
+import { DecisionLog, unavailableAuditFs } from '../audit/decisionLog.js';
 import path from 'node:path';
 import type { TtsStatus } from '../../shared/types.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
@@ -149,6 +150,21 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     pendingAsyncStore,
     coordinator
   );
+
+  // T4: registro de decisões das mutações (duas fases, cadeia de hashes). Se não puder abrir, fica INDISPONÍVEL e as
+  // mutações são recusadas (falha fechada); nunca segue sem registro em silêncio.
+  let decisionLog: DecisionLog;
+  try {
+    decisionLog = new DecisionLog(path.join(dataDir, 'audit', 'decisions.jsonl'));
+    const check = decisionLog.verify();
+    if (!check.ok) console.warn(`[Rodrigo AI] AUDITORIA: o registro de decisões não confere (linha ${check.line}: ${check.reason}).`);
+    const open = decisionLog.pending();
+    if (open.length > 0) console.warn(`[Rodrigo AI] AUDITORIA: ${open.length} intenção(ões) sem conclusão (indeterminadas: a ação pode ou não ter sido aplicada).`);
+  } catch (err) {
+    console.error('[Rodrigo AI] AUDITORIA: não consegui abrir o registro de decisões; as mutações serão RECUSADAS.', err instanceof Error ? err.name : 'erro');
+    decisionLog = new DecisionLog(path.join(dataDir, 'audit', 'decisions.jsonl'), unavailableAuditFs());
+  }
+  sessionManager.decisionLog = decisionLog;
 
   // Fase 15 §4.3: recuperação mínima pós-restart (descarta por TTL; fala datada na 1ª sessão).
   void sessionManager.recoverPendingAsyncOnBoot(openClawClient, parseAsyncTaskTtlHours()).then((r) => {
