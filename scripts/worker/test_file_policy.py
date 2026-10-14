@@ -114,4 +114,12 @@ assert not P.check_readable(f"{repo}/sub/link-env.txt")["ok"]
 assert P.check_writable(f"{repo}/sub/saida.wav")["ok"]
 assert P.check_writable(f"{repo}/sub/.env")["reason"] == "sensitive"
 
+# 9) raiz extra (fora do repositório): hard link para .env lá também é pego pelo inode
+extra = os.path.join(tmp, "extra"); os.makedirs(extra)
+w(os.path.join(extra, ".env"), SECRET); os.link(os.path.join(extra, ".env"), os.path.join(extra, "inofensivo.txt"))
+P2 = fp.FilePolicy(policy, repo, [repo, extra])
+assert P2.read(os.path.join(extra, "inofensivo.txt"))["reason"] == "sensitive"
+assert P2.write(os.path.join(extra, "inofensivo.txt"), b"X")["reason"] == "sensitive"
+assert open(os.path.join(extra, ".env"), "rb").read() == SECRET
+
 print("ok: test_file_policy")

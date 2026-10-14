@@ -137,6 +137,9 @@ class FilePolicy:
                         continue
 
         walk(self.repo_root, True)
+        for _given, real in self.roots:  # outras raízes permitidas: um .env lá também ganha a defesa por inode
+            if real != self.repo_root:
+                walk(real, True)
         for d in self.deny_paths:
             if os.path.isdir(d):
                 walk(d, False)

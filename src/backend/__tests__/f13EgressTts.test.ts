@@ -84,6 +84,7 @@ describe('TTS Gemini contra o worker real e um Gemini falso (Fase 13a)', { skip:
     const wenv: Record<string, string> = {
       RODRIGO_TEST: '1',
       RODRIGO_WORKER_NO_MODELS: '1',
+      RODRIGO_FILE_ROOTS: os.tmpdir(), // T2
       RODRIGO_GEMINI_BASE_URL: gemini.url,
       GEMINI_API_KEY: REAL_LOOKING_KEY,
       ...workerEnv
