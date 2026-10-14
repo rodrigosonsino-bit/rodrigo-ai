@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "status": "RASCUNHO da decisão 7 (docs/plans/openjarvis-voz-desktop-v2.md §6.3): a lista abaixo é a recomendada pelo plano e NÃO foi aprovada pelo Rodrigo. Revisar antes de depender dela.",
+  "name_deny_globs": [
+    ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.keystore",
+    "id_rsa*", "id_ed25519*", "id_ecdsa*",
+    "credentials.json", "credentials.yaml", "credentials.yml",
+    ".npmrc", ".netrc"
+  ],
+  "name_allow": [".env.example"],
+  "exclude_dirs_for_name_rules": [".runtime", "node_modules", ".git"],
+  "deny_paths_in_repo": ["data", "docs/research", "memory", "media", ".openclaw-cli-images"],
+  "deny_paths_outside_repo": [
+    "~/.zshenv", "~/.hermes", "~/.config/opencode", "~/.config/mimocode",
+    "~/.notebooklm", "~/.ssh"
+  ],
+  "pending_user_decision": ["USER.md", "SOUL.md", "IDENTITY.md", "DREAMS.md", "AGENTS.md", "skill-observations", "docs/audits/**/*.log"]
+}
