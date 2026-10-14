@@ -19,8 +19,13 @@ import {
   NO_ACTION_CLAIM_TEXT,
   MUTATION_FAILURE_TEXT,
   PENDING_MUTATION_TTL_MS,
+  AUDIT_CONCLUSION_LOST_TEXT,
+  AUDIT_REFUSED_TEXT,
+  VOICE_FALLBACK_NOTICE,
   VOICE_LIMITS
 } from '../../shared/voiceProtocol.js';
+import { CapabilityPolicy, DEFAULT_CAPABILITY_POLICY, type Capability } from '../agents/capabilityPolicy.js';
+import { DecisionLog, normalizeName, withAudit } from '../audit/decisionLog.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
@@ -186,6 +191,8 @@ interface Session {
   createdAt: number;
   lastActivityAt: number;
   idleTimer: NodeJS.Timeout;
+  /** T9-política (a): o aviso de troca de voz já foi dado nesta sessão. */
+  voiceFallbackNotified: boolean;
   sseRes: ServerResponse | null;
   history: ConversationMessage[];
   activeTurn: ActiveTurn | null;
@@ -235,6 +242,10 @@ type CaptureResult =
 export class SessionManager {
   private readonly engine: VoiceEngine;
   private readonly ttsProvider: IVoiceProvider;
+  /** T3: política de capacidades (negar por padrão). Pública só para os testes injetarem uma tabela própria. */
+  capabilityPolicy: CapabilityPolicy = DEFAULT_CAPABILITY_POLICY;
+  /** T4: registro de decisões (duas fases) das MUTAÇÕES. null = sem registro (testes); em produção o voiceRuntime sempre define. */
+  decisionLog: DecisionLog | null = null;
   private readonly audioStore: AudioStore;
   private readonly agents: readonly IAgent[];
   /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
@@ -285,6 +296,13 @@ export class SessionManager {
   ) {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
+    // T9-política (a): no máximo UM aviso por sessão quando a voz em nuvem cai para a do sistema por indisponibilidade.
+    ttsProvider.onFallback = (): void => {
+      const s = this.current;
+      if (!s || s.voiceFallbackNotified) return;
+      s.voiceFallbackNotified = true;
+      this.emit(s, { type: 'voice_notice', code: 'tts_fallback', message: VOICE_FALLBACK_NOTICE });
+    };
     this.audioStore = audioStore;
     this.agents = agents;
     this.retriever = retriever;
@@ -343,6 +361,8 @@ export class SessionManager {
     isMutation: boolean;
     signal: AbortSignal;
     context?: Record<string, unknown>;
+    /** T3: capacidades que esta operação exige; a política (negar por padrão) é aplicada antes de `runTask`. */
+    needs?: readonly Capability[];
     taskId?: string;
     /** Sessão autorizada — quando presente, a fala de estouro vai por TTS. */
     sessionId?: string;
@@ -379,6 +399,23 @@ export class SessionManager {
       };
     }
 
+    // T3: PONTO ÚNICO de aplicação das capacidades (negar por padrão), imediatamente antes de `runTask`.
+    // Se faltar qualquer capacidade exigida, o agente NEM É INVOCADO.
+    const needs = this.capabilityPolicy.needsFor(agent, { needs: opts.needs, context: opts.context });
+    const verdict = this.capabilityPolicy.check(agent, needs);
+    if (!verdict.allowed) {
+      const error = `Capacidade negada para ${agent.id}: ${verdict.missing.join(', ')}.`;
+      console.warn(`[T3] ${error}`);
+      budget.trace.tasks.push({
+        subAgentId: opts.subAgentId,
+        prompt: opts.prompt,
+        isMutation: opts.isMutation,
+        status: 'failed',
+        result: error
+      });
+      return { ok: false, result: { success: false, output: '', error, kind: 'final' } };
+    }
+
     // Gatekeeper: token só existe se houve SIM neste turnId; nunca inventado aqui.
     let confirmationToken: string | undefined;
     if (opts.isMutation) {
@@ -391,7 +428,8 @@ export class SessionManager {
       prompt: opts.prompt,
       isMutation: opts.isMutation,
       confirmationToken,
-      context: opts.context
+      context: opts.context,
+      needs: opts.needs
     };
 
     const started = this.nowMs();
@@ -445,17 +483,32 @@ export class SessionManager {
     content: string | null,
     isMutation: boolean
   ): Promise<{ text: string | null; error?: string }> {
-    const r = await this.runSubAgentDelegation({
-      turnId: turn.turnId,
-      query: transcript,
-      subAgentId: `tool_${tool.name.toLowerCase()}`,
-      prompt: content ?? '',
-      isMutation,
-      signal: turn.abortController.signal,
-      context: { action }
-    });
-    if (r.budgetExceeded && r.speech) return { text: r.speech };
-    return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
+    const run = async (): Promise<{ text: string | null; error?: string }> => {
+      const r = await this.runSubAgentDelegation({
+        turnId: turn.turnId,
+        query: transcript,
+        subAgentId: `tool_${tool.name.toLowerCase()}`,
+        prompt: content ?? '',
+        isMutation,
+        signal: turn.abortController.signal,
+        context: { action }
+      });
+      if (r.budgetExceeded && r.speech) return { text: r.speech };
+      return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
+    };
+    // T4: SÓ mutações passam pelo protocolo de duas fases (consultas e leituras não alteram nada).
+    if (!isMutation || !this.decisionLog) return run();
+    const audited = await withAudit(
+      this.decisionLog,
+      { mid: crypto.randomUUID(), turnId: turn.turnId, action, tool: normalizeName(tool.name), executor: 'tool', dataClass: 'unknown' },
+      run,
+      (res) => (res.text === null ? 'failed' : 'ok')
+    );
+    if (audited.refused) return { text: AUDIT_REFUSED_TEXT, error: 'auditoria indisponível' };
+    if (audited.conclusionLost && audited.result.text !== null) {
+      return { text: `${audited.result.text} ${AUDIT_CONCLUSION_LOST_TEXT}` };
+    }
+    return audited.result;
   }
 
   private async speakBudgetExceeded(
@@ -529,6 +582,7 @@ export class SessionManager {
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
         idleTimer: setTimeout(() => {}, 0),
+        voiceFallbackNotified: false,
         sseRes: null,
         history: [],
         activeTurn: null,

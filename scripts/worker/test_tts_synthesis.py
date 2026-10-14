@@ -12,6 +12,8 @@ from types import SimpleNamespace
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+import tempfile as _tf_roots  # noqa: E402
+os.environ.setdefault("RODRIGO_FILE_ROOTS", _tf_roots.gettempdir())  # T2: o Node informa as raízes permitidas; o teste usa o diretório temporário
 import worker  # noqa: E402
 
 worker.log_diag = lambda *_a, **_k: None  # type: ignore[assignment]

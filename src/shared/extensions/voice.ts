@@ -31,4 +31,10 @@ export interface IVoiceProvider {
   synthesize(text: string, outputPath: string, signal?: AbortSignal, options?: SynthesizeOptions): Promise<void>;
   /** Fase 13a: o turno terminou (ou foi superado); libera o que o provedor reservou para ele. */
   endTurn?(turnId: string): void;
+  /**
+   * T9-política (a): chamado quando uma voz em nuvem cai para a do sistema POR INDISPONIBILIDADE (cota ou falha).
+   * Não é chamado quando a voz do sistema foi escolhida por privacidade (conteúdo ditado, guarda em block) nem por
+   * configuração. `reason` é um código curto, nunca texto de frase.
+   */
+  onFallback?: (info: { turnId?: string; reason: string }) => void;
 }

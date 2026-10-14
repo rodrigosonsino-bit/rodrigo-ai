@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from outbound_guard import guard_messages, guard_text  # T1: guarda de saída (camada em profundidade)
+import file_policy as _fp  # T2: política de arquivos sensíveis (leitura/escrita seguras)
 
 # Offline em operação normal — o setup script sobrescreve isso explicitamente para baixar modelos.
 if os.environ.get("RODRIGO_VOICE_SETUP") != "1":
@@ -569,6 +570,48 @@ TTS_PEAK_LIMIT_DBFS = -1.0
 TTS_MIN_ACTIVE_SAMPLES = 240   # < 10 ms de fala ativa a 24 kHz: sem medida confiável, não mexe no ganho
 
 
+# --- T2: política de arquivos. Falha FECHADA: se a política não carregar, toda leitura/escrita é recusada. ---
+_FILE_POLICY: Any = None
+_FILE_POLICY_LOCK = threading.Lock()
+_FILE_POLICY_ERROR: Optional[str] = None
+FILE_READ_MAX = 1_048_576
+FILE_WRITE_MAX = 262_144
+SCREEN_READ_MAX = 12 * 1024 * 1024  # leitura interna da captura de tela (não é o IPC file_read)
+
+
+def get_file_policy() -> Any:
+    global _FILE_POLICY, _FILE_POLICY_ERROR
+    with _FILE_POLICY_LOCK:
+        if _FILE_POLICY is None and _FILE_POLICY_ERROR is None:
+            try:
+                repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                roots = [repo] + [p for p in os.environ.get("RODRIGO_FILE_ROOTS", "").split(os.pathsep) if p]
+                _FILE_POLICY = _fp.FilePolicy.from_file(
+                    os.path.join(repo, "config", "sensitive-files.json"), repo, roots, os.environ.get("RODRIGO_DATA_DIR") or None)
+            except Exception as exc:  # noqa: BLE001
+                _FILE_POLICY_ERROR = type(exc).__name__
+                log_diag(f"Política de arquivos indisponível ({_FILE_POLICY_ERROR}): toda leitura/escrita será recusada.")
+        return _FILE_POLICY
+
+
+def policy_read(path: str, max_bytes: int) -> dict:
+    pol = get_file_policy()
+    if pol is None:
+        return {"ok": False, "reason": "io_error"}
+    return pol.read(path, max_bytes)
+
+
+def policy_check_readable(path: str) -> dict:
+    pol = get_file_policy()
+    return {"ok": False, "reason": "io_error"} if pol is None else pol.check_readable(path)
+
+
+def policy_check_writable(path: str) -> dict:
+    pol = get_file_policy()
+    return {"ok": False, "reason": "io_error"} if pol is None else pol.check_writable(path)
+
+
+
 def _rms_dbfs_gated(samples: Any) -> Optional[float]:
     """RMS em dBFS só sobre amostras acima do gate de silêncio (float em [-1, 1]). None se não há fala suficiente."""
     import numpy as np
@@ -609,6 +652,9 @@ def write_wav_atomic(path: str, pcm: bytes, sample_rate: int) -> None:
     os.replace ao fim; qualquer erro apaga o .part (nunca deixa arquivo parcial com o nome final)."""
     import wave
 
+    verdict = policy_check_writable(path)  # T2 (inventário item 15): o destino vem do Node; classifica antes de gravar
+    if not verdict.get("ok"):
+        raise PermissionError(f"escrita recusada pela política de arquivos ({verdict.get('reason')})")
     part = path + ".part"
     try:
         with open(part, "wb") as f:  # open() primeiro: falha limpa (OSError) em vez de um Wave_write meio construído
@@ -841,6 +887,7 @@ class Worker:
         self._syntheses: dict[str, dict[str, Any]] = {}
         self._synth_lock = threading.Lock()
         self._synth_pool = SynthPool(TTS_POOL_WORKERS)
+        self._file_pool = SynthPool(2)  # T2: pool próprio, fora da work_queue (a geração ocupa o laço e a fila tem tamanho 1)
         self._llm = None
         self._llm_tokenizer = None
         self._stt = None
@@ -891,6 +938,44 @@ class Worker:
         with self._current_lock:
             return turn_id is not None and turn_id in self._cancelled_turns
 
+    def handle_file_read(self, msg: dict[str, Any]) -> None:
+        import base64
+        req_id = msg.get("reqId")
+        path = msg.get("path")
+        if not isinstance(path, str) or not isinstance(req_id, str):
+            emit({"event": "file_result", "reqId": req_id, "ok": False, "reason": "bad_request"})
+            return
+        try:
+            mb = min(int(msg.get("maxBytes", FILE_READ_MAX)), FILE_READ_MAX)
+        except (TypeError, ValueError):
+            mb = FILE_READ_MAX
+        r = policy_read(path, max(mb, 0))
+        if r.get("ok"):
+            emit({"event": "file_result", "reqId": req_id, "ok": True, "bytes_b64": base64.b64encode(r["data"]).decode("ascii"),
+                  "size": r["size"], "class": r["class"]})
+        else:
+            emit({"event": "file_result", "reqId": req_id, "ok": False, "reason": r.get("reason", "io_error")})
+
+    def handle_file_write(self, msg: dict[str, Any]) -> None:
+        import base64
+        req_id = msg.get("reqId")
+        path = msg.get("path")
+        b64 = msg.get("dataB64")
+        if not isinstance(path, str) or not isinstance(req_id, str) or not isinstance(b64, str):
+            emit({"event": "file_result", "reqId": req_id, "ok": False, "reason": "bad_request"})
+            return
+        try:
+            data = base64.b64decode(b64, validate=True)
+        except Exception:  # noqa: BLE001
+            emit({"event": "file_result", "reqId": req_id, "ok": False, "reason": "bad_request"})
+            return
+        pol = get_file_policy()
+        r = {"ok": False, "reason": "io_error"} if pol is None else pol.write(path, data, FILE_WRITE_MAX)
+        if r.get("ok"):
+            emit({"event": "file_result", "reqId": req_id, "ok": True, "bytes_written": r["bytes_written"], "sha256": r["sha256"]})
+        else:
+            emit({"event": "file_result", "reqId": req_id, "ok": False, "reason": r.get("reason", "io_error")})
+
     def handle_cancel(self, msg: dict[str, Any]) -> None:
         turn_id = msg.get("turnId")
         with self._current_lock:
@@ -920,6 +1005,11 @@ class Worker:
         req_id = msg["reqId"]
         audio_path = msg["audioPath"]
         try:
+            verdict = policy_check_readable(audio_path)  # T2 (inventário item 17): leitura indireta via mlx_whisper
+            if not verdict.get("ok"):
+                log_diag(f"Transcrição recusada pela política de arquivos ({verdict.get('reason')}).")
+                emit({"event": "error", "reqId": req_id, "message": "Falha ao transcrever áudio."})
+                return
             import mlx_whisper
 
             result = mlx_whisper.transcribe(
@@ -1122,6 +1212,12 @@ class Worker:
             log_diag(f"Descrição de tela cancelada antes do início (turnId={turn_id}).")
             return
 
+        screen_read = policy_read(image_path, SCREEN_READ_MAX) if image_path else {"ok": False, "reason": "not_found"}  # T2 (item 16)
+        if image_path and not screen_read.get("ok") and screen_read.get("reason") not in ("not_found",):
+            log_diag(f"Imagem de tela recusada pela política de arquivos ({screen_read.get('reason')}).")
+            emit({"event": "screen_description", "reqId": req_id, "turnId": turn_id, "kind": "image_missing",
+                  "error": "Imagem não encontrada."})
+            return
         if not image_path or not os.path.exists(image_path):
             if self._turn_cancelled(turn_id):
                 log_diag(f"Imagem de tela ausente para turno cancelado (turnId={turn_id}).")
@@ -1151,8 +1247,7 @@ class Worker:
                     from google import genai
                     from google.genai import types
                     client = self._gemini_client_for(genai, 20_000)
-                    with open(image_path, "rb") as f:
-                        img_bytes = f.read()
+                    img_bytes = screen_read["data"]  # T2: bytes lidos pela política (nada de open() direto)
 
                     prompt_text = (
                         "Você vê uma captura da tela do usuário. "
@@ -1746,6 +1841,10 @@ class Worker:
                 # ocupa o work_loop enquanto as frases precisam ser sintetizadas).
                 self.register_synth(msg)
                 self._synth_pool.submit(self.handle_synthesize, msg)
+            elif cmd == "file_read":
+                self._file_pool.submit(self.handle_file_read, msg)
+            elif cmd == "file_write":
+                self._file_pool.submit(self.handle_file_write, msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
             elif cmd in ("transcribe", "classify", "generate", "detect_tool", "detect_mutation", "detect_confirmation", "detect_intent"):

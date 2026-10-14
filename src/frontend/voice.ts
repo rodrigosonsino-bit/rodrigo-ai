@@ -76,7 +76,8 @@ export class VoiceController {
     private readonly onAssistantText: (text: string) => void,
     private readonly onError: (message: string) => void,
     private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void,
-    private readonly onScreenSharingChange: (sharing: boolean) => void = () => {}
+    private readonly onScreenSharingChange: (sharing: boolean) => void = () => {},
+    private readonly onNotice: (message: string) => void = () => {}
   ) {}
 
   private setState(state: VoiceState): void {
@@ -159,6 +160,9 @@ export class VoiceController {
         break;
       case 'session_preempted':
         this.teardown();
+        break;
+      case 'voice_notice':
+        this.onNotice(event.message);
         break;
       case 'error':
         this.onError(event.message);

@@ -42,6 +42,8 @@ interface TurnState {
   /** 'say' => o resto do turno inteiro fala com a voz do sistema. */
   mode: 'gemini' | 'say';
   reason?: string;
+  /** T9-política (a): o aviso de troca de voz já foi disparado para este turno. */
+  notified?: boolean;
 }
 
 const UNKNOWN_BACKOFF_BASE_MS = 30_000;
@@ -61,6 +63,8 @@ export class GeminiVoiceProvider implements IVoiceProvider {
   private serviceFailures = 0;
   /** Contadores para o teste e o cartão de estado (nunca texto de frase). */
   readonly counters = { gemini: 0, fallback: 0, failures: 0, tokensOut: 0 };
+  /** T9-política (a): ver IVoiceProvider.onFallback. */
+  onFallback?: (info: { turnId?: string; reason: string }) => void;
 
   constructor(
     private readonly engine: VoiceEngine,
@@ -150,6 +154,11 @@ export class GeminiVoiceProvider implements IVoiceProvider {
     const cloudText = guarded.text;
 
     const st = this.turnState(turnId);
+    // T9-política (a): a reserva de cota falhou ao abrir o turno => voz do sistema por indisponibilidade (avisa uma vez por turno).
+    if (st.mode === 'say' && st.reason === 'budget' && !st.notified) {
+      st.notified = true;
+      this.onFallback?.({ turnId: options.turnId, reason: 'budget' });
+    }
     if (st.mode === 'say' || !this.engine.synthesize) return this.useFallback(text, outputPath, signal, options);
 
     // Só desconta DEPOIS de obter a vaga (auditoria F13a, achado 2): um pedido abortado enquanto espera na fila nunca é
@@ -160,6 +169,8 @@ export class GeminiVoiceProvider implements IVoiceProvider {
       this.release();
       st.mode = 'say';
       st.reason = 'budget';
+      st.notified = true;
+      this.onFallback?.({ turnId: options.turnId, reason: 'budget' });
       return this.useFallback(text, outputPath, signal, options);
     }
     let result: SynthesizeResult;
@@ -192,6 +203,8 @@ export class GeminiVoiceProvider implements IVoiceProvider {
     st.mode = 'say';
     st.reason = result.kind;
     this.afterFailure(result);
+    st.notified = true;
+    this.onFallback?.({ turnId: options.turnId, reason: result.kind });
     return this.useFallback(text, outputPath, signal, options);
   }
 

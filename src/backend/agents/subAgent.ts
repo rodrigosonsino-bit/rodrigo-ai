@@ -1,3 +1,5 @@
+import type { Capability } from './capabilityPolicy.js';
+
 /** Tetos iniciais da Fase 15 §6 (ponto de partida; recalibração é Fatia 5). */
 export const SUBAGENT_BUDGET = {
   MAX_CALLS_PER_TURN: 6,
@@ -19,6 +21,8 @@ export interface SubAgentTaskRequest {
    */
   confirmationToken?: string;
   context?: Record<string, unknown>;
+  /** T3: capacidades que ESTA operação exige (além das implícitas do agente). Faltou alguma concedida => o agente nem é invocado. */
+  needs?: readonly Capability[];
 }
 
 export interface SubAgentTaskResult {
@@ -39,6 +43,8 @@ export interface ISubAgent {
   readonly id: string;
   readonly name: string;
   readonly capabilities: readonly string[];
+  /** T3: capacidades tipadas DECLARADAS (negar por padrão: ausente = nenhuma). Vale a interseção com a política efetiva. */
+  readonly grants?: readonly Capability[];
 
   /**
    * Executa a tarefa do subagente com suporte a cancelamento por AbortSignal.

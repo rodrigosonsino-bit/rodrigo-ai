@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parsePrivacyConfig, ttsCloudEffective, ttsDictatedViaCloud, webSearchEffective } from './privacy.js';
 import { validateHost, validatePort } from './config.js';
+import { SENSITIVE_LIST_APPROVED } from './fileAccessRegistry.js';
 
 /**
  * T5a (docs/plans/openjarvis-voz-desktop-v2.md §3.5): diagnóstico de prontidão e de fronteira.
@@ -101,6 +102,15 @@ export function runDoctor(input: DoctorInput): DoctorReport {
     } else {
       checks.push(check('voice-runtime', 'Runtime de voz', 'warn', `Faltando: ${missing.join(', ')}. Rode "npm run setup:voice". O resto do app continua funcionando.`));
     }
+  }
+
+  // 3b. T5b: política de arquivos sensíveis (só existência do arquivo + o estado declarado da aprovação; não abre o conteúdo).
+  if (!exists(path.join(rootDir, 'config', 'sensitive-files.json'))) {
+    checks.push(check('file-policy', 'Política de arquivos sensíveis', 'error', 'config/sensitive-files.json não existe: o worker recusa TODA leitura e escrita (falha fechada).'));
+  } else if (!SENSITIVE_LIST_APPROVED) {
+    checks.push(check('file-policy', 'Política de arquivos sensíveis', 'warn', 'A lista de arquivos sensíveis está em RASCUNHO (decisão 7 pendente de aprovação do Rodrigo). A política já se aplica, mas a lista pode ter lacunas.'));
+  } else {
+    checks.push(check('file-policy', 'Política de arquivos sensíveis', 'ok', 'Lista de arquivos sensíveis aprovada e presente.'));
   }
 
   if (cfg !== null) {

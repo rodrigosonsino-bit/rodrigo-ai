@@ -47,6 +47,9 @@ export function isQueryName(v: unknown): v is QueryName {
   return typeof v === 'string' && (QUERY_NAMES as readonly string[]).includes(v);
 }
 
+/** Mensagem fixa do aviso de troca de voz (T9-política a). */
+export const VOICE_FALLBACK_NOTICE = 'A voz do Google ficou indisponível agora; vou falar com a voz do sistema até ela voltar.';
+
 export interface StateEvent {
   type: 'state';
   state: VoiceState;
@@ -99,6 +102,16 @@ export interface ScreenRequestEvent {
   captureId: string;
 }
 
+/**
+ * T9-política (a): aviso INFORMATIVO, no máximo uma vez por sessão, quando a voz do Gemini cai para a do sistema por
+ * indisponibilidade (cota ou falha). Não é erro e não carrega texto de frase: só um código e a mensagem fixa.
+ */
+export interface VoiceNoticeEvent {
+  type: 'voice_notice';
+  code: 'tts_fallback';
+  message: string;
+}
+
 export interface ErrorEvent {
   type: 'error';
   message: string;
@@ -113,6 +126,7 @@ export type VoiceServerEvent =
   | TurnDoneEvent
   | SessionPreemptedEvent
   | ScreenRequestEvent
+  | VoiceNoticeEvent
   | ErrorEvent;
 
 export interface CreateSessionResponse {
@@ -176,6 +190,10 @@ export const DETECT_MUTATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_MUTATION_TIMEOUT_M
 export const DETECT_CONFIRMATION_TIMEOUT_MS = VOICE_LIMITS.DETECT_CONFIRMATION_TIMEOUT_MS;
 export const PENDING_MUTATION_TTL_MS = VOICE_LIMITS.PENDING_MUTATION_TTL_MS;
 export const MUTATION_FAILURE_TEXT = 'Não consegui salvar isso agora.';
+/** T4: a intenção não pôde ser registrada, então a mutação NÃO foi executada. */
+export const AUDIT_REFUSED_TEXT = 'Não consegui registrar o que ia fazer, então não executei. Pode tentar de novo.';
+/** T4: a mutação foi feita, mas o registro de conclusão falhou (a ação não é desfeita). */
+export const AUDIT_CONCLUSION_LOST_TEXT = 'Atenção: fiz a ação, mas não consegui registrar a conclusão no histórico de auditoria.';
 export const MUTATION_CANCELLED_TEXT = 'Tudo bem, não fiz nada.';
 /** Idade máxima TOTAL de um pedido de mutação, contada do pedido original (o reprompt não renova). */
 export const MUTATION_MAX_AGE_MS = 120_000;

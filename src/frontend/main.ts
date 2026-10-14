@@ -268,6 +268,14 @@ function appendErrorEntry(message: string): void {
   voiceTranscriptLog.scrollTop = voiceTranscriptLog.scrollHeight;
 }
 
+function appendNoticeEntry(message: string): void {
+  const entry = document.createElement('p');
+  entry.className = 'transcript-entry transcript-notice';
+  entry.textContent = `Aviso: ${message}`;
+  voiceTranscriptLog.appendChild(entry);
+  voiceTranscriptLog.scrollTop = voiceTranscriptLog.scrollHeight;
+}
+
 const voiceController = new VoiceController(
   (state) => {
     voiceStateContainer.className = `voice-state voice-state-${state}`;
@@ -294,7 +302,8 @@ const voiceController = new VoiceController(
     voiceScreenBtn.setAttribute('aria-pressed', String(sharing));
     voiceScreenBtn.textContent = sharing ? 'Parar compartilhamento' : 'Compartilhar tela';
     voiceScreenNote.hidden = !sharing;
-  }
+  },
+  (message) => appendNoticeEntry(message)
 );
 
 voiceStartBtn.addEventListener('click', () => {

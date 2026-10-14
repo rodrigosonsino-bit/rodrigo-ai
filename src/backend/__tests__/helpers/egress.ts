@@ -330,6 +330,7 @@ export async function startEgressHarness(opts: EgressOptions = {}): Promise<Egre
   const workerBase: Record<string, string> = {
     RODRIGO_TEST: '1',
     RODRIGO_WORKER_NO_MODELS: '1',
+    RODRIGO_FILE_ROOTS: os.tmpdir(), // T2: o Node informa as raízes permitidas ao worker
     RODRIGO_GEMINI_BASE_URL: gemini.url,
     GEMINI_API_KEY: REAL_LOOKING_KEY
   };

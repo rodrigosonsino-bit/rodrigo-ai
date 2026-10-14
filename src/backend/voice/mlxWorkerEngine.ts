@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createLineSink } from './lineSink.js';
 import { redact } from '../redact.js';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import type { ConversationMessage, IntentDetection, IntentName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
@@ -88,6 +89,24 @@ interface PendingDescribeScreen {
   spawnGeneration: number;
 }
 
+/** T2: motivos de recusa devolvidos pelo worker (`file_policy.py`) mais os dois que só o Node conhece. */
+export type FileFailReason =
+  | 'sensitive' | 'symlink' | 'too_large' | 'not_found' | 'io_error' | 'timeout' | 'bad_request'
+  | 'worker_unavailable' | 'bad_response';
+export type FileReadResult = { ok: true; data: Buffer; size: number; fileClass: string } | { ok: false; reason: FileFailReason };
+export type FileWriteResult = { ok: true; bytesWritten: number; sha256: string } | { ok: false; reason: FileFailReason };
+const FILE_FAIL_REASONS = new Set<string>(['sensitive', 'symlink', 'too_large', 'not_found', 'io_error', 'timeout', 'bad_request']);
+const FILE_IPC_TIMEOUT_MS = 5_000;
+
+interface PendingFile {
+  kind: 'file';
+  /** Nunca rejeita: falha é resultado { ok: false } — falha FECHADA, o Node jamais lê/grava direto como reserva. */
+  resolve: (res: Record<string, unknown> | { ok: false; reason: FileFailReason }) => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
+  spawnGeneration: number;
+}
+
 interface PendingSynthesize {
   kind: 'synthesize';
   turnId: string;
@@ -147,6 +166,7 @@ type Pending =
   | PendingDetectIntent
   | PendingDetectConfirmation
   | PendingSynthesize
+  | PendingFile
   | PendingDescribeScreen;
 
 let reqCounter = 0;
@@ -245,11 +265,13 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.kind === 'detect_intent' ||
         pending.kind === 'detect_confirmation' ||
         pending.kind === 'synthesize' ||
-        pending.kind === 'describe_screen'
+        pending.kind === 'describe_screen' ||
+        pending.kind === 'file'
       ) {
         clearTimeout(pending.timeout);
       }
-      if (pending.kind === 'detect_intent') pending.resolve(null);
+      if (pending.kind === 'file') pending.resolve({ ok: false, reason: 'worker_unavailable' });
+      else if (pending.kind === 'detect_intent') pending.resolve(null);
       else if (pending.kind === 'synthesize') pending.resolve({ ok: false, kind: 'transport' });
       else pending.reject(err);
     }
@@ -374,6 +396,13 @@ export class MlxWorkerEngine implements VoiceEngine {
       return;
     }
 
+    if (event === 'file_result' && pending.kind === 'file') {
+      this.pending.delete(reqId);
+      clearTimeout(pending.timeout);
+      pending.resolve(msg);
+      return;
+    }
+
     if (event === 'synth_result' && pending.kind === 'synthesize') {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
@@ -383,6 +412,11 @@ export class MlxWorkerEngine implements VoiceEngine {
 
     if (event === 'error') {
       this.pending.delete(reqId);
+      if (pending.kind === 'file') {
+        clearTimeout(pending.timeout);
+        pending.resolve({ ok: false, reason: 'io_error' });
+        return;
+      }
       if (
         pending.kind === 'generate' ||
         pending.kind === 'classify' ||
@@ -535,6 +569,55 @@ export class MlxWorkerEngine implements VoiceEngine {
    * { ok: false, kind } para o provedor decidir o fallback. O Node ainda impõe um teto (prazo local + 3 s) caso o worker
    * não responda, sem matar o worker.
    */
+  /** T2: leitura pela política de arquivos do worker (pool próprio, fora da fila de geração). Falha FECHADA. */
+  private fileRequest(cmd: 'file_read' | 'file_write', body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const reqId = nextReqId();
+    const spawnGeneration = this.spawnGeneration;
+    return new Promise((resolve) => {
+      const fail = (reason: FileFailReason): void => {
+        clearTimeout(timeout);
+        this.pending.delete(reqId);
+        resolve({ ok: false, reason });
+      };
+      const timeout = setTimeout(() => fail('timeout'), FILE_IPC_TIMEOUT_MS);
+      this.pending.set(reqId, {
+        kind: 'file',
+        resolve: (r) => resolve(r as Record<string, unknown>),
+        reject: () => fail('io_error'),
+        timeout,
+        spawnGeneration
+      });
+      try {
+        this.writeCommand({ cmd, reqId, ...body });
+      } catch {
+        fail('worker_unavailable');
+      }
+    });
+  }
+
+  async fileRead(filePath: string, maxBytes = 1_048_576): Promise<FileReadResult> {
+    const r = await this.fileRequest('file_read', { path: filePath, maxBytes });
+    if (r.ok === true && typeof r.bytes_b64 === 'string' && typeof r.size === 'number') {
+      const data = Buffer.from(r.bytes_b64, 'base64');
+      if (data.length !== r.size || data.length > maxBytes) return { ok: false, reason: 'bad_response' };
+      return { ok: true, data, size: r.size, fileClass: typeof r.class === 'string' ? r.class : 'ordinary' };
+    }
+    const reason = typeof r.reason === 'string' && (FILE_FAIL_REASONS.has(r.reason) || r.reason === 'worker_unavailable') ? (r.reason as FileFailReason) : 'bad_response';
+    return { ok: false, reason: r.ok === true ? 'bad_response' : reason };
+  }
+
+  async fileWrite(filePath: string, data: Buffer): Promise<FileWriteResult> {
+    const expected = crypto.createHash('sha256').update(data).digest('hex');
+    const r = await this.fileRequest('file_write', { path: filePath, dataB64: data.toString('base64') });
+    if (r.ok === true && typeof r.sha256 === 'string' && typeof r.bytes_written === 'number') {
+      // Confirmação da escrita: o Node confere o sha256 devolvido contra o do que enviou.
+      if (r.sha256 !== expected || r.bytes_written !== data.length) return { ok: false, reason: 'bad_response' };
+      return { ok: true, bytesWritten: r.bytes_written, sha256: r.sha256 };
+    }
+    const reason = typeof r.reason === 'string' && (FILE_FAIL_REASONS.has(r.reason) || r.reason === 'worker_unavailable') ? (r.reason as FileFailReason) : 'bad_response';
+    return { ok: false, reason: r.ok === true ? 'bad_response' : reason };
+  }
+
   async synthesize(request: SynthesizeRequest, signal?: AbortSignal): Promise<SynthesizeResult> {
     const reqId = nextReqId();
     const spawnGeneration = this.spawnGeneration;
@@ -700,7 +783,7 @@ export class MlxWorkerEngine implements VoiceEngine {
     // worker abaixo é só uma otimização de CPU (parar de gastar ciclos com algo que
     // ninguém mais vai usar), nunca um requisito para o Node destravar.
     for (const [reqId, pending] of this.pending) {
-      if (pending.kind === 'transcribe') continue; // transcribe não carrega turnId
+      if (pending.kind === 'transcribe' || pending.kind === 'file') continue; // transcribe e file não carregam turnId
       if (pending.turnId !== turnId) continue;
 
       this.pending.delete(reqId);

@@ -20,6 +20,8 @@ import {
   type PrivacyConfig
 } from '../privacy.js';
 
+import type { Capability } from './capabilityPolicy.js';
+
 const DEFAULT_SHORT_TIMEOUT_MS = 15_000;
 
 export class OpenClawSubAgent implements ISubAgent {
@@ -28,6 +30,7 @@ export class OpenClawSubAgent implements ISubAgent {
   readonly capabilities: readonly string[];
   readonly shortTimeoutMs: number;
   readonly requiresConfirmation: boolean;
+  readonly grants: readonly Capability[];
 
   constructor(
     id: string,
@@ -37,6 +40,7 @@ export class OpenClawSubAgent implements ISubAgent {
     opts: {
       shortTimeoutMs?: number;
       requiresConfirmation?: boolean;
+      grants?: readonly Capability[];
       privacy?: PrivacyConfig;
       /** Fatia 4 (C2/B1): gatekeeper que confirma e consome o token emitido; sem ele, fail-closed. */
       verifyMutationToken?: (turnId: string, token: string) => boolean;
@@ -47,6 +51,7 @@ export class OpenClawSubAgent implements ISubAgent {
     this.capabilities = capabilities;
     this.shortTimeoutMs = opts.shortTimeoutMs ?? DEFAULT_SHORT_TIMEOUT_MS;
     this.requiresConfirmation = opts.requiresConfirmation ?? false;
+    this.grants = opts.grants ?? getOpenClawCapability(id)?.grants ?? [];
     this.privacy = opts.privacy ?? DEFAULT_PRIVACY;
     this.verifyMutationToken = opts.verifyMutationToken;
   }
