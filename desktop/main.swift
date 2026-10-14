@@ -16,7 +16,7 @@ func dlog(_ s: String) { if debugLog { FileHandle.standardError.write(Data(("[de
 
 final class Panel: NSPanel {
     override var canBecomeKey: Bool { true }
-    override func cancelOperation(_ sender: Any?) { orderOut(nil) } // Esc fecha
+    override func cancelOperation(_ sender: Any?) { (NSApp.delegate as? AppDelegate)?.hidePanel() } // Esc fecha e devolve o foco
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var web: WKWebView!
     var server: Process?
     var hotKeyRef: EventHotKeyRef?
+    var previousApp: NSRunningApplication?   // quem estava na frente antes de abrir o painel (o foco volta para ele)
+    var keyTime: Date?                        // carimbo da tecla/clique que pediu abrir
     let showOnStart = ProcessInfo.processInfo.environment["RODRIGO_DESKTOP_SHOW"] == "1"
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -123,17 +125,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         panel.contentView = web
+        // O WKWebView consome o Esc antes de ele chegar ao painel (cancelOperation não dispara): captura aqui.
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            if e.keyCode == 53, let self = self, self.panel.isKeyWindow { self.hidePanel(); return nil }
+            return e
+        }
     }
 
     func showPanel() {
+        let me = NSRunningApplication.current
+        if let front = NSWorkspace.shared.frontmostApplication, front != me { previousApp = front }
         if let screen = NSScreen.main {
             let f = screen.visibleFrame
             panel.setFrameOrigin(NSPoint(x: f.maxX - panel.frame.width - 16, y: f.maxY - panel.frame.height - 8))
         }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        recordUsage(visibleAt: Date())
+        if debugLog {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.web.evaluateJavaScript("document.hasFocus()") { r, _ in
+                    dlog("foco: appAtiva=\(NSApp.isActive) painelKey=\(self.panel.isKeyWindow) paginaFoco=\(String(describing: r)) frente=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
+                }
+            }
+        }
     }
-    @objc func togglePanel() { panel.isVisible ? panel.orderOut(nil) : showPanel() }
+    func hidePanel() {
+        panel.orderOut(nil)
+        if let p = previousApp, !p.isTerminated { p.activate(options: []) }   // devolve o foco ao app anterior
+        if debugLog {
+            let anterior = previousApp?.localizedName ?? "?"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                dlog("foco após fechar: frente=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?") (esperado: \(anterior))")
+            }
+        }
+        previousApp = nil
+    }
+    @objc func togglePanel() {
+        if panel.isVisible { hidePanel() } else { keyTime = Date(); showPanel() }
+    }
+
+    /// Contador local de uso (plano §3.6): só dois carimbos de tempo por abertura. NENHUM conteúdo, nenhum nome de app.
+    func recordUsage(visibleAt: Date) {
+        guard let k = keyTime else { return }
+        keyTime = nil
+        let line = "{\"ts\":\"\(ISO8601DateFormatter().string(from: k))\",\"keyToVisibleMs\":\(Int(visibleAt.timeIntervalSince(k) * 1000))}\n"
+        dlog("uso: \(line.trimmingCharacters(in: .whitespacesAndNewlines))")
+        let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(".runtime/desktop-usage.jsonl")
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? Data(line.utf8).write(to: url) }
+    }
 
     // --- ícone da barra de menus ---
     func buildStatusItem() {

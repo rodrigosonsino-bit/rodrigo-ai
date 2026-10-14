@@ -22,7 +22,8 @@ Sem área de transferência; inspetor desligado; armazenamento de dados **não p
 - Auditoria **não** feita por Codex/agy (a do MiMo é a única até aqui).
 
 ## Verificado (execução real, 2026-10-13 22:45 e 23:00)
-Binário em modo diagnóstico, porta 4601: servidor iniciado pelo app; `RegisterEventHotKey status=0`; página carregou no painel (`isSecureContext: true`, `navigator.mediaDevices: object`); captura de tela mostrou o painel no canto superior direito. **Não verificado (depende do Rodrigo):** o prompt de permissão do microfone na primeira vez, uma conversa por voz de ponta a ponta dentro do painel, e se ⌘⇧Espaço conflita com outro atalho seu (Spotlight/Alfred etc.).
+Binário em modo diagnóstico, porta 4601: servidor iniciado pelo app; `RegisterEventHotKey status=0`; página carregou no painel (`isSecureContext: true`, `navigator.mediaDevices: object`); captura de tela mostrou o painel no canto superior direito. **Medido depois (23:05, teclado injetado no nível HID, que é o caminho do teclado físico):** ⌘⇧Espaço abre o painel em **4–18 ms** (critério do plano: ≤ 300 ms); ao abrir, app ativo, painel é a janela de teclado e a página tem foco; **Esc fecha** (bug achado e corrigido: o WKWebView consome o Esc, então há um monitor local de teclado); ao fechar, o **foco volta ao app anterior** (medido: Claude → painel → Claude); o contador local grava só `{ts, keyToVisibleMs}` em `.runtime/desktop-usage.jsonl`. A tecla injetada pelo computer-use (nível de sessão) **não** aciona o atalho global; use o nível HID para testar.
+**Não verificado (depende do Rodrigo):** o prompt de permissão do microfone na primeira vez, uma conversa por voz de ponta a ponta dentro do painel, e se ⌘⇧Espaço conflita com outro atalho seu (Spotlight/Alfred etc.).
 
 ## Como usar
 ```bash

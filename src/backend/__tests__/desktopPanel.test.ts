@@ -42,6 +42,17 @@ describe('painel desktop (T6): fronteiras declaradas', () => {
   it('o servidor filho encerra sozinho se o app morrer (RODRIGO_PARENT_PID)', () => {
     assert.match(code, /RODRIGO_PARENT_PID/);
   });
+  it('o contador de uso grava só carimbos de tempo (sem conteúdo nem nome de app) e o foco volta ao app anterior', () => {
+    const rec = code.slice(code.indexOf('func recordUsage'), code.indexOf('func recordUsage') + 700);
+    assert.match(rec, /keyToVisibleMs/);
+    assert.doesNotMatch(rec, /localizedName|bundleIdentifier|evaluateJavaScript|innerText|transcript/);
+    assert.match(code, /previousApp/);
+    assert.match(code, /p\.activate\(options: \[\]\)/);
+  });
+  it('Esc é capturado por um monitor local (o WKWebView consome o Esc antes do painel)', () => {
+    assert.match(code, /addLocalMonitorForEvents\(matching: \.keyDown\)/);
+    assert.match(code, /e\.keyCode == 53/);
+  });
   it('não referencia nenhum host externo', () => {
     const noRules = code.replace(/"url-filter":"[^"]*"/g, ''); // as regras de bloqueio citam 127.0.0.1 como regex
     const hosts = [...noRules.matchAll(/https?:\/\/([^\s"/\\)]+)/g)].map((m) => m[1]);
