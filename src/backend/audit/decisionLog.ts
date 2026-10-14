@@ -13,6 +13,11 @@ import { guardText } from '../privacy/outboundGuard.js';
  * - Protocolo em duas fases (`withAudit`): a INTENÇÃO é gravada antes da mutação (se falhar, a mutação é recusada); a
  *   CONCLUSÃO depois (se falhar, a mutação já ocorreu e não é desfeita: devolve `conclusionLost`).
  *
+ * LIMITE DE PROJETO (achado da auditoria do Codex, aceito e declarado): a cadeia é EVIDÊNCIA de adulteração contra erro e
+ * edição ingênua, NÃO prova contra quem tem escrita na pasta de dados: essa pessoa pode recalcular todos os hashes ou cortar o
+ * fim do arquivo e `verify()` aceita. Fechar isso exige uma âncora externa (hash final e contagem em armazenamento
+ * independente) ou chave fora do arquivo; não há esse armazenamento neste app, então não é prometido.
+ *
  * Limites declarados (honestidade do plano): é um registro de auditoria com compensação tardia, NÃO uma transação atômica.
  * Não cobre queda do processo entre a gravação da intenção e a mutação. Sem o marcador `applied` nos stores (mudança de
  * esquema que aguarda a aprovação do Rodrigo), a recuperação NÃO distingue "mutação aplicada, conclusão perdida" de "não
@@ -112,9 +117,11 @@ export interface AuditFs {
   mkdir(dir: string): void;
   append(file: string, line: string): void;
   read(file: string): string | null;
+  rename(from: string, to: string): void;
 }
 export const realAuditFs: AuditFs = {
   mkdir: (dir) => fs.mkdirSync(dir, { recursive: true, mode: 0o700 }),
+  rename: (from, to) => fs.renameSync(from, to),
   append: (file, line) => fs.appendFileSync(file, line, { mode: 0o600 }),
   read: (file) => {
     try { return fs.readFileSync(file, 'utf-8'); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
@@ -123,7 +130,18 @@ export const realAuditFs: AuditFs = {
 
 /** Registro INDISPONÍVEL (disco/permissão): toda gravação lança, então as mutações são recusadas — falha fechada. */
 export function unavailableAuditFs(): AuditFs {
-  return { mkdir: () => undefined, read: () => null, append: () => { throw new Error('registro de auditoria indisponível'); } };
+  return { mkdir: () => undefined, read: () => null, rename: () => undefined, append: () => { throw new Error('registro de auditoria indisponível'); } };
+}
+
+/** Registro em MEMÓRIA (padrão dos testes e de qualquer SessionManager sem arquivo): toda mutação continua auditada. */
+export function memoryAuditFs(): AuditFs {
+  let text = '';
+  return {
+    mkdir: () => undefined,
+    read: () => (text === '' ? null : text),
+    rename: () => { text = ''; },
+    append: (_f, line) => { text += line; }
+  };
 }
 
 export type VerifyResult = { ok: true; count: number } | { ok: false; line: number; reason: string };
@@ -149,6 +167,24 @@ export class DecisionLog {
         } catch { /* linha corrompida: continua a partir da última válida; verify() acusa */ }
       }
     }
+  }
+
+  static inMemory(): DecisionLog {
+    return new DecisionLog('memoria://decisions.jsonl', memoryAuditFs());
+  }
+
+  /**
+   * Se a cadeia NÃO verifica (adulteração, ou linha cortada por uma queda no meio da gravação), move o arquivo para
+   * `<arquivo>.quarentena-<ms>` (a evidência fica) e começa uma cadeia NOVA: nada novo é anexado a uma cadeia inválida e o
+   * app não fica sem poder mutar por causa de uma linha cortada. Devolve o novo nome do arquivo, ou null se estava íntegro.
+   */
+  quarantineIfBroken(): string | null {
+    if (this.verify().ok) return null;
+    const dest = `${this.filePath}.quarentena-${this.now().getTime()}`;
+    this.io.rename(this.filePath, dest);
+    this.seq = 0;
+    this.prev = GENESIS;
+    return dest;
   }
 
   /** Grava um registro. LANÇA se a validação ou a escrita falhar (quem chama decide: na fase 1 a mutação é recusada). */

@@ -86,9 +86,43 @@ describe('T4: registro de decisões sem conteúdo', () => {
     });
   });
 
+  describe('(4b) quarentena e registro em memória (auditoria do Codex)', () => {
+    it('cadeia íntegra: nada é movido', () => {
+      const log = new DecisionLog(file); log.append(intent());
+      assert.equal(log.quarantineIfBroken(), null);
+      assert.deepEqual(log.verify(), { ok: true, count: 1 });
+    });
+    it('cadeia ADULTERADA: o arquivo vai para quarentena (a evidência fica) e uma cadeia nova começa, que verifica', () => {
+      const a = new DecisionLog(file); a.append(intent({ mid: 'a' })); a.append(intent({ mid: 'b' }));
+      const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+      fs.writeFileSync(file, [lines[0].replace('LembreteTool', 'Outra'), lines[1]].join('\n') + '\n');
+      const b = new DecisionLog(file);
+      const dest = b.quarantineIfBroken();
+      assert.ok(dest && fs.existsSync(dest), 'a evidência foi guardada');
+      assert.equal(fs.existsSync(file), false, 'nada novo é anexado à cadeia inválida');
+      const rec = b.append(intent({ mid: 'c' }));
+      assert.equal(rec.seq, 1);
+      assert.deepEqual(b.verify(), { ok: true, count: 1 });
+    });
+    it('linha CORTADA por uma queda no meio da gravação também vai para quarentena (o app não fica sem poder mutar)', () => {
+      const a = new DecisionLog(file); a.append(intent({ mid: 'a' }));
+      fs.appendFileSync(file, '{"seq":2,"ts":"2026-');
+      const b = new DecisionLog(file);
+      assert.ok(b.quarantineIfBroken());
+      assert.equal(b.append(intent({ mid: 'd' })).seq, 1);
+    });
+    it('registro em memória audita igual (nenhuma mutação roda sem registro)', async () => {
+      const log = DecisionLog.inMemory();
+      const { kind: _k, ...base } = intent();
+      const r = await withAudit(log, base, async () => 'ok', () => 'ok');
+      assert.equal(r.refused, false);
+      assert.deepEqual(log.verify(), { ok: true, count: 2 });
+    });
+  });
+
   describe('(5) protocolo em duas fases (falha de escrita injetada por um invólucro do sistema de arquivos)', () => {
     function flaky(failOn: number): AuditFs & { writes: number } {
-      const f = { writes: 0, mkdir: realAuditFs.mkdir, read: realAuditFs.read, append(file: string, line: string): void {
+      const f = { writes: 0, mkdir: realAuditFs.mkdir, read: realAuditFs.read, rename: realAuditFs.rename, append(file: string, line: string): void {
         f.writes += 1;
         if (f.writes === failOn) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
         realAuditFs.append(file, line);

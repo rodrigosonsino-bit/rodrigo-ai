@@ -1527,6 +1527,7 @@ describe('Ferramentas do Sistema (Fase 5b) — integração com o turno de voz (
         id: 'tool_lembrete',
         name: 'LEMBRETE',
         capabilities: ['test'],
+        grants: ['write_file'], // T3: o tool_lembrete real declara write_file (toda mutação a exige)
         async runTask() {
           return { success: true, output: '', kind: 'async_deferred', asyncTaskId: 'async-a3' };
         }

@@ -18,11 +18,12 @@ import json
 import os
 import secrets
 import stat
+import unicodedata
 from typing import Any, Callable, Optional
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
-_MAX_INODE_WALK = 5000
+_MAX_INODE_WALK = 20000
 
 # Ganchos SÓ de teste (ver docstring).
 TEST_HOOKS: dict[str, Any] = {"between_components": None, "disable_nofollow": False, "disable_classify": False}
@@ -71,6 +72,7 @@ class FilePolicy:
         # resolvida UMA vez aqui (código confiável) e o resto é percorrido sem seguir symlink.
         self.roots = [(os.path.abspath(r), os.path.realpath(r)) for r in roots]
         self.sensitive_inodes: set[tuple[int, int]] = set()
+        self.inode_scan_truncated = False  # a varredura estourou o limite: hard link não comprovável => recusa (falha fechada)
         self.reload_inodes()
 
     @classmethod
@@ -81,19 +83,24 @@ class FilePolicy:
     # --- classificação por nome/caminho resolvido ---
     def classify_path(self, real_path: str) -> str:
         p = os.path.realpath(real_path) if not os.path.islink(real_path) else real_path
+        # O macOS é case-insensitive por padrão: `.ENV` e `Credentials.JSON` são o MESMO arquivo que `.env`/`credentials.json`.
+        # Toda comparação de nome e de caminho é feita normalizada (NFC) e sem distinção de maiúsculas.
+        fold = lambda s: unicodedata.normalize("NFC", s).casefold()  # noqa: E731
+        pl = fold(p)
         for d in self.deny_paths:
-            if p == d or p.startswith(d.rstrip(os.sep) + os.sep):
+            dl = fold(d).rstrip(os.sep)
+            if pl == dl or pl.startswith(dl + os.sep):
                 return "sensitive"
-        base = os.path.basename(p)
-        if base in self.allow_names:
+        base = fold(os.path.basename(p))
+        if base in [fold(a) for a in self.allow_names]:
             return "ordinary"
-        rel = p
-        if p.startswith(self.repo_root + os.sep):
-            rel = p[len(self.repo_root) + 1:]
-            if any(part in self.exclude_dirs for part in rel.split(os.sep)[:-1]):
+        rl = fold(self.repo_root)
+        if pl.startswith(rl + os.sep):
+            rel = pl[len(rl) + 1:]
+            if any(part in [fold(e) for e in self.exclude_dirs] for part in rel.split(os.sep)[:-1]):
                 return "ordinary"
         for g in self.deny_globs:
-            if fnmatch.fnmatch(base, g):
+            if fnmatch.fnmatchcase(base, fold(g)):
                 return "sensitive"
         return "ordinary"
 
@@ -101,6 +108,7 @@ class FilePolicy:
     def reload_inodes(self) -> None:
         found: set[tuple[int, int]] = set()
         budget = [_MAX_INODE_WALK]
+        truncated = [False]
 
         def add(path: str) -> None:
             try:
@@ -121,6 +129,7 @@ class FilePolicy:
                 for e in it:
                     budget[0] -= 1
                     if budget[0] <= 0:
+                        truncated[0] = True
                         return
                     try:
                         if e.is_dir(follow_symlinks=False):
@@ -146,6 +155,22 @@ class FilePolicy:
             elif os.path.exists(d):
                 add(d)
         self.sensitive_inodes = found
+        self.inode_scan_truncated = truncated[0]
+
+    def _inode_sensitive(self, st: os.stat_result) -> bool:
+        """Hard link: o mesmo inode de um sensível com nome inofensivo. Um arquivo com mais de um nome (st_nlink > 1) dispara uma
+        RE-varredura sob demanda (pega o sensível criado depois da carga); se a varredura estourou o limite, a recusa é a
+        resposta (falha fechada), porque o inode não pode ser comprovadamente excluído."""
+        key = (st.st_dev, st.st_ino)
+        if key in self.sensitive_inodes:
+            return True
+        if st.st_nlink > 1:
+            self.reload_inodes()
+            if key in self.sensitive_inodes:
+                return True
+            if self.inode_scan_truncated:
+                return True
+        return False
 
     # --- abertura componente a componente ---
     def _resolve_root(self, path: str) -> tuple[str, list[str]]:
@@ -200,7 +225,7 @@ class FilePolicy:
     def _classify_fd(self, fd: int, st: os.stat_result, fallback_path: str) -> str:
         if _test_on() and TEST_HOOKS.get("disable_classify"):
             return "ordinary"
-        if (st.st_dev, st.st_ino) in self.sensitive_inodes:
+        if self._inode_sensitive(st):
             return "sensitive"
         p = _fd_path(fd) or fallback_path
         return self.classify_path(p)
@@ -300,7 +325,7 @@ class FilePolicy:
             return {"ok": False, "reason": "io_error"}
         if stat.S_ISLNK(st.st_mode):
             return {"ok": False, "reason": "symlink"}
-        if (st.st_dev, st.st_ino) in self.sensitive_inodes:
+        if self._inode_sensitive(st):
             return {"ok": False, "reason": "sensitive"}
         return {"ok": True, "reason": None}
 

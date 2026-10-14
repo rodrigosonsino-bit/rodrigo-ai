@@ -26,6 +26,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import sys
 import threading
 import time
@@ -655,9 +656,11 @@ def write_wav_atomic(path: str, pcm: bytes, sample_rate: int) -> None:
     verdict = policy_check_writable(path)  # T2 (inventário item 15): o destino vem do Node; classifica antes de gravar
     if not verdict.get("ok"):
         raise PermissionError(f"escrita recusada pela política de arquivos ({verdict.get('reason')})")
-    part = path + ".part"
+    # Temporário de nome imprevisível, criado com O_EXCL|O_NOFOLLOW: nem um symlink nem um hard link plantado em `<path>.part`
+    # consegue fazer esta gravação truncar um arquivo alheio (achado da auditoria do Codex).
+    part = f"{path}.{secrets.token_hex(4)}.part"
     try:
-        with open(part, "wb") as f:  # open() primeiro: falha limpa (OSError) em vez de um Wave_write meio construído
+        with os.fdopen(os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600), "wb") as f:
             with wave.open(f, "wb") as w:
                 w.setnchannels(1)
                 w.setsampwidth(2)

@@ -24,7 +24,7 @@ w(os.path.join(repo, "data", "notas.json"), b"{}")
 w(os.path.join(repo, ".runtime", "cacert.pem"), b"publico")
 w(os.path.join(repo, "sub", "chave.pem"), SECRET)
 
-policy = {"name_deny_globs": [".env", ".env.*", "*.pem"], "name_allow": [".env.example"],
+policy = {"name_deny_globs": [".env", ".env.*", "*.pem", "credentials.json"], "name_allow": [".env.example"],
           "exclude_dirs_for_name_rules": [".runtime"], "deny_paths_in_repo": ["data"], "deny_paths_outside_repo": []}
 P = fp.FilePolicy(policy, repo, [repo])
 def reset_hooks():
@@ -121,5 +121,32 @@ P2 = fp.FilePolicy(policy, repo, [repo, extra])
 assert P2.read(os.path.join(extra, "inofensivo.txt"))["reason"] == "sensitive"
 assert P2.write(os.path.join(extra, "inofensivo.txt"), b"X")["reason"] == "sensitive"
 assert open(os.path.join(extra, ".env"), "rb").read() == SECRET
+
+# 10) auditoria do Codex, achado 3: o macOS é case-insensitive; variantes de caixa/Unicode dos nomes sensíveis são sensíveis
+for nome in [".ENV", ".Env", "CREDENTIALS.JSON", "Chave.PEM"]:
+    pth = os.path.join(repo, "sub", nome)
+    w(pth, SECRET)
+    assert P.read(pth)["reason"] == "sensitive", nome
+    os.makedirs(os.path.join(repo, "sub", "n"), exist_ok=True)
+    assert P.write(os.path.join(repo, "sub", "n", nome), b"X")["reason"] == "sensitive", "escrita " + nome
+    assert not os.path.exists(os.path.join(repo, "sub", "n", nome)), "destino sensível inexistente não é criado"
+w(os.path.join(repo, ".ENV.EXAMPLE"), b"ok"); assert P.read(os.path.join(repo, ".ENV.EXAMPLE"))["ok"], "a exceção .env.example também vale em outra caixa"
+w(os.path.join(repo, "DATA", "x.json") if os.makedirs(os.path.join(repo, "DATA"), exist_ok=True) is None else "", b"{}")
+assert P.read(os.path.join(repo, "DATA", "x.json"))["reason"] == "sensitive", "pasta de dados em outra caixa"
+
+# 11) achado 1: hard link criado DEPOIS da carga (o inventário de inodes ficou velho) é pego pela re-varredura sob demanda
+novo = os.path.join(repo, "sub", ".env.tarde"); w(novo, SECRET)   # sensível criado depois da carga
+os.link(novo, os.path.join(repo, "sub", "tardio.txt"))
+r = P.read(os.path.join(repo, "sub", "tardio.txt")); assert r["reason"] == "sensitive", r
+# ... e se a varredura estourou o limite, a recusa é a resposta (falha fechada): nlink>1 não comprovável => sensível
+old = fp._MAX_INODE_WALK; fp._MAX_INODE_WALK = 1
+try:
+    P3 = fp.FilePolicy(policy, repo, [repo])
+    assert P3.inode_scan_truncated
+    outro = os.path.join(repo, "sub", "comum.txt"); w(outro, b"x"); os.link(outro, os.path.join(repo, "sub", "comum-link.txt"))
+    assert P3.read(os.path.join(repo, "sub", "comum-link.txt"))["reason"] == "sensitive", "varredura truncada + hard link => recusa"
+    assert P3.read(os.path.join(repo, "sub", "ok.txt"))["ok"], "arquivo com um nome só segue lido normalmente"
+finally:
+    fp._MAX_INODE_WALK = old
 
 print("ok: test_file_policy")

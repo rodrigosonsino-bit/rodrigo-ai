@@ -34,7 +34,7 @@ class FlakyCloudVoice implements IVoiceProvider {
 }
 
 describe('T9-política (a): aviso de troca de voz', () => {
-  let server: http.Server; let sm: SessionManager; let tmp: string; let base: string;
+  let server: http.Server; let sm: SessionManager; let tmp: string; let base: string; let voice: FlakyCloudVoice;
   afterEach(async () => {
     await sm.shutdownAll();
     const closed = new Promise<void>((r) => server.close(() => r()));
@@ -48,7 +48,8 @@ describe('T9-política (a): aviso de troca de voz', () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't9-notice-'));
     const engine = new FakeVoiceEngine();
     const audioStore = new AudioStore(tmp);
-    sm = new SessionManager(engine, new FlakyCloudVoice(), audioStore, createSpecialistAgents(), null, [], [], null);
+    voice = new FlakyCloudVoice();
+    sm = new SessionManager(engine, voice, audioStore, createSpecialistAgents(), null, [], [], null);
     server = await startServer(config, undefined, { config, sessionManager: sm, audioStore });
     base = `http://127.0.0.1:${port}`;
     return { engine };
@@ -84,6 +85,14 @@ describe('T9-política (a): aviso de troca de voz', () => {
     assert.equal(notices(s).length, 1);
     assert.deepEqual(notices(s)[0], { type: 'voice_notice', code: 'tts_fallback', message: VOICE_FALLBACK_NOTICE });
     assert.equal(s.events.some((e) => e.type === 'error'), false, 'o aviso não é erro');
+  });
+
+  it('callback TARDIO de um turno que não é desta sessão NÃO avisa (achado do Codex)', async () => {
+    await boot();
+    const s = await session();
+    voice.onFallback?.({ turnId: 'turno-de-outra-sessao', reason: 'server' });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(notices(s).length, 0);
   });
 
   it('uma sessão NOVA recebe o seu próprio aviso (é por sessão, não global)', async () => {

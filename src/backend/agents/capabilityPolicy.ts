@@ -23,7 +23,11 @@ export type GrantTable = Readonly<Record<string, readonly Capability[]>>;
 export const EFFECTIVE_GRANTS: GrantTable = {
   openclaw_web: ['network'],
   openclaw_drive: ['network', 'read_file'],
-  openclaw_social: ['network']
+  openclaw_social: ['network'],
+  // Ferramentas locais que MUTAM (gravam nos stores de dados do app): exigem e recebem `write_file`.
+  tool_lembrete: ['write_file'],
+  tool_nota: ['write_file'],
+  tool_memoria: ['write_file']
 };
 
 /** Capacidades que a simples existência da operação já exige (ex.: o agente web sempre usa a rede). */
@@ -53,8 +57,10 @@ export class CapabilityPolicy {
   }
 
   /** O que a operação exige: o pedido explícito + o implícito do agente + dado sensível declarado no contexto. */
-  needsFor(agent: PolicySubject, req: { needs?: readonly Capability[]; context?: Record<string, unknown> }): Capability[] {
+  needsFor(agent: PolicySubject, req: { needs?: readonly Capability[]; context?: Record<string, unknown>; isMutation?: boolean }): Capability[] {
     const out = new Set<Capability>(req.needs ?? []);
+    // Achado da auditoria do Codex: TODA mutação grava dados, então exige `write_file` mesmo que o chamador esqueça de declarar.
+    if (req.isMutation) out.add('write_file');
     for (const c of this.implied[agent.id] ?? []) out.add(c);
     if (req.context && req.context.dataClass === 'sensitive') out.add('sensitive_data');
     return [...out];

@@ -42,7 +42,7 @@ Escrito para ser lido por inteiro. Três classes, sempre marcadas: **[verificado
 1. **Decisão 7:** aprovar (ou editar) a lista de sensíveis. [sua]
 2. **T4, marcador `applied`:** aprovar a mudança de esquema dos stores para a recuperação distinguir "aplicada, conclusão perdida" de "não aplicada". [sua]
 3. **PR #10, D1–D6** e a configuração do OpenClaw no Mac. [sua + Grok]
-4. **Auditoria de código por outro modelo** de T1 e T5a: o agy estava rodando na outra sessão (há uma branch local `fix-outbound-guard-agy` no worktree dela). T2, T3, T4, T9a **não foram auditadas por outro modelo**. [pendente]
+4. **Auditoria de código por outro modelo:** T2, T3, T4 e T9a foram auditadas pelo **Codex** (ver §7); T1 e T5a pelo agy, na outra sessão (PR #26 aberto com as correções dele). T6 foi auditada pelo MiMo (`docs/implementation-t6.md`). Nenhuma foi auditada por um segundo modelo além desse. [feito em parte]
 5. **T1, o que falta:** o inventário de canais em documento e o egress em rede real (captura de pacotes; exige o Mac e privilégio).
 6. **T6/T8 com você:** conversa por voz de ponta a ponta no painel, prompt do microfone, conflito do atalho; a baseline de voz real da T8 (roteiro em `docs/t8-roteiro-baseline-voz.md`). T7 é só monitoramento (`docs/t7-monitoramento-personaplex.md`).
 7. **Abertos de outras sessões, não tocados:** PRs #6, #7, #8 (correção do `fvScreen` intermitente), #10 a #15.
@@ -59,3 +59,21 @@ Escrito para ser lido por inteiro. Três classes, sempre marcadas: **[verificado
 ## 6. O que não foi enviado a ninguém
 
 `docs/research/`, `.env`, chaves, `memory/` e o material pessoal listado no handoff anterior. Nenhum áudio saiu da máquina; o texto das frases e o histórico seguem as regras de privacidade já documentadas (`GET /api/privacy`).
+
+## 7. Auditoria do Codex sobre T2, T3, T4 e T9a (2026-10-14, código exportado sem `.env` nem `docs/research`)
+
+9 achados; cada um foi conferido contra o código antes de aceitar. **8 corrigidos com teste e prova de mutação; 1 é limite de projeto, declarado.**
+
+| Achado (severidade do Codex) | Destino |
+|---|---|
+| T2: hard link com nome comum para um sensível criado **depois** da carga, ou fora do limite de 5.000 entradas (alta) | **Corrigido:** arquivo com mais de um nome dispara re-varredura sob demanda; se a varredura estourou o limite, a recusa é a resposta (falha fechada); limite subiu para 20.000 |
+| T2: `<path>.part` seguia symlink e truncava o alvo (alta) | **Corrigido:** temporário de nome imprevisível criado com `O_EXCL` e `O_NOFOLLOW` |
+| T2: `.ENV`, `Credentials.JSON` (o macOS é case-insensitive) (média) | **Corrigido:** nomes e caminhos comparados normalizados (NFC) e sem distinção de caixa |
+| T3: mutação não exigia `write_file`; as ferramentas não declaravam nada (alta) | **Corrigido:** toda mutação exige `write_file`; as 3 ferramentas que mutam declaram e recebem; o teste de coerência passou a cobrir as ferramentas reais |
+| T4: cadeia sem âncora externa; quem escreve no arquivo recalcula tudo (alta) | **Limite de projeto, não corrigido:** é evidência de adulteração, não prova contra quem tem escrita na pasta de dados. Declarado no código e aqui. Fechar exige armazenamento independente ou chave fora do arquivo |
+| T4: log adulterado no boot só avisava e seguia aceitando mutações (alta) | **Corrigido:** o arquivo vai para quarentena (a evidência fica) e uma cadeia nova começa; vale também para linha cortada por queda |
+| T4: `decisionLog` nulo deixava a mutação rodar sem registro (média) | **Corrigido:** nunca é nulo; o padrão é um registro em memória, e a produção injeta o arquivo |
+| T9: callback tardio avisava a sessão errada (média) | **Corrigido:** só avisa se o turno é o da sessão corrente |
+| Teste vácuo: o scanner do worker não via `os.open` (média) | **Corrigido:** o scanner pega `os.open`, `os.fdopen`, `io.open`, `wave.open`; mutação acrescentada |
+
+Testes depois das correções: 865 de 865; todos os testes Python do worker passam; 7 mutações novas, todas mortas.
