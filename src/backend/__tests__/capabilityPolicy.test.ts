@@ -8,6 +8,7 @@ import { CAPABILITIES, CapabilityPolicy, DEFAULT_CAPABILITY_POLICY, EFFECTIVE_GR
 import { ToolSubAgent, SpecialistSubAgent } from '../agents/adapters.js';
 import { OPENCLAW_CAPABILITIES } from '../agents/openClawCapabilities.js';
 import { OpenClawSubAgent } from '../agents/openClawSubAgent.js';
+import { createMutatingTools } from '../tools/index.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { SubAgentCoordinator, type ISubAgent, type SubAgentTaskRequest } from '../agents/subAgent.js';
 import { AudioStore } from '../voice/audioStore.js';
@@ -92,17 +93,34 @@ describe('T3: capacidades tipadas, negar por padrão', () => {
     assert.equal((await delegate(sm, 'tool_hora')).ok, true); assert.equal(runs.length, 1);
   });
 
+  it('MUTAÇÃO exige write_file sem o chamador declarar: agente sem a concessão não é invocado (achado do Codex)', async () => {
+    const agent: ISubAgent = { id: 'qualquer_mutador', name: 'm', capabilities: ['x'], runTask: ok };
+    const { sm, runs } = setup(agent);
+    const r = await sm.runSubAgentDelegation({ turnId: 'tm', query: 'q', subAgentId: 'qualquer_mutador', prompt: 'x', isMutation: true, signal: new AbortController().signal });
+    assert.equal(r.ok, false); assert.equal(runs.length, 0);
+    assert.match(r.result?.error ?? '', /write_file/);
+  });
+
+  it('a mesma ferramenta de LEITURA (isMutation=false) segue funcionando sem concessão', async () => {
+    const agent: ISubAgent = { id: 'leitor', name: 'l', capabilities: ['x'], runTask: ok };
+    const { sm, runs } = setup(agent);
+    const r = await delegate(sm, 'leitor');
+    assert.equal(r.ok, true); assert.equal(runs.length, 1);
+  });
+
   describe('coerência entre a declaração no registro e a política efetiva', () => {
     const registered = (): ISubAgent[] => {
       const out: ISubAgent[] = OPENCLAW_CAPABILITIES.map((c) => new OpenClawSubAgent(c.id, c.name, [c.id]));
       for (const a of createSpecialistAgents()) out.push(new SpecialistSubAgent(a));
       out.push(new ToolSubAgent({ name: 'HoraAtualTool' } as never));
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 't3-tools-')); dirs.push(dataDir);
+      for (const t of createMutatingTools(dataDir).tools) out.push(new ToolSubAgent(t)); // LEMBRETE, NOTA, MEMORIA
       return out;
     };
 
     it('os agentes reais declaram exatamente o que a política efetiva concede', () => {
       assert.deepEqual(DEFAULT_CAPABILITY_POLICY.coherenceErrors(registered()), []);
-      assert.ok(registered().length >= 5);
+      assert.ok(registered().length >= 8);
     });
 
     it('mutação 1: declarar uma capacidade a mais sem política efetiva reprova', () => {
@@ -117,10 +135,11 @@ describe('T3: capacidades tipadas, negar por padrão', () => {
       assert.ok(errs.some((e) => /openclaw_web declara 'network' sem política efetiva/.test(e)));
     });
 
-    it('nenhum agente real recebe sensitive_data, shell, browser ou write_file por padrão', () => {
+    it('nenhum agente real recebe sensitive_data, shell ou browser; write_file só as 3 ferramentas que mutam', () => {
       for (const a of registered()) {
         const have = DEFAULT_CAPABILITY_POLICY.granted(a);
-        for (const c of ['sensitive_data', 'shell', 'browser', 'write_file'] as const) assert.equal(have.has(c), false, `${a.id} não deveria ter ${c}`);
+        for (const c of ['sensitive_data', 'shell', 'browser'] as const) assert.equal(have.has(c), false, `${a.id} não deveria ter ${c}`);
+        assert.equal(have.has('write_file'), ['tool_lembrete', 'tool_nota', 'tool_memoria'].includes(a.id), `${a.id}: write_file`);
       }
     });
   });

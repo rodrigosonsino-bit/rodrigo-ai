@@ -29,7 +29,7 @@ export function filesImportingFs(files: Record<string, string>): string[] {
   return Object.entries(files).filter(([, src]) => FS_IMPORT.test(src)).map(([f]) => f).sort();
 }
 export function pythonOpenViolations(src: string, allowed: readonly string[]): string[] {
-  return src.split('\n').map((l) => l.split(/\s#\s/)[0].trim()).filter((l) => /(^|[^\w.])open\(|\bwave\.open\(/.test(l) && !l.startsWith('#') && !allowed.some((a) => l.startsWith(a)));
+  return src.split('\n').map((l) => l.split(/\s#\s/)[0].trim()).filter((l) => /(^|[^\w.])open\(|\b(?:wave|os|io|codecs)\.open\(|\bos\.fdopen\(/.test(l) && !l.startsWith('#') && !allowed.some((a) => l.startsWith(a)));
 }
 
 describe('T2: inventário de acessos a arquivo (registro de exceções)', () => {
@@ -70,11 +70,14 @@ describe('T2: inventário de acessos a arquivo (registro de exceções)', () => 
   it('(e) worker.py: a única abertura direta de arquivo é a gravação atômica do WAV (destino validado antes)', () => {
     const w = fs.readFileSync(path.join(ROOT, 'scripts', 'worker', 'worker.py'), 'utf-8');
     assert.deepEqual(pythonOpenViolations(w, WORKER_ALLOWED_OPENS), []);
-    assert.match(w, /policy_check_writable\(path\)[\s\S]{0,400}?part = path \+ "\.part"/, 'o WAV só é gravado depois de validar o destino');
+    assert.match(w, /policy_check_writable\(path\)[\s\S]{0,700}?part = f"\{path\}\.\{secrets\.token_hex\(4\)\}\.part"/, 'o WAV só é gravado depois de validar o destino, em temporário de nome imprevisível');
+    assert.match(w, /os\.O_EXCL \| getattr\(os, "O_NOFOLLOW", 0\)/, 'o temporário é criado com O_EXCL e O_NOFOLLOW');
     assert.match(w, /policy_check_readable\(audio_path\)/, 'transcribe valida o caminho recebido');
     assert.match(w, /policy_read\(image_path, SCREEN_READ_MAX\)/, 'describe_screen lê pela política');
     // prova de mutação do scanner: um open() novo seria pego
     assert.equal(pythonOpenViolations(w + '\nwith open(image_path, "rb") as f:\n', WORKER_ALLOWED_OPENS).length, 1);
+    assert.equal(pythonOpenViolations(w + '\nfd = os.open(image_path, os.O_RDONLY)\n', WORKER_ALLOWED_OPENS).length, 1, 'os.open direto também é pego');
+    assert.equal(pythonOpenViolations(w + '\nf = os.fdopen(3)\n', WORKER_ALLOWED_OPENS).length, 1);
   });
 
   it('o registro declara a lista de sensíveis como rascunho (decisão 7 pendente)', () => {

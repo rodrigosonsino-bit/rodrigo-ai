@@ -244,8 +244,8 @@ export class SessionManager {
   private readonly ttsProvider: IVoiceProvider;
   /** T3: política de capacidades (negar por padrão). Pública só para os testes injetarem uma tabela própria. */
   capabilityPolicy: CapabilityPolicy = DEFAULT_CAPABILITY_POLICY;
-  /** T4: registro de decisões (duas fases) das MUTAÇÕES. null = sem registro (testes); em produção o voiceRuntime sempre define. */
-  decisionLog: DecisionLog | null = null;
+  /** T4: registro de decisões (duas fases) das MUTAÇÕES. NUNCA nulo: por padrão é em memória (testes); em produção o voiceRuntime injeta o arquivo. */
+  decisionLog: DecisionLog = DecisionLog.inMemory();
   private readonly audioStore: AudioStore;
   private readonly agents: readonly IAgent[];
   /** Fase 5a: null quando o corpus não carregou — comportamento idêntico ao da Fase 4. */
@@ -297,9 +297,11 @@ export class SessionManager {
     this.engine = engine;
     this.ttsProvider = ttsProvider;
     // T9-política (a): no máximo UM aviso por sessão quando a voz em nuvem cai para a do sistema por indisponibilidade.
-    ttsProvider.onFallback = (): void => {
+    ttsProvider.onFallback = (info): void => {
       const s = this.current;
       if (!s || s.voiceFallbackNotified) return;
+      // Achado da auditoria do Codex: um callback tardio de um turno de OUTRA sessão não pode avisar a sessão corrente.
+      if (info.turnId !== undefined && s.lastTurnId !== info.turnId && s.activeTurn?.turnId !== info.turnId) return;
       s.voiceFallbackNotified = true;
       this.emit(s, { type: 'voice_notice', code: 'tts_fallback', message: VOICE_FALLBACK_NOTICE });
     };
@@ -401,7 +403,7 @@ export class SessionManager {
 
     // T3: PONTO ÚNICO de aplicação das capacidades (negar por padrão), imediatamente antes de `runTask`.
     // Se faltar qualquer capacidade exigida, o agente NEM É INVOCADO.
-    const needs = this.capabilityPolicy.needsFor(agent, { needs: opts.needs, context: opts.context });
+    const needs = this.capabilityPolicy.needsFor(agent, { needs: opts.needs, context: opts.context, isMutation: opts.isMutation });
     const verdict = this.capabilityPolicy.check(agent, needs);
     if (!verdict.allowed) {
       const error = `Capacidade negada para ${agent.id}: ${verdict.missing.join(', ')}.`;
@@ -497,7 +499,7 @@ export class SessionManager {
       return r.result?.success ? { text: r.result.output } : { text: null, error: r.result?.error ?? r.speech };
     };
     // T4: SÓ mutações passam pelo protocolo de duas fases (consultas e leituras não alteram nada).
-    if (!isMutation || !this.decisionLog) return run();
+    if (!isMutation) return run();
     const audited = await withAudit(
       this.decisionLog,
       { mid: crypto.randomUUID(), turnId: turn.turnId, action, tool: normalizeName(tool.name), executor: 'tool', dataClass: 'unknown' },

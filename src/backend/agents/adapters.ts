@@ -1,6 +1,7 @@
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IntentName } from '../../shared/voiceProtocol.js';
+import type { Capability } from './capabilityPolicy.js';
 import type {
   ISubAgent,
   SubAgentTaskRequest,
@@ -44,6 +45,8 @@ export class ToolSubAgent implements ISubAgent {
   readonly id: string;
   readonly name: string;
   readonly capabilities: readonly string[];
+  /** T3: ferramenta que MUTA declara `write_file`; a de leitura não declara nada (negar por padrão). */
+  readonly grants: readonly Capability[];
 
   /**
    * `verifyMutationToken` (Fatia 4, C2/B1): o gatekeeper confirma que o token foi EMITIDO por ele
@@ -56,6 +59,7 @@ export class ToolSubAgent implements ISubAgent {
     this.id = `tool_${tool.name.toLowerCase()}`;
     this.name = tool.name;
     this.capabilities = ['ferramenta', tool.name.toLowerCase()];
+    this.grants = 'preview' in tool && 'execute' in tool ? ['write_file'] : [];
   }
 
   async runTask(

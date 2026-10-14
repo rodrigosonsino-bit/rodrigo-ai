@@ -156,8 +156,8 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   let decisionLog: DecisionLog;
   try {
     decisionLog = new DecisionLog(path.join(dataDir, 'audit', 'decisions.jsonl'));
-    const check = decisionLog.verify();
-    if (!check.ok) console.warn(`[Rodrigo AI] AUDITORIA: o registro de decisões não confere (linha ${check.line}: ${check.reason}).`);
+    const quarantined = decisionLog.quarantineIfBroken();
+    if (quarantined) console.warn(`[Rodrigo AI] AUDITORIA: o registro de decisões NÃO conferia (adulterado ou linha cortada); foi guardado em ${path.basename(quarantined)} e uma cadeia nova começou.`);
     const open = decisionLog.pending();
     if (open.length > 0) console.warn(`[Rodrigo AI] AUDITORIA: ${open.length} intenção(ões) sem conclusão (indeterminadas: a ação pode ou não ter sido aplicada).`);
   } catch (err) {

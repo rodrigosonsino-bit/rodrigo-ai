@@ -43,6 +43,6 @@ export const SENSITIVE_LIST_APPROVED = false;
 
 /** Aberturas de arquivo permitidas no worker Python (`scripts/worker/worker.py`): tudo mais passa por `file_policy`. */
 export const WORKER_ALLOWED_OPENS: readonly string[] = [
-  'with open(part, "wb") as f:', // write_wav_atomic: o destino é validado por policy_check_writable ANTES
+  'with os.fdopen(os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL', // write_wav_atomic: destino validado ANTES; temporário O_EXCL|O_NOFOLLOW
   'with wave.open(f, "wb") as w:'
 ];
