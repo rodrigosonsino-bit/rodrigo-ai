@@ -14,7 +14,8 @@
     "start": "node dist/server/backend/index.js",
     "setup:voice": "node scripts/setup-voice.mjs",
     "bench:voice": "node scripts/bench-voice.mjs",
-    "doctor": "tsc -p tsconfig.server.json && node scripts/doctor.mjs"
+    "doctor": "tsc -p tsconfig.server.json && node scripts/doctor.mjs",
+    "desktop:build": "./desktop/build.sh"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
