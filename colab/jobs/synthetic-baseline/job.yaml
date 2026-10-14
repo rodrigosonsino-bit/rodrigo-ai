@@ -1,0 +1,8 @@
+job: synthetic-baseline
+description: Deterministic contract smoke test; no personal input and no GPU required.
+entrypoint: synthetic-baseline.ipynb
+input: none
+output: result.json
+gpu_expected: false
+estimated_minutes: 1
+network_required: false
