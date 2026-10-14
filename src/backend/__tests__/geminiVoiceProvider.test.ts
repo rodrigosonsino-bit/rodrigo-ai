@@ -61,6 +61,41 @@ describe('GeminiVoiceProvider (Fase 13a)', () => {
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
+  describe('guarda de saída na voz em nuvem (T1)', () => {
+    const CPF = '529.982.247-25';
+    const frase = `Anotei: o seu cpf é ${CPF}, certo?`;
+
+    it('redact (padrão): o motor de nuvem recebe o texto MASCARADO; nenhum dado sensível sai', async () => {
+      const p = make({ RODRIGO_OUTBOUND_GUARD: 'redact' });
+      await p.synthesize(frase, out('r'), undefined, { turnId: 'g1', kind: 'generated', isFirstOfTurn: true });
+      assert.equal(engine.synthCalls.length, 1, 'precondição: houve envio à nuvem');
+      const enviado = (engine.synthCalls[0] as SynthesizeRequest).text;
+      assert.equal(enviado.includes(CPF), false, 'o CPF não pode ir ao Google');
+      assert.match(enviado, /\[cpf omitido\]/);
+      assert.equal(say.calls.length, 0);
+    });
+
+    it('controle positivo: com o guarda em off o mesmo CPF SAI para a nuvem', async () => {
+      const p = make({ RODRIGO_OUTBOUND_GUARD: 'off' });
+      await p.synthesize(frase, out('o'), undefined, { turnId: 'g2', kind: 'generated', isFirstOfTurn: true });
+      assert.equal((engine.synthCalls[0] as SynthesizeRequest).text.includes(CPF), true);
+    });
+
+    it('block: nada vai à nuvem; a frase inteira é falada pela voz do sistema, com o texto original (que fica local)', async () => {
+      const p = make({ RODRIGO_OUTBOUND_GUARD: 'block' });
+      await p.synthesize(frase, out('b'), undefined, { turnId: 'g3', kind: 'generated', isFirstOfTurn: true });
+      assert.equal(engine.synthCalls.length, 0, 'nenhuma chamada à nuvem');
+      assert.equal(say.calls.length, 1);
+      assert.equal(say.calls[0].text, frase, 'o `say` fala o texto original, local');
+    });
+
+    it('frase sem dado sensível passa idêntica em redact', async () => {
+      const p = make({ RODRIGO_OUTBOUND_GUARD: 'redact' });
+      await p.synthesize('Tudo certo por aqui.', out('s'), undefined, { turnId: 'g4', kind: 'generated', isFirstOfTurn: true });
+      assert.equal((engine.synthCalls[0] as SynthesizeRequest).text, 'Tudo certo por aqui.');
+    });
+  });
+
   it('caminho feliz: pede ao motor o modelo, a voz e o prazo certos; o `say` não é usado', async () => {
     const p = make();
     await p.synthesize('Olá, tudo bem?', out('a'), undefined, { turnId: 't1', kind: 'generated', isFirstOfTurn: true });

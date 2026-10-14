@@ -35,6 +35,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from outbound_guard import guard_messages, guard_text  # T1: guarda de saída (camada em profundidade)
+
 # Offline em operação normal — o setup script sobrescreve isso explicitamente para baixar modelos.
 if os.environ.get("RODRIGO_VOICE_SETUP") != "1":
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -1112,6 +1114,9 @@ class Worker:
         image_path = msg.get("imagePath", "")
         question = msg.get("question", "")
         cloud_authorized = bool(msg.get("cloudAuthorized", False))
+        question, _findings, _blocked = guard_text(question)  # T1: a pergunta (texto) vai ao Gemini junto com a imagem
+        if _blocked:
+            cloud_authorized = False  # block: nada vai à nuvem; a descrição cai no caminho local
 
         if self._turn_cancelled(turn_id):
             log_diag(f"Descrição de tela cancelada antes do início (turnId={turn_id}).")
@@ -1295,6 +1300,10 @@ class Worker:
             return unavailable("GEMINI_API_KEY ausente")
         if self._turn_cancelled(turn_id):
             return  # turno cancelado: o Node já resolveu este pedido localmente; nada sai para o Gemini
+        # T1 (camada em profundidade): guarda de saída sobre o texto da fala que vai à nuvem.
+        text, _findings, _blocked = guard_text(text)
+        if _blocked:
+            return unavailable("guarda de saída (RODRIGO_OUTBOUND_GUARD=block)")
         try:
             if getattr(self, "_intent_client", None) is None:
                 from google import genai
@@ -1438,6 +1447,10 @@ class Worker:
         out_path = msg.get("outPath")
         if not isinstance(text, str) or not text.strip() or not isinstance(out_path, str) or not os.path.isabs(out_path):
             return {"ok": False, "kind": "client_error", "status": 400, "reason": "bad_request"}
+        # T1 (camada em profundidade): guarda de saída sobre o texto que vai ao Google para virar voz.
+        text, _findings, _blocked = guard_text(text)
+        if _blocked:
+            return {"ok": False, "kind": "disabled"}  # o Node cai na voz local; nada vai à nuvem
         model = msg.get("model") or TTS_DEFAULT_MODEL
         voice = msg.get("voice") or TTS_DEFAULT_VOICE
         deadline_s = max(1.0, min(30.0, float(msg.get("deadlineMs", 12_000)) / 1000.0))
@@ -1545,6 +1558,9 @@ class Worker:
             else:
                 genai = self._genai  # testes injetam cliente e módulo falsos
 
+            # T1 (camada em profundidade): o guarda de saída também vale aqui, caso o Node falhe ou seja contornado.
+            # No modo block isto LANÇA OutboundBlocked (cai no except abaixo, como erro de geração, sem eco do conteúdo).
+            messages = guard_messages(messages)
             system_instruction, contents = to_gemini_contents(messages)
 
             buffer = ""

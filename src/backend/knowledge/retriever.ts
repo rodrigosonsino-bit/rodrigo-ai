@@ -1,5 +1,6 @@
 import { KNOWLEDGE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { KnowledgeChunk } from './corpus.js';
+import { neutralizeUntrusted, wrapUntrusted, UNTRUSTED_NOTICE } from '../memory/untrustedData.js';
 
 /**
  * Palavras funcionais do português, incluindo as conversacionais que aparecem em fala espontânea.
@@ -193,5 +194,6 @@ export const KNOWLEDGE_PREAMBLE = PREAMBLE;
 export function buildKnowledgeBlock(chunks: RetrievedChunk[]): string {
   if (chunks.length === 0) return '';
   const c = chunks[0];
-  return `${PREAMBLE}\n\n[${c.headingPath}]\n${c.body}`;
+  // Decisão 11: o corpo vai como DADO NÃO CONFIÁVEL, entre delimitadores que o conteúdo não consegue fechar.
+  return `${PREAMBLE}\n${UNTRUSTED_NOTICE}\n\n[${c.headingPath}]\n${wrapUntrusted(c.body.split('\n').map(neutralizeUntrusted))}`;
 }

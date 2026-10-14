@@ -1,0 +1,177 @@
+{
+  "comentario": "Casos de paridade do guarda de saída (T1). A referência é o TypeScript; o Python (scripts/worker/outbound_guard.py) precisa dar exatamente o mesmo resultado em modo redact.",
+  "cases": [
+    {
+      "text": "a chave é AIzaSyDxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ok",
+      "redacted": "a chave é [api-key omitido] ok",
+      "kinds": [
+        "api-key"
+      ]
+    },
+    {
+      "text": "token sk-a1B2c3D4a1B2c3D4a1B2c3D4a1B2c3D4",
+      "redacted": "token [api-key omitido]",
+      "kinds": [
+        "api-key"
+      ]
+    },
+    {
+      "text": "meu cpf é 529.982.247-25",
+      "redacted": "meu cpf é [cpf omitido]",
+      "kinds": [
+        "cpf"
+      ]
+    },
+    {
+      "text": "cpf sem pontos 52998224725 fim",
+      "redacted": "cpf sem pontos [cpf omitido] fim",
+      "kinds": [
+        "cpf"
+      ]
+    },
+    {
+      "text": "cnpj 11.222.333/0001-81",
+      "redacted": "cnpj [cnpj omitido]",
+      "kinds": [
+        "cnpj"
+      ]
+    },
+    {
+      "text": "cartão 4111 1111 1111 1111 validade",
+      "redacted": "cartão [credit-card omitido] validade",
+      "kinds": [
+        "credit-card"
+      ]
+    },
+    {
+      "text": "cartão com hifens 4111-1111-1111-1111 ok",
+      "redacted": "cartão com hifens [credit-card omitido] ok",
+      "kinds": [
+        "credit-card"
+      ]
+    },
+    {
+      "text": "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123",
+      "redacted": "Authorization: Bearer [bearer-token omitido]",
+      "kinds": [
+        "bearer-token"
+      ]
+    },
+    {
+      "text": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkq\n-----END PRIVATE KEY-----",
+      "redacted": "[private-key omitido]",
+      "kinds": [
+        "private-key"
+      ]
+    },
+    {
+      "text": "a minha senha é Jacaranda2026",
+      "redacted": "a minha senha é [spoken-password omitido]",
+      "kinds": [
+        "spoken-password"
+      ]
+    },
+    {
+      "text": "a senha do wifi é azul-verde-77",
+      "redacted": "a senha do wifi é [spoken-password omitido]",
+      "kinds": [
+        "spoken-password"
+      ]
+    },
+    {
+      "text": "password: Abc123xyz",
+      "redacted": "password: [spoken-password omitido]",
+      "kinds": [
+        "spoken-password"
+      ]
+    },
+    {
+      "text": "a senha é Abc",
+      "redacted": "a senha é Abc",
+      "kinds": []
+    },
+    {
+      "text": "a senha é importante",
+      "redacted": "a senha é importante",
+      "kinds": []
+    },
+    {
+      "text": "a senha é jacaranda",
+      "redacted": "a senha é jacaranda",
+      "kinds": []
+    },
+    {
+      "text": "preciso trocar a senha amanhã",
+      "redacted": "preciso trocar a senha amanhã",
+      "kinds": []
+    },
+    {
+      "text": "ligar para 11 98765-4321 amanhã",
+      "redacted": "ligar para 11 98765-4321 amanhã",
+      "kinds": []
+    },
+    {
+      "text": "o pedido 12345678 chega dia 15/10/2026",
+      "redacted": "o pedido 12345678 chega dia 15/10/2026",
+      "kinds": []
+    },
+    {
+      "text": "lembrete: pagar 1.234,56 reais",
+      "redacted": "lembrete: pagar 1.234,56 reais",
+      "kinds": []
+    },
+    {
+      "text": "o código 4111 não é um cartão",
+      "redacted": "o código 4111 não é um cartão",
+      "kinds": []
+    },
+    {
+      "text": "cpf 529.982.247-26",
+      "redacted": "cpf 529.982.247-26",
+      "kinds": []
+    },
+    {
+      "text": "cartão 4111 1111 1111 1112",
+      "redacted": "cartão 4111 1111 1111 1112",
+      "kinds": []
+    },
+    {
+      "text": "sk-curto",
+      "redacted": "sk-curto",
+      "kinds": []
+    },
+    {
+      "text": "Bearer é uma palavra em inglês",
+      "redacted": "Bearer é uma palavra em inglês",
+      "kinds": []
+    },
+    {
+      "text": "dois segredos: cpf 529.982.247-25 e chave AIzaSyDxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "redacted": "dois segredos: cpf [cpf omitido] e chave [api-key omitido]",
+      "kinds": [
+        "cpf",
+        "api-key"
+      ]
+    },
+    {
+      "text": "oi, tudo bem? marque dentista dia 20",
+      "redacted": "oi, tudo bem? marque dentista dia 20",
+      "kinds": []
+    },
+    {
+      "text": "ação: senha é Çedilha9 ok",
+      "redacted": "ação: senha é [spoken-password omitido] ok",
+      "kinds": [
+        "spoken-password"
+      ]
+    },
+    {
+      "text": "o cnpj 11222333000181 e o cpf 52998224725 juntos",
+      "redacted": "o cnpj [cnpj omitido] e o cpf [cpf omitido] juntos",
+      "kinds": [
+        "cnpj",
+        "cpf"
+      ]
+    }
+  ]
+}

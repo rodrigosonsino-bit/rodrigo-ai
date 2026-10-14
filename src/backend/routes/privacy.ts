@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { effectivePrivacy } from '../privacy.js';
+import { getOutboundCounts } from '../privacy/outboundGuard.js';
 
 /**
  * Rota GET /api/privacy (Fase 12). A validação de Host já ocorreu em server.ts, antes do roteamento,
@@ -18,7 +19,7 @@ export function handlePrivacyRequest(req: IncomingMessage, res: ServerResponse):
 
   let payload: string;
   try {
-    payload = JSON.stringify(effectivePrivacy(process.env));
+    payload = JSON.stringify({ ...effectivePrivacy(process.env), outboundGuardCounts: getOutboundCounts() });
   } catch (err) {
     // Configuração inválida normalmente já derrubou o startup; se chegar aqui, não escondemos.
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });

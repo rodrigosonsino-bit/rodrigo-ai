@@ -1,5 +1,6 @@
 import type { IVoiceProvider, SynthesizeOptions } from '../../shared/extensions/voice.js';
 import { type PrivacyConfig, ttsCloudEffective, ttsDictatedViaCloud } from '../privacy.js';
+import { guardText } from '../privacy/outboundGuard.js';
 import type { SynthesizeResult, VoiceEngine } from './engine.js';
 import type { BudgetStatus, Reservation, TtsBudget } from './ttsBudget.js';
 
@@ -142,6 +143,12 @@ export class GeminiVoiceProvider implements IVoiceProvider {
     // D-b: conteúdo ditado só vai à nuvem se a configuração permitir; o resto da resposta segue no Gemini.
     if (kind === 'dictated' && !ttsDictatedViaCloud(this.privacy)) return this.useFallback(text, outputPath, signal, options);
 
+    // T1: o texto de cada frase falada vai à nuvem para virar voz; ele passa pelo guarda de saída. No modo block, com achado, a
+    // frase INTEIRA fica local (voz do sistema). Em redact o que vai à nuvem é o texto mascarado; o texto original só vai ao `say`.
+    const guarded = guardText(text, this.privacy.outboundGuard);
+    if (guarded.blocked) return this.useFallback(text, outputPath, signal, options);
+    const cloudText = guarded.text;
+
     const st = this.turnState(turnId);
     if (st.mode === 'say' || !this.engine.synthesize) return this.useFallback(text, outputPath, signal, options);
 
@@ -160,7 +167,7 @@ export class GeminiVoiceProvider implements IVoiceProvider {
       result = await this.engine.synthesize(
         {
           turnId,
-          text,
+          text: cloudText,
           outPath: outputPath,
           model: this.config.model,
           voice: this.config.voice,

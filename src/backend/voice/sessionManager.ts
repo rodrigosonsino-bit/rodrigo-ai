@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, type PrivacyConfig } from '../privacy.js';
+import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, OUTBOUND_BLOCKED_TEXT, type PrivacyConfig } from '../privacy.js';
+import { guardMessages, guardText, OutboundBlockedError } from '../privacy/outboundGuard.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
@@ -862,7 +863,12 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           (this.tools.length > 0 && mightBeTemporal(transcript)))
       ) {
         try {
-          cloudIntent = await this.engine.detectIntent(turn.turnId, turn.epoch, transcript);
+          // T1: o texto que vai à nuvem passa pelo guarda de saída. No modo block, com achado, nada é enviado
+          // e o turno usa os detectores locais (cloudIntent fica null); a transcrição local segue intacta.
+          const intentGuard = guardText(transcript, this.privacy.outboundGuard);
+          cloudIntent = intentGuard.blocked
+            ? null
+            : await this.engine.detectIntent(turn.turnId, turn.epoch, intentGuard.text);
         } catch (err) {
           cloudIntent = null;
           console.error('[intent] classificação em nuvem falhou, usando detectores locais:', err);
@@ -1363,7 +1369,18 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, GENERATION_DISABLED_TEXT, 0, 'local'));
       return;
     }
-    await this.engine.generate(turn.turnId, turn.epoch, messages, handlers);
+    // T1: ponto único onde o prompt de geração (sistema + memórias + histórico + fala) sai para a nuvem.
+    let outgoing: ConversationMessage[];
+    try {
+      outgoing = guardMessages(messages, this.privacy.outboundGuard);
+    } catch (err) {
+      if (!(err instanceof OutboundBlockedError)) throw err;
+      console.warn(`[outbound-guard] turno=${turn.turnId}: envio bloqueado (${err.kinds.join(', ')}).`);
+      turn.expectedSentences.add(0);
+      turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, OUTBOUND_BLOCKED_TEXT, 0, 'local'));
+      return;
+    }
+    await this.engine.generate(turn.turnId, turn.epoch, outgoing, handlers);
   }
 
   /**
