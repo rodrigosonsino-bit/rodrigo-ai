@@ -63,11 +63,12 @@ describe('guarda de saída no fluxo real do SessionManager (T1)', () => {
 
   it('texto sem segredo passa idêntico em redact: o guarda não altera fala comum nem memória comum', async (t) => {
     resetOutboundCounts();
-    const h = await setup({ RODRIGO_OUTBOUND_GUARD: 'redact' }, false);
+    const h = await setup({ RODRIGO_OUTBOUND_GUARD: 'redact' }, true, 'gosto de café sem açúcar'); // COM memória comum
     t.after(() => teardown(h));
     await oneTurn(h, 'que horas são? marque dentista dia 20');
     const sent = everythingSentToCloud(h);
     assert.ok(sent.includes('marque dentista dia 20'));
+    assert.ok(sent.includes('gosto de café sem açúcar'), 'a memória comum chega intacta ao prompt (o guarda não a corrompe)');
     assert.deepEqual(getOutboundCounts(), {});
   });
 });

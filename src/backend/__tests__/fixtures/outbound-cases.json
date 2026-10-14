@@ -172,6 +172,54 @@
         "cnpj",
         "cpf"
       ]
+    },
+    {
+      "text": "minha chave é github_pat_11A6W3K2Y0abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ok",
+      "redacted": "minha chave é [api-key omitido] ok",
+      "kinds": [
+        "api-key"
+      ]
+    },
+    {
+      "text": "chave de sessão ASIAIOSFODNN7EXAMPLE ok",
+      "redacted": "chave de sessão [api-key omitido] ok",
+      "kinds": [
+        "api-key"
+      ]
+    },
+    {
+      "text": "o token é eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHclb4 fim",
+      "redacted": "o token é [bearer-token omitido] fim",
+      "kinds": [
+        "bearer-token"
+      ]
+    },
+    {
+      "text": "cabeçalho bearer abcdefghijklmnopqrstuvwxyz0123 fim",
+      "redacted": "cabeçalho bearer [bearer-token omitido] fim",
+      "kinds": [
+        "bearer-token"
+      ]
+    },
+    {
+      "text": "a senha eletronica2 do cartao",
+      "redacted": "a senha eletronica2 do cartao",
+      "kinds": []
+    },
+    {
+      "text": "minha senha e Abc12345 ok",
+      "redacted": "minha senha e [spoken-password omitido] ok",
+      "kinds": [
+        "spoken-password"
+      ]
+    },
+    {
+      "text": "a chave AKIAIOSFODNN7EXAMPLE e a ASIAIOSFODNN7EXAMPLE",
+      "redacted": "a chave [api-key omitido] e a [api-key omitido]",
+      "kinds": [
+        "api-key",
+        "api-key"
+      ]
     }
   ]
 }
