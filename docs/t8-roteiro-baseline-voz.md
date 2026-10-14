@@ -29,7 +29,7 @@ Limiares 1 a 4 são **palpites meus**: a pausa de fim de fala hoje é 1000 ms, "
 1. Ambiente quieto, mesmo microfone e alto-falante de sempre; anote-os. App pelo ícone da barra de menus **ou** pelo navegador, conforme o que quer medir (o gate T6-voz compara os dois).
 2. Para cada categoria, 60 tentativas variando a frase (use as listas de `docs/f11-roteiro-voz-real.md` como banco). Marque ✔ ou ✘ na hora; **não regrave a que falhou**.
 3. Registre o que falhou em uma linha (não o conteúdo pessoal). Se ouvir o app dizer algo que você não disse, anote o horário.
-4. Conta: com **≤ 4 falhas em 60** a categoria passa no limiar proposto (taxa verdadeira < 15% com 80% de confiança de cada lado); 5 ou mais falhas, não passa e vira dívida registrada, **sem baixar o limiar para caber**.
+4. Conta: com **≤ 4 falhas em 60** a categoria passa no limiar proposto (isso rejeita "a taxa verdadeira é 15% ou mais" ao nível de 5%; se a taxa verdadeira for 5%, a categoria passa em 80% das vezes); 5 ou mais falhas, não passa e vira dívida registrada, **sem baixar o limiar para caber**.
 
 ## 4. Pendências honestas
 - Não verifiquei se o app já grava os carimbos que as categorias 1 e 2 pedem (hoje o contador do painel só mede tecla→janela visível). Se não gravar, a medida 1 e 2 sai de **cronômetro manual** (menos precisa) ou de uma instrumentação pequena que precisa de plano e auditoria.
