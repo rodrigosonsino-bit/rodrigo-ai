@@ -97,15 +97,16 @@ _DETECTORS: list[tuple[str, re.Pattern[str], bool, int | None]] = [
         "api-key",
         re.compile(
             r"\b(?:AIza[0-9A-Za-z_-]{30,}|sk-[A-Za-z0-9_-]{20,}|nvapi-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9]{20,}"
-            r"|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})"
+            r"|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[0-9A-Za-z_]{20,}|A[SK]IA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})"
         ),
         False,
         None,
     ),
-    ("bearer-token", re.compile(r"\bBearer\s+([A-Za-z0-9._~+/=-]{20,})"), False, 1),
+    ("bearer-token", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), False, None),
+    ("bearer-token", re.compile(r"\bBearer\s+([A-Za-z0-9._~+/=-]{20,})", re.IGNORECASE), False, 1),
     (
         "spoken-password",
-        re.compile(r"\b(?:senha|password|passwd)(?:\s+d[aoe]s?\s+[\w-]+)?\s*(?:é|eh|e|:|=|is)\s*[\"']?([^\s\"',;]{3,})", re.IGNORECASE),
+        re.compile(r"\b(?:senha|password|passwd)(?:\s+d[aoe]s?\s+[\w-]+)?\s*(?:(?:é|eh|e|is)\s+|[:=]\s*)[\"']?([^\s\"',;]{3,})", re.IGNORECASE),
         False,
         1,
     ),

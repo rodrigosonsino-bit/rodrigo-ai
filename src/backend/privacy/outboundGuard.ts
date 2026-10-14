@@ -122,18 +122,23 @@ const DETECTORS: readonly Detector[] = [
   {
     kind: 'api-key',
     regex:
-      /\b(?:AIza[0-9A-Za-z_-]{30,}|sk-[A-Za-z0-9_-]{20,}|nvapi-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})/g
+      /\b(?:AIza[0-9A-Za-z_-]{30,}|sk-[A-Za-z0-9_-]{20,}|nvapi-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[0-9A-Za-z_]{20,}|A[SK]IA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})/g
   },
-  // Authorization: Bearer <token> (mascara só o token).
+  // JWT solto (três partes base64url, as duas primeiras começam com "eyJ"): mascara o token inteiro.
   {
     kind: 'bearer-token',
-    regex: /\bBearer\s+([A-Za-z0-9._~+/=-]{20,})/g,
+    regex: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g
+  },
+  // Authorization: Bearer <token> (mascara só o token). Sem diferenciar maiúsculas: "bearer" também vale.
+  {
+    kind: 'bearer-token',
+    regex: /\bBearer\s+([A-Za-z0-9._~+/=-]{20,})/gi,
     accept: (m) => ({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length })
   },
   // Senha ditada: "minha senha é X", "a senha do wifi é X", "password: X". Mascara só o valor.
   {
     kind: 'spoken-password',
-    regex: /\b(?:senha|password|passwd)(?:\s+d[aoe]s?\s+[\p{L}0-9_-]+)?\s*(?:é|eh|e|:|=|is)\s*["']?([^\s"',;]{3,})/giu,
+    regex: /\b(?:senha|password|passwd)(?:\s+d[aoe]s?\s+[\p{L}0-9_-]+)?\s*(?:(?:é|eh|e|is)\s+|[:=]\s*)["']?([^\s"',;]{3,})/giu,
     // Só vale se o valor PARECE credencial (dígito, símbolo ou maiúscula no meio): "a senha é importante" não é senha.
     // Limite declarado: uma senha ditada toda em minúsculas e só com letras ("jacaranda") não é pega.
     accept: (m) =>
