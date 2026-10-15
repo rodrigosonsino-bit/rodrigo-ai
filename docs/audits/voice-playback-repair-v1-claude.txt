@@ -1,0 +1,95 @@
+# Auditoria: frontend/experiência do plano `voice-playback-repair-v1`
+
+**Escopo da revisão:** li o plano e o `VoiceController` colados na mensagem. Não executei nada e não abri outros arquivos.
+
+**Limitações:**
+- O hash SHA256 não foi verificado, porque isso exige executar `shasum`.
+- `main.swift` e `main.ts` não foram inspecionados. Os itens da ponte desktop (passo 5) foram avaliados só pelo texto do plano.
+
+## Achados
+
+### A1. Alta: o estado entre frases segue o servidor e abre janela de autocaptura
+- **Evidência:** o servidor emite `ouvindo` logo após sintetizar a última frase. O plano diz que o "estado entre frases deriva do estado recebido do servidor". Entre o `onended` da frase N e o `start` da N+1 (fetch e decode), o estado vira `ouvindo`. Nesse intervalo:
+  - `processAudioBlock` volta ao limiar 0,012;
+  - o eco residual do TTS pode iniciar uma gravação e virar um turno falso;
+  - o indicador verde pisca.
+- **Ajuste mínimo:** calcular o estado efetivo da seguinte forma:
+  - `falando` enquanto houver fonte ativa **ou** frases do `currentTurnId` na fila ou em download/decode;
+  - só depois disso, usar o estado do servidor.
+  - Opcional: manter o limiar elevado por cerca de 300 ms após o último `onended`, para cobrir a cauda de eco.
+
+### A2. Alta: parar a fonte ao iniciar novo upload pode gerar `/played` falso
+- **Evidência:** no passo 3, a fonte anterior é parada quando começa um novo upload. Enquanto o POST está pendente, `currentTurnId` ainda é o turno antigo. Se o `stop()` não incrementar `playbackGeneration`, o `onended` assíncrono passa nas duas checagens e envia `/played` de uma frase truncada.
+- **Ajuste mínimo:** todo caminho que para a fonte deve passar por uma única função `cancelPlayback()`. Ela incrementa `playbackGeneration` de forma síncrona antes de `stop()` e limpa a fila do turno anterior.
+- **Teste:** cobrir explicitamente este caso.
+
+### A3. Alta (pré-existente, dentro do tema corridas e `/played`): áudio do turno cancelado ainda toca
+- **Evidência:** `triggerBargeIn` não altera `currentTurnId`. O cancelamento no servidor é assíncrono. Um `sentence_audio_ready` do mesmo turno que chegue depois do barge-in é aceito pelo novo drain, que captura a nova geração. Resultado: a frase toca e `/played` é enviado após a interrupção. O mesmo vale para o cancelamento manual de TELA.
+- **Hipótese:** o backend talvez já descarte esses eventos, mas isso não está comprovado.
+- **Ajuste mínimo:**
+  - registrar `cancelledTurnId` (ou um conjunto deles) no barge-in e no cancelamento manual;
+  - descartar na chegada qualquer chunk de turno cancelado;
+  - ignorar `state: falando` de um turno cancelado.
+
+### A4. Média: `onended` antigo pode anular a fonte nova
+- **Evidência:** `source.onended = () => { this.currentSource = null }` é incondicional. Com o estado derivado da fonte (passo 2), um `onended` atrasado de uma fonte já parada pode zerar `currentSource` ou o `falando` de uma fonte nova. Depois disso, o barge-in não consegue mais parar a fonte nova.
+- **Ajuste mínimo:** usar `if (this.currentSource === source) this.currentSource = null`, e aplicar a mesma regra ao flag de "fonte ativa".
+
+### A5. Média: drain pode travar e o indicador ficar preso
+- **Evidência:**
+  - Se `source.start()` lançar exceção, a Promise nunca resolve. `playbackActive` fica `true` para sempre e nenhum áudio futuro toca.
+  - Se o contexto for suspenso no meio da reprodução (interrupção do WKWebView, troca de dispositivo), `onended` pode não disparar. O indicador fica preso em `falando`.
+- **Ajuste mínimo:**
+  - chamar `start` dentro de try, com reject;
+  - adicionar um watchdog de `buffer.duration + margem`, ou ouvir `onstatechange`, que rejeita sem enviar `/played`.
+
+### A6. Média: uploads sobrepostos e encerramento
+- **Evidência:** em `processando`, o VAD continua com o limiar baixo, então um segundo upload pode começar. Problemas resultantes:
+  - um POST antigo que resolva depois sobrescreve `currentTurnId`;
+  - um erro após `teardown` chama `setState('ouvindo')` estando `idle`.
+- **Avaliação:** o plano cobre isso de forma genérica.
+- **Ajuste mínimo:**
+  - usar um `uploadSeq` monotônico; só o upload mais recente define `currentTurnId` e altera o estado;
+  - se `sessionId` mudou ou ficou nulo, não fazer nada.
+- **Sobre a suspensão do drain:** em vez de fazer o drain aguardar uma Promise, não iniciá-lo enquanto o upload estiver pendente e chamá-lo explicitamente quando o POST resolver. Isso evita um drain pendurado depois do `teardown`.
+
+### A7. Média (UX): AudioContext suspenso sem caminho de recuperação
+- **Evidência:** `resume()` fora de um gesto do usuário pode falhar no WKWebView. O plano só exibe o erro.
+- **Ajuste mínimo:**
+  - mensagem acionável, por exemplo "Áudio bloqueado — clique para reativar a voz";
+  - um `resume()` no próximo clique;
+  - deduplicar para no máximo um aviso por turno.
+
+### A8. Baixa (privacidade de log)
+- **Evidência:** `[playback:start]` registra `chunk.text`. As URLs de áudio e SSE carregam o token na query.
+- **Ajuste mínimo:**
+  - remover o texto do log e registrar só `turnId` e índice da frase;
+  - nunca logar URL, `res.url` ou a mensagem de erro bruta de fetch.
+
+### A9. Baixa
+- **`/played` sem tratamento:** é disparado sem `.catch` e sem checar `res.ok`. Registrar a falha em log técnico, sem retry, para não duplicar.
+- **Ordenação da fila:** `sort` só por `sentenceIndex` mistura turnos. Filtrar o turno antes de ordenar.
+- **Limpeza no `teardown`:** além da fila e dos buffers do VAD, zerar `bargeInCandidateMs`, `continuousVoiceMs` e `lastRoutingLabel`.
+
+### A10. Baixa (passo 1, fora do perfil)
+- Confirmar `git check-ignore .env` antes de copiar o arquivo.
+- Não seguir symlink na cópia.
+
+## Testes adicionais recomendados
+
+Somar ao conjunto do plano:
+- áudio de turno cancelado chegando depois do barge-in (A3);
+- novo upload interrompendo a reprodução sem `/played` (A2);
+- `onended` atrasado de fonte antiga (A4);
+- `start` lançando exceção, ou `onended` ausente (A5);
+- POSTs resolvendo fora de ordem e `teardown` com POST pendente (A6);
+- estado continuar `falando` entre frases quando o SSE já mandou `ouvindo` (A1).
+
+## Veredito
+
+**Apto com ressalvas não bloqueantes.**
+
+O diagnóstico está correto: o SSE é tratado como estado de reprodução, o áudio é descartado antes do POST e as falhas são silenciosas. O escopo está bem delimitado, e a garantia de `/played` por geração é preservada como princípio.
+
+A1, A2 e A3 devem entrar na implementação como condições. São ajustes locais, dentro do mesmo escopo, e não exigem uma nova rodada de plano. Sem eles, o reparo pode trocar o silêncio atual por autocaptura de eco ou `/played` falso. A4 a A7 são recomendados na mesma entrega. A8 a A10 são oportunistas.
+

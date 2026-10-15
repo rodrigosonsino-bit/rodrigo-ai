@@ -6,7 +6,7 @@ import type {
 } from '../shared/voiceProtocol.ts';
 
 // --- Parâmetros de VAD (Fase 2 v2 + adendo) ---
-const PRE_ROLL_MS = 200;
+const PRE_ROLL_MS = 400; // Preserva 400ms de áudio pré-início para garantir integridade do onset com tolerância
 // F13b (decisão do usuário, 2026-10-08: "1,0 s"): 700 ms cortava a pergunta em pausas naturais e cada pedaço virava um turno
 // com transcrição ruim. Custo: +0,3 s em toda resposta. A junção de fragmentos no servidor foi reprovada na auditoria
 // (docs/phase-13b-v1.md + docs/audits/f13b-plan-codex-2026-10-08.md).
@@ -14,8 +14,9 @@ const SILENCE_THRESHOLD_MS = 1000;
 const MIN_VOICE_DURATION_MS = 220; // Achado v2-5: 200-250ms, não os 400ms originais (corta "Sim"/"Não"/"Oi")
 const MAX_SEGMENT_MS = 20_000;
 const BARGE_IN_HYSTERESIS_MS = 250; // sustentar fala acima do limiar por 250ms durante "falando"
-const RMS_THRESHOLD = 0.018;
+const RMS_THRESHOLD = 0.012;
 const RMS_THRESHOLD_WHILE_SPEAKING = 0.045; // limiar elevado durante playback (histerese)
+const ONSET_GRACE_MS = 60; // tolerância de micro-pausas/consoantes antes de resetar candidato a fala
 
 type VoiceState = 'idle' | 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | 'erro';
 
@@ -30,6 +31,7 @@ export class VoiceController {
   private sessionId: string | null = null;
   private token: string | null = null;
   private eventSource: EventSource | null = null;
+  private inFlightStart: Promise<void> | null = null;
 
   private audioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
@@ -52,6 +54,8 @@ export class VoiceController {
   private recordedMs = 0;
   private continuousVoiceMs = 0;
   private continuousSilenceMs = 0;
+  private onsetGraceMs = 0;
+  private debugBlockCounter = 0;
   private bargeInCandidateMs = 0;
   private sampleRate = 16000;
 
@@ -80,6 +84,10 @@ export class VoiceController {
     private readonly onNotice: (message: string) => void = () => {}
   ) {}
 
+  getState(): VoiceState {
+    return this.state;
+  }
+
   private setState(state: VoiceState): void {
     this.state = state;
     this.onStateChange(state);
@@ -93,18 +101,32 @@ export class VoiceController {
   }
 
   async start(): Promise<void> {
-    const res = await fetch('/api/voice/session', { method: 'POST', headers: this.headers() });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: 'Erro desconhecido.' }));
-      throw new Error(body.error || 'Não foi possível iniciar a sessão de voz.');
-    }
-    const data = (await res.json()) as CreateSessionResponse;
-    this.sessionId = data.sessionId;
-    this.token = data.token;
+    if (this.inFlightStart) return this.inFlightStart;
+    if (this.sessionId) return; // já ativo
 
-    this.connectEvents();
-    await this.startCapture();
-    this.setState('ouvindo');
+    this.inFlightStart = (async () => {
+      const res = await fetch('/api/voice/session', { method: 'POST', headers: this.headers() });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: 'Erro desconhecido.' }));
+        throw new Error(body.error || 'Não foi possível iniciar a sessão de voz.');
+      }
+      const data = (await res.json()) as CreateSessionResponse;
+      this.sessionId = data.sessionId;
+      this.token = data.token;
+
+      try {
+        this.connectEvents();
+        await this.startCapture();
+        this.setState('ouvindo');
+      } catch (err) {
+        this.teardown();
+        throw err;
+      }
+    })().finally(() => {
+      this.inFlightStart = null;
+    });
+
+    return this.inFlightStart;
   }
 
   private connectEvents(): void {
@@ -173,19 +195,37 @@ export class VoiceController {
   // --- Captura de microfone + VAD ---
 
   private async startCapture(): Promise<void> {
+    console.log('[capture:1] getUserMedia...');
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
     });
+    console.log('[capture:2] stream ok, tracks=' + this.mediaStream.getAudioTracks().length);
 
     this.audioContext = new AudioContext({ sampleRate: 16000 });
+    console.log('[capture:3] audioCtx state=' + this.audioContext.state);
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+      console.log('[capture:4] resumido, state=' + this.audioContext.state);
+    }
     this.sampleRate = this.audioContext.sampleRate;
+    console.log('[capture:5] sampleRate=' + this.sampleRate);
 
     const workletUrl = new URL('./vad-processor.js', import.meta.url);
+    console.log('[capture:6] workletUrl=' + workletUrl.toString().slice(0, 80));
     await this.audioContext.audioWorklet.addModule(workletUrl);
+    console.log('[capture:7] worklet carregado');
 
     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
     this.workletNode = new AudioWorkletNode(this.audioContext, 'vad-meter-processor');
     source.connect(this.workletNode);
+
+    // No WebKit (Safari/WKWebView), o pipeline de WebAudio é pull-based.
+    // Sem um destino ativo conectado downstream, o AudioWorkletNode é otimizado e
+    // os buffers de microfone param de ser requisitados pelo motor de áudio.
+    const silentGain = this.audioContext.createGain();
+    silentGain.gain.value = 0;
+    this.workletNode.connect(silentGain);
+    silentGain.connect(this.audioContext.destination);
 
     this.workletNode.port.onmessage = (ev: MessageEvent<{ rms: number; samples: Float32Array }>) => {
       this.processAudioBlock(ev.data.rms, ev.data.samples);
@@ -211,6 +251,10 @@ export class VoiceController {
     const threshold = speaking ? RMS_THRESHOLD_WHILE_SPEAKING : RMS_THRESHOLD;
     const isVoice = rms >= threshold;
 
+    if (this.debugBlockCounter++ % 50 === 0) {
+      console.log(`[vad:meter] rms=${rms.toFixed(4)} thr=${threshold.toFixed(4)} isVoice=${isVoice} rec=${this.recording} st=${this.state}`);
+    }
+
     if (speaking) {
       // Barge-in: exige fala sustentada acima do limiar elevado por BARGE_IN_HYSTERESIS_MS
       // antes de interromper — evita que o vazamento acústico do próprio TTS no
@@ -231,11 +275,19 @@ export class VoiceController {
 
       if (isVoice) {
         this.continuousVoiceMs += durationMs;
+        this.onsetGraceMs = 0;
         if (this.continuousVoiceMs >= MIN_VOICE_DURATION_MS) {
           this.beginRecording();
         }
       } else {
-        this.continuousVoiceMs = 0;
+        // Tolerância (JEV Grace Period) para quedas transitórias de consoantes/micro-pausas
+        if (this.continuousVoiceMs > 0) {
+          this.onsetGraceMs += durationMs;
+          if (this.onsetGraceMs > ONSET_GRACE_MS) {
+            this.continuousVoiceMs = 0;
+            this.onsetGraceMs = 0;
+          }
+        }
       }
       return;
     }
@@ -256,21 +308,25 @@ export class VoiceController {
   }
 
   private beginRecording(): void {
+    console.log(`[vad:begin] voz detectada (continuousVoiceMs=${this.continuousVoiceMs.toFixed(0)}ms >= ${MIN_VOICE_DURATION_MS}ms). Gravando turno.`);
     this.recording = true;
     this.recordedChunks = [...this.ringBuffer];
     this.recordedMs = this.ringBufferMs;
     this.continuousSilenceMs = 0;
     this.continuousVoiceMs = 0;
+    this.onsetGraceMs = 0;
     this.ringBuffer = [];
     this.ringBufferMs = 0;
   }
 
   private async finishRecording(): Promise<void> {
+    console.log(`[vad:finish] silêncio detectado (${this.continuousSilenceMs.toFixed(0)}ms). Finalizando gravação (${this.recordedChunks.length} blocos, ${(this.recordedMs/1000).toFixed(2)}s).`);
     this.recording = false;
     const chunks = this.recordedChunks;
     this.recordedChunks = [];
     this.recordedMs = 0;
     this.continuousSilenceMs = 0;
+    this.onsetGraceMs = 0;
 
     const wavBuffer = encodeWavPcm16(chunks, this.sampleRate);
     if (wavBuffer.byteLength === 0) return;
@@ -435,12 +491,17 @@ export class VoiceController {
     const arrayBuffer = await res.arrayBuffer();
 
     if (!this.audioContext) return;
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume().catch(() => {});
+    }
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
     // chunk.turnId !== currentTurnId cobre um turno NOVO já ter começado; generation
     // cobre um barge-in que ainda não começou um turno novo (ver comentário no campo
     // playbackGeneration acima) — as duas checagens são necessárias, nenhuma sozinha basta.
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // cancelado enquanto decodificava
+
+    console.log(`[playback:start] reproduzindo turnId=${chunk.turnId} frase=${chunk.sentenceIndex}: "${chunk.text}"`);
 
     await new Promise<void>((resolve) => {
       const source = this.audioContext!.createBufferSource();
@@ -458,6 +519,7 @@ export class VoiceController {
 
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // barge-in ocorreu durante a reprodução
 
+    console.log(`[playback:done] turnId=${chunk.turnId} frase=${chunk.sentenceIndex}`);
     this.onAssistantText(chunk.text);
     void fetch('/api/voice/session/played', {
       method: 'POST',
@@ -509,10 +571,15 @@ export class VoiceController {
   }
 
   async stop(): Promise<void> {
-    if (this.sessionId && this.token) {
-      await fetch('/api/voice/session/end', { method: 'POST', headers: this.headers() }).catch(() => {});
-    }
+    const sId = this.sessionId;
+    const tok = this.token;
     this.teardown();
+    if (sId && tok) {
+      void fetch('/api/voice/session/end', {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sId, 'X-Rodrigo-Token': tok }
+      }).catch(() => {});
+    }
   }
 }
 
