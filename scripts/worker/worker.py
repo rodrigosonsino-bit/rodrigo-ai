@@ -48,6 +48,11 @@ CACHE_LIMIT_BYTES = 1024 * 1024 * 1024  # 1 GiB — Achado v2-8: API moderna, n�
 LLM_MODEL_ID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 VISION_MODEL_ID = os.environ.get("RODRIGO_VISION_MODEL", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")
 CLASSIFICATION_LABELS = frozenset({"GERAL", "TEOLOGIA", "VIRTOLOGIA", "NEUROCIENCIA", "AMBIGUO"})
+# Comandos que o stdin_reader_loop aceita na work_queue (fila de tamanho 1).
+# Todo comando tratado no work_loop precisa estar aqui, senão cai em
+# "Comando desconhecido ignorado" (foi o caso de describe_screen, achado 2026-10-15).
+QUEUED_COMMANDS = ("transcribe", "classify", "generate", "detect_tool", "detect_mutation",
+                   "detect_confirmation", "detect_intent", "describe_screen")
 CLASSIFICATION_SYSTEM_PROMPT = (
     "Você classifica uma frase do usuário em EXATAMENTE uma categoria. "
     "Responda com UMA ÚNICA PALAVRA, sem pontuação, sem explicação: "
@@ -1328,14 +1333,18 @@ class Worker:
             )
 
             start_time = time.monotonic()
-            output_text = mlx_vlm.generate(
+            # Assinatura: generate(model, processor, prompt, image=None, ...).
+            # SEMPRE por palavra-chave: na ordem posicional image e prompt trocam
+            # de lugar e o erro só aparece em produção ("Failed to load image").
+            output = mlx_vlm.generate(
                 self._vlm_model,
                 self._vlm_processor,
-                image_path,
-                formatted_prompt,
+                prompt=formatted_prompt,
+                image=image_path,
                 max_tokens=200,
                 verbose=False
             )
+            output_text = output.text if hasattr(output, "text") else str(output)
 
             if handle.cancel_event.is_set() or self._turn_cancelled(turn_id):
                 log_diag(f"Descrição de tela cancelada após a inferência (turnId={turn_id}).")
@@ -1854,7 +1863,7 @@ class Worker:
                 self._file_pool.submit(self.handle_file_write, msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
-            elif cmd in ("transcribe", "classify", "generate", "detect_tool", "detect_mutation", "detect_confirmation", "detect_intent"):
+            elif cmd in QUEUED_COMMANDS:
                 # Fila de tamanho 1: se algo estiver esperando (não deveria, pois o Node só
                 # envia um novo comando após cancelar o anterior), descarta o mais antigo.
                 try:
