@@ -285,6 +285,7 @@ const voiceController = new VoiceController(
     if (state === 'processando' || state === 'erro') {
       resetAgentIndicator();
     }
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage(state);
   },
   (text) => appendTranscriptEntry('Você', text),
   (text) => appendTranscriptEntry('Rodrigo AI', text),
@@ -364,3 +365,34 @@ voiceScreenBtn.addEventListener('click', () => {
 window.addEventListener('beforeunload', () => {
   void voiceController.stop();
 });
+
+// Exposed for native Swift desktop app — toggleVoice via callAsyncJavaScript
+(window as any).__toggleVoice = async (): Promise<string> => {
+  try {
+    if (!voiceEndBtn.disabled) {
+      await voiceController.stop();
+      voiceStartBtn.disabled = false;
+      voiceEndBtn.disabled = true;
+      voiceMuteBtn.disabled = true;
+      voiceInterruptBtn.disabled = true;
+      voiceScreenBtn.disabled = true;
+      muted = false;
+      voiceMuteBtn.setAttribute('aria-pressed', 'false');
+      voiceMuteBtn.textContent = 'Silenciar microfone';
+      resetAgentIndicator();
+      return 'stopped';
+    }
+    if (!voiceStartBtn.disabled) {
+      voiceStartBtn.disabled = true;
+      await voiceController.start();
+      voiceEndBtn.disabled = false;
+      voiceMuteBtn.disabled = false;
+      voiceScreenBtn.disabled = false;
+      return 'started';
+    }
+    return 'busy';
+  } catch (e) {
+    voiceStartBtn.disabled = false;
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
