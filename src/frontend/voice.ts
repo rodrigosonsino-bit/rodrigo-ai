@@ -195,18 +195,25 @@ export class VoiceController {
   // --- Captura de microfone + VAD ---
 
   private async startCapture(): Promise<void> {
+    console.log('[capture:1] getUserMedia...');
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
     });
+    console.log('[capture:2] stream ok, tracks=' + this.mediaStream.getAudioTracks().length);
 
     this.audioContext = new AudioContext({ sampleRate: 16000 });
+    console.log('[capture:3] audioCtx state=' + this.audioContext.state);
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
+      console.log('[capture:4] resumido, state=' + this.audioContext.state);
     }
     this.sampleRate = this.audioContext.sampleRate;
+    console.log('[capture:5] sampleRate=' + this.sampleRate);
 
     const workletUrl = new URL('./vad-processor.js', import.meta.url);
+    console.log('[capture:6] workletUrl=' + workletUrl.toString().slice(0, 80));
     await this.audioContext.audioWorklet.addModule(workletUrl);
+    console.log('[capture:7] worklet carregado');
 
     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
     this.workletNode = new AudioWorkletNode(this.audioContext, 'vad-meter-processor');

@@ -574,6 +574,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     private func startVoiceViaWeb() {
+        // WKWebView precisa de janela visível para getUserMedia funcionar no macOS.
+        // Posicionamos o painel fora da área visível (nunca aparece para o usuário).
+        if !panel.isVisible {
+            panel.setFrameOrigin(NSPoint(x: -9999, y: -9999))
+            panel.orderFront(nil)
+            dlog("startVoice: painel ordenado fora da tela para permitir getUserMedia")
+        }
         let js = "return await window.__startVoice();"
         web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { [weak self] result in
             guard let self = self else { return }
@@ -585,6 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     self.iconView?.iconState = .idle
                     self.voiceActive = false
                     self.isMuted = false
+                    self.panel.orderOut(nil)
                     let msg = String(r.dropFirst(6))
                     dlog("startVoice ERRO: \(msg)")
                     DispatchQueue.main.async {
@@ -599,12 +607,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     self.voiceActive = true
                     self.isMuted = false
                     self.iconView?.iconState = .listening
+                    // Painel permanece visível (fora da tela) enquanto voz estiver ativa
                 }
             case .failure(let err):
                 dlog("startVoice JS falhou: \(err)")
                 self.iconView?.iconState = .idle
                 self.voiceActive = false
                 self.isMuted = false
+                self.panel.orderOut(nil)
             }
         }
     }
@@ -616,6 +626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             self.voiceActive = false
             self.isMuted = false
             self.iconView?.iconState = .idle
+            self.panel.orderOut(nil)
             dlog("stopVoice: \(result)")
         }
     }

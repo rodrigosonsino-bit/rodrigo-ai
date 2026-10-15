@@ -420,7 +420,8 @@ window.addEventListener('beforeunload', () => {
 
 (window as any).__toggleMute = async (): Promise<string> => {
   try {
-    if (voiceEndBtn.disabled) return 'not_active';
+    const vs = voiceController.getState();
+    if (vs === 'idle' || vs === 'erro') return 'not_active';
     muted = !muted;
     voiceController.muteMicrophone(muted);
     voiceMuteBtn.setAttribute('aria-pressed', String(muted));
