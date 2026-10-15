@@ -5,6 +5,7 @@
 import Cocoa
 import WebKit
 import Carbon.HIToolbox
+import AVFoundation
 
 let info = Bundle.main.infoDictionary ?? [:]
 let repoRoot = (info["RodrigoRepoRoot"] as? String) ?? FileManager.default.currentDirectoryPath
@@ -14,12 +15,319 @@ let origin = "http://127.0.0.1:\(port)"
 let debugLog = ProcessInfo.processInfo.environment["RODRIGO_DESKTOP_DEBUG"] == "1"
 func dlog(_ s: String) { if debugLog { FileHandle.standardError.write(Data(("[desktop] " + s + "\n").utf8)) } }
 
+// MARK: - Floating Desktop Icon
+
+enum IconState: String {
+    case idle = "idle"
+    case listening = "ouvindo"
+    case processing = "processando"
+    case speaking = "falando"
+    case muted = "mutado"
+}
+
+final class FloatingIconView: NSView {
+    var iconState: IconState = .idle {
+        didSet {
+            if iconState != oldValue {
+                DispatchQueue.main.async { self.transitionTo(self.iconState) }
+            }
+        }
+    }
+
+    private let discSz: CGFloat = 52
+    private let glowPad: CGFloat = 8
+    private let glowRing = CALayer()
+    private let disc = CAGradientLayer()
+    private var bars: [CALayer] = []
+    private let barRest: [CGFloat] = [11, 19, 11]
+
+    private let cIdle1 = NSColor(red: 0.31, green: 0.275, blue: 0.90, alpha: 1)
+    private let cIdle2 = NSColor(red: 0.486, green: 0.228, blue: 0.93, alpha: 1)
+
+    private let cListen1 = NSColor(red: 0.05, green: 0.50, blue: 0.95, alpha: 1)
+    private let cListen2 = NSColor(red: 0.10, green: 0.75, blue: 1.00, alpha: 1)
+
+    private let cProc1 = NSColor(red: 0.55, green: 0.20, blue: 0.90, alpha: 1)
+    private let cProc2 = NSColor(red: 0.85, green: 0.25, blue: 0.80, alpha: 1)
+
+    private let cSpeak1 = NSColor(red: 0.05, green: 0.70, blue: 0.50, alpha: 1)
+    private let cSpeak2 = NSColor(red: 0.15, green: 0.85, blue: 0.60, alpha: 1)
+
+    private let cMute1 = NSColor(red: 0.90, green: 0.35, blue: 0.15, alpha: 1)
+    private let cMute2 = NSColor(red: 0.95, green: 0.20, blue: 0.20, alpha: 1)
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer!.backgroundColor = NSColor.clear.cgColor
+        setupLayers()
+        breathe()
+        popIn()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupLayers() {
+        let cx = bounds.midX, cy = bounds.midY
+        let gs = discSz + glowPad * 2
+        glowRing.frame = CGRect(x: cx - gs / 2, y: cy - gs / 2, width: gs, height: gs)
+        glowRing.cornerRadius = gs / 2
+        glowRing.backgroundColor = cIdle1.withAlphaComponent(0.2).cgColor
+        layer!.addSublayer(glowRing)
+
+        disc.frame = CGRect(x: cx - discSz / 2, y: cy - discSz / 2, width: discSz, height: discSz)
+        disc.cornerRadius = discSz / 2
+        disc.colors = [cIdle1.cgColor, cIdle2.cgColor]
+        disc.startPoint = CGPoint(x: 0, y: 1); disc.endPoint = CGPoint(x: 1, y: 0)
+        disc.shadowColor = cIdle1.cgColor; disc.shadowRadius = 10
+        disc.shadowOpacity = 0.45; disc.shadowOffset = CGSize(width: 0, height: -2)
+        layer!.addSublayer(disc)
+
+        let bw: CGFloat = 3.5, gap: CGFloat = 5
+        let tw = 3 * bw + 2 * gap, x0 = (discSz - tw) / 2
+        for i in 0..<3 {
+            let b = CALayer()
+            b.bounds = CGRect(x: 0, y: 0, width: bw, height: barRest[i])
+            b.position = CGPoint(x: x0 + CGFloat(i) * (bw + gap) + bw / 2, y: discSz / 2)
+            b.cornerRadius = bw / 2
+            b.backgroundColor = NSColor.white.withAlphaComponent(0.93).cgColor
+            disc.addSublayer(b); bars.append(b)
+        }
+    }
+
+    private func popIn() {
+        layer!.transform = CATransform3DMakeScale(0.01, 0.01, 1)
+        let a = CASpringAnimation(keyPath: "transform.scale")
+        a.fromValue = 0.01; a.toValue = 1.0
+        a.damping = 13; a.stiffness = 180; a.mass = 0.8
+        a.duration = a.settlingDuration; a.isRemovedOnCompletion = true
+        layer!.add(a, forKey: "popIn"); layer!.transform = CATransform3DIdentity
+    }
+
+    private func breathe() {
+        glowRing.removeAllAnimations()
+        bars.forEach { $0.removeAllAnimations() }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.35)
+        disc.colors = [cIdle1.cgColor, cIdle2.cgColor]
+        disc.shadowColor = cIdle1.cgColor
+        glowRing.backgroundColor = cIdle1.withAlphaComponent(0.2).cgColor
+        for (i, b) in bars.enumerated() {
+            b.bounds.size.height = barRest[i]
+            b.backgroundColor = NSColor.white.withAlphaComponent(0.93).cgColor
+        }
+        CATransaction.commit()
+
+        let s = CABasicAnimation(keyPath: "transform.scale")
+        s.fromValue = 0.88; s.toValue = 1.14; s.duration = 2.8
+        s.autoreverses = true; s.repeatCount = .infinity
+        s.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        glowRing.add(s, forKey: "breathe")
+        let o = CABasicAnimation(keyPath: "opacity")
+        o.fromValue = 0.2; o.toValue = 0.6; o.duration = 2.8
+        o.autoreverses = true; o.repeatCount = .infinity
+        o.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        glowRing.add(o, forKey: "glow")
+    }
+
+    private func listenAnim() {
+        glowRing.removeAllAnimations()
+        bars.forEach { $0.removeAllAnimations() }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.3)
+        disc.colors = [cListen1.cgColor, cListen2.cgColor]
+        disc.shadowColor = cListen1.cgColor
+        glowRing.backgroundColor = cListen1.withAlphaComponent(0.4).cgColor
+        bars.forEach { $0.backgroundColor = NSColor.white.withAlphaComponent(0.95).cgColor }
+        CATransaction.commit()
+
+        let s = CABasicAnimation(keyPath: "transform.scale")
+        s.fromValue = 0.94; s.toValue = 1.20; s.duration = 1.2
+        s.autoreverses = true; s.repeatCount = .infinity
+        s.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        glowRing.add(s, forKey: "breathe")
+        let o = CABasicAnimation(keyPath: "opacity")
+        o.fromValue = 0.35; o.toValue = 0.85; o.duration = 1.2
+        o.autoreverses = true; o.repeatCount = .infinity
+        s.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        glowRing.add(o, forKey: "glow")
+
+        let seqs: [[NSNumber]] = [
+            [10, 6, 14, 8, 12, 7, 10], [16, 10, 7, 17, 9, 14, 16], [10, 15, 6, 11, 7, 13, 10]]
+        let durs: [CFTimeInterval] = [0.75, 0.85, 0.7]
+        for (i, bar) in bars.enumerated() {
+            let a = CAKeyframeAnimation(keyPath: "bounds.size.height")
+            a.values = seqs[i]; a.duration = durs[i]; a.repeatCount = .infinity
+            a.calculationMode = .cubic
+            bar.add(a, forKey: "bounce")
+        }
+    }
+
+    private func processAnim() {
+        glowRing.removeAllAnimations()
+        bars.forEach { $0.removeAllAnimations() }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.3)
+        disc.colors = [cProc1.cgColor, cProc2.cgColor]
+        disc.shadowColor = cProc1.cgColor
+        glowRing.backgroundColor = cProc1.withAlphaComponent(0.45).cgColor
+        CATransaction.commit()
+
+        let s = CABasicAnimation(keyPath: "transform.scale")
+        s.fromValue = 0.92; s.toValue = 1.22; s.duration = 0.65
+        s.autoreverses = true; s.repeatCount = .infinity
+        s.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        glowRing.add(s, forKey: "breathe")
+
+        let seqs: [[NSNumber]] = [
+            [6, 14, 20, 14, 6], [14, 20, 6, 20, 14], [20, 14, 6, 14, 20]]
+        for (i, bar) in bars.enumerated() {
+            let a = CAKeyframeAnimation(keyPath: "bounds.size.height")
+            a.values = seqs[i]; a.duration = 0.65; a.repeatCount = .infinity
+            a.calculationMode = .cubic
+            bar.add(a, forKey: "bounce")
+        }
+    }
+
+    private func speakAnim() {
+        glowRing.removeAllAnimations()
+        bars.forEach { $0.removeAllAnimations() }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.3)
+        disc.colors = [cSpeak1.cgColor, cSpeak2.cgColor]
+        disc.shadowColor = cSpeak1.cgColor
+        glowRing.backgroundColor = cSpeak1.withAlphaComponent(0.45).cgColor
+        CATransaction.commit()
+
+        let s = CABasicAnimation(keyPath: "transform.scale")
+        s.fromValue = 0.95; s.toValue = 1.25; s.duration = 0.8
+        s.autoreverses = true; s.repeatCount = .infinity
+        glowRing.add(s, forKey: "breathe")
+
+        let seqs: [[NSNumber]] = [
+            [12, 6, 20, 8, 16, 7, 12], [24, 12, 8, 22, 10, 18, 24], [14, 20, 8, 16, 9, 18, 14]]
+        let durs: [CFTimeInterval] = [0.45, 0.55, 0.42]
+        for (i, bar) in bars.enumerated() {
+            let a = CAKeyframeAnimation(keyPath: "bounds.size.height")
+            a.values = seqs[i]; a.duration = durs[i]; a.repeatCount = .infinity
+            a.calculationMode = .cubic
+            bar.add(a, forKey: "bounce")
+        }
+    }
+
+    private func muteAnim() {
+        glowRing.removeAllAnimations()
+        bars.forEach { $0.removeAllAnimations() }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.25)
+        disc.colors = [cMute1.cgColor, cMute2.cgColor]
+        disc.shadowColor = cMute1.cgColor
+        glowRing.backgroundColor = cMute1.withAlphaComponent(0.35).cgColor
+        for bar in bars {
+            bar.bounds.size.height = 3.5
+            bar.backgroundColor = NSColor(white: 1.0, alpha: 0.7).cgColor
+        }
+        CATransaction.commit()
+
+        let o = CABasicAnimation(keyPath: "opacity")
+        o.fromValue = 0.3; o.toValue = 0.7; o.duration = 1.8
+        o.autoreverses = true; o.repeatCount = .infinity
+        glowRing.add(o, forKey: "glow")
+    }
+
+    private func transitionTo(_ st: IconState) {
+        switch st {
+        case .idle: breathe()
+        case .listening: listenAnim()
+        case .processing: processAnim()
+        case .speaking: speakAnim()
+        case .muted: muteAnim()
+        }
+    }
+
+    func pressDown() {
+        let a = CABasicAnimation(keyPath: "transform.scale")
+        a.toValue = 0.88; a.duration = 0.08
+        a.fillMode = .forwards; a.isRemovedOnCompletion = false
+        layer!.add(a, forKey: "press")
+    }
+    func pressUp() {
+        layer!.removeAnimation(forKey: "press")
+        let a = CASpringAnimation(keyPath: "transform.scale")
+        a.fromValue = 0.88; a.toValue = 1.0
+        a.damping = 10; a.stiffness = 300; a.mass = 0.5
+        a.duration = a.settlingDuration; a.isRemovedOnCompletion = true
+        layer!.add(a, forKey: "release")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) {
+        let a = CABasicAnimation(keyPath: "transform.scale")
+        a.toValue = 1.1; a.duration = 0.2; a.fillMode = .forwards; a.isRemovedOnCompletion = false
+        a.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer!.add(a, forKey: "hover")
+    }
+    override func mouseExited(with event: NSEvent) { layer!.removeAnimation(forKey: "hover") }
+}
+
+final class FloatingIconWindow: NSPanel {
+    private var clickOrigin: NSPoint?
+    private var frameAtClick: NSPoint?
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+    override func mouseDown(with event: NSEvent) {
+        clickOrigin = NSEvent.mouseLocation; frameAtClick = frame.origin
+        (contentView as? FloatingIconView)?.pressDown()
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let co = clickOrigin, let fo = frameAtClick else { return }
+        let now = NSEvent.mouseLocation
+        setFrameOrigin(NSPoint(x: fo.x + now.x - co.x, y: fo.y + now.y - co.y))
+    }
+    override func mouseUp(with event: NSEvent) {
+        (contentView as? FloatingIconView)?.pressUp()
+        if let co = clickOrigin {
+            let now = NSEvent.mouseLocation
+            if hypot(now.x - co.x, now.y - co.y) < 4 {
+                if event.clickCount >= 2 {
+                    (NSApp.delegate as? AppDelegate)?.stopVoice()
+                } else {
+                    (NSApp.delegate as? AppDelegate)?.handleIconClick()
+                }
+            }
+        }
+        clickOrigin = nil; frameAtClick = nil
+    }
+    override func rightMouseUp(with event: NSEvent) {
+        guard let d = NSApp.delegate as? AppDelegate else { return }
+        let m = NSMenu()
+        if d.isVoiceSessionActive {
+            let muteTitle = d.isMuted ? "Reativar microfone" : "Silenciar microfone"
+            m.addItem(NSMenuItem(title: muteTitle, action: #selector(AppDelegate.toggleMute), keyEquivalent: "m"))
+            m.addItem(NSMenuItem(title: "Encerrar conversa (duplo clique)", action: #selector(AppDelegate.stopVoice), keyEquivalent: "."))
+            m.addItem(.separator())
+        } else {
+            m.addItem(NSMenuItem(title: "Iniciar conversa por voz", action: #selector(AppDelegate.startVoice), keyEquivalent: "v"))
+            m.addItem(.separator())
+        }
+        m.addItem(NSMenuItem(title: "Mostrar/ocultar janela (⌘⇧Espaço)", action: #selector(AppDelegate.togglePanel), keyEquivalent: ""))
+        m.addItem(NSMenuItem(title: "Recarregar", action: #selector(AppDelegate.reload), keyEquivalent: ""))
+        m.addItem(.separator())
+        m.addItem(NSMenuItem(title: "Sair do Rodrigo AI", action: #selector(AppDelegate.quit), keyEquivalent: "q"))
+        m.items.forEach { $0.target = d }
+        NSMenu.popUpContextMenu(m, with: event, for: contentView!)
+    }
+}
+
 final class Panel: NSPanel {
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { (NSApp.delegate as? AppDelegate)?.hidePanel() } // Esc fecha e devolve o foco
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     var status: NSStatusItem!
     var panel: Panel!
     var web: WKWebView!
@@ -28,12 +336,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var previousApp: NSRunningApplication?   // quem estava na frente antes de abrir o painel (o foco volta para ele)
     var keyTime: Date?                        // carimbo da tecla/clique que pediu abrir
     let showOnStart = ProcessInfo.processInfo.environment["RODRIGO_DESKTOP_SHOW"] == "1"
+    var floatingIcon: FloatingIconWindow!
+    var iconView: FloatingIconView!
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
         buildPanel()
         buildStatusItem()
         registerHotKey()
+        buildFloatingIcon()
         // O servidor sobe em segundo plano (pode levar segundos): a interface nunca fica bloqueada esperando por ele.
         DispatchQueue.global(qos: .userInitiated).async {
             self.startServerIfNeeded()
@@ -109,10 +420,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 5)
+        cfg.mediaTypesRequiringUserActionForPlayback = []
+        cfg.userContentController.add(self, name: "iconState")
+        cfg.userContentController.add(self, name: "consoleLog")
         web = WKWebView(frame: .zero, configuration: cfg)
         web.navigationDelegate = self
         web.uiDelegate = self
-        if #available(macOS 13.3, *) { web.isInspectable = false }
+        if #available(macOS 13.3, *) { web.isInspectable = true }
         let w: CGFloat = 420, h: CGFloat = 560
         panel = Panel(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                       styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
@@ -182,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let b = status.button {
             b.image = NSImage(systemSymbolName: "waveform.circle", accessibilityDescription: "Rodrigo AI")
             b.image?.isTemplate = true
-            b.target = self; b.action = #selector(togglePanel)
+            b.target = self; b.action = #selector(toggleVoice)
             b.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         let menu = NSMenu()
@@ -206,13 +520,172 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, ud in
             let d = Unmanaged<AppDelegate>.fromOpaque(ud!).takeUnretainedValue()
-            DispatchQueue.main.async { d.togglePanel() }
+            DispatchQueue.main.async { d.toggleVoice() }
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
         let id = EventHotKeyID(signature: OSType(0x52414931), id: 1)
         let st = RegisterEventHotKey(UInt32(kVK_Space), UInt32(cmdKey | shiftKey), id, GetApplicationEventTarget(), 0, &hotKeyRef)
         dlog("RegisterEventHotKey status=\(st)")
         if st != noErr { NSLog("Rodrigo AI: atalho ⌘⇧Espaço indisponível (status \(st)); use o ícone da barra de menus.") }
+    }
+
+    // --- voz via ícone flutuante e atalho ---
+    var isVoiceSessionActive: Bool { voiceActive }
+    var isMuted: Bool = false
+    private var voiceActive = false
+
+    @objc func handleIconClick() {
+        if voiceActive {
+            toggleMute()
+        } else {
+            startVoice()
+        }
+    }
+
+    @objc func toggleVoice() {
+        handleIconClick()
+    }
+
+    @objc func startVoice() {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        dlog("startVoice micPermissão=\(status.rawValue)")
+        switch status {
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                dlog("startVoice micConcedido=\(granted)")
+                if granted { DispatchQueue.main.async { self?.startVoiceViaWeb() } }
+                else {
+                    DispatchQueue.main.async {
+                        let a = NSAlert()
+                        a.messageText = "Rodrigo AI"
+                        a.informativeText = "Permita o acesso ao microfone em Ajustes do Sistema → Privacidade e Segurança → Microfone."
+                        a.alertStyle = .warning; a.addButton(withTitle: "OK"); a.runModal()
+                    }
+                }
+            }
+        case .denied, .restricted:
+            let a = NSAlert()
+            a.messageText = "Rodrigo AI"
+            a.informativeText = "Acesso ao microfone negado. Abra Ajustes do Sistema → Privacidade e Segurança → Microfone e ative o Rodrigo AI."
+            a.alertStyle = .warning; a.addButton(withTitle: "OK"); a.runModal()
+        default:
+            startVoiceViaWeb()
+        }
+    }
+
+    private func startVoiceViaWeb() {
+        let js = "return await window.__startVoice();"
+        web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let val):
+                let r = val as? String ?? "nil"
+                dlog("startVoice: \(r)")
+                if r.hasPrefix("error:") {
+                    self.iconView?.iconState = .idle
+                    self.voiceActive = false
+                    self.isMuted = false
+                    let msg = String(r.dropFirst(6))
+                    dlog("startVoice ERRO: \(msg)")
+                    DispatchQueue.main.async {
+                        let a = NSAlert()
+                        a.messageText = "Rodrigo AI"
+                        a.informativeText = msg
+                        a.alertStyle = .warning
+                        a.addButton(withTitle: "OK")
+                        a.runModal()
+                    }
+                } else if r == "started" || r == "already_active" {
+                    self.voiceActive = true
+                    self.isMuted = false
+                    self.iconView?.iconState = .listening
+                }
+            case .failure(let err):
+                dlog("startVoice JS falhou: \(err)")
+                self.iconView?.iconState = .idle
+                self.voiceActive = false
+                self.isMuted = false
+            }
+        }
+    }
+
+    @objc func stopVoice() {
+        let js = "return await window.__stopVoice();"
+        web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { [weak self] result in
+            guard let self = self else { return }
+            self.voiceActive = false
+            self.isMuted = false
+            self.iconView?.iconState = .idle
+            dlog("stopVoice: \(result)")
+        }
+    }
+
+    @objc func toggleMute() {
+        guard voiceActive else { return }
+        let js = "return await window.__toggleMute();"
+        web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let val):
+                let r = val as? String ?? "nil"
+                dlog("toggleMute: \(r)")
+                if r == "muted" {
+                    self.isMuted = true
+                    self.iconView?.iconState = .muted
+                } else if r == "unmuted" {
+                    self.isMuted = false
+                    self.iconView?.iconState = .listening
+                }
+            case .failure(let err):
+                dlog("toggleMute falhou: \(err)")
+            }
+        }
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "consoleLog", let text = message.body as? String {
+            dlog(text)
+            return
+        }
+        guard message.name == "iconState", let stateStr = message.body as? String else { return }
+        dlog("iconState: \(stateStr)")
+        if stateStr == "mutado" {
+            isMuted = true
+            iconView?.iconState = .muted
+            voiceActive = true
+            return
+        }
+        if stateStr == "idle" || stateStr == "erro" {
+            voiceActive = false
+            isMuted = false
+            iconView?.iconState = .idle
+            return
+        }
+        voiceActive = true
+        if !isMuted {
+            iconView?.iconState = IconState(rawValue: stateStr) ?? .listening
+        }
+    }
+
+    // --- ícone flutuante ---
+    func buildFloatingIcon() {
+        let vs: CGFloat = 72
+        iconView = FloatingIconView(frame: NSRect(x: 0, y: 0, width: vs, height: vs))
+        floatingIcon = FloatingIconWindow(contentRect: NSRect(x: 0, y: 0, width: vs, height: vs),
+                                          styleMask: .nonactivatingPanel, backing: .buffered, defer: false)
+        floatingIcon.isOpaque = false
+        floatingIcon.backgroundColor = .clear
+        floatingIcon.level = .floating
+        floatingIcon.hasShadow = false
+        floatingIcon.hidesOnDeactivate = false
+        floatingIcon.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        floatingIcon.isReleasedWhenClosed = false
+        floatingIcon.contentView = iconView
+        if let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            floatingIcon.setFrameOrigin(NSPoint(x: f.maxX - vs - 24, y: f.minY + 24))
+        }
+        floatingIcon.orderFrontRegardless()
     }
 
     // --- só a origem do app ---

@@ -2,6 +2,20 @@ import type { HealthResponse, PrivacyStatus, TtsStatus } from '../shared/types.t
 import { describePrivacy, describeTtsStatus, PRIVACY_UNAVAILABLE_TEXT, PRIVACY_FOOTNOTE } from '../shared/privacyText.ts';
 import { VoiceController } from './voice.ts';
 
+// Ponte de logs para o processo desktop nativo (macOS WKWebView)
+const _postToNative = (level: string, ...args: any[]) => {
+  try {
+    const text = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    (window as any).webkit?.messageHandlers?.consoleLog?.postMessage(`[web:${level}] ${text}`);
+  } catch {}
+};
+const _origLog = console.log;
+console.log = (...args: any[]) => { _origLog(...args); _postToNative('log', ...args); };
+const _origWarn = console.warn;
+console.warn = (...args: any[]) => { _origWarn(...args); _postToNative('warn', ...args); };
+const _origError = console.error;
+console.error = (...args: any[]) => { _origError(...args); _postToNative('err', ...args); };
+
 // Elementos da interface do usuário
 const statusContainer = document.getElementById('health-status-container') as HTMLDivElement;
 const statusMessage = document.getElementById('health-message') as HTMLSpanElement;
@@ -285,6 +299,8 @@ const voiceController = new VoiceController(
     if (state === 'processando' || state === 'erro') {
       resetAgentIndicator();
     }
+    const effectiveState = muted ? 'mutado' : state;
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
   },
   (text) => appendTranscriptEntry('Você', text),
   (text) => appendTranscriptEntry('Rodrigo AI', text),
@@ -364,3 +380,62 @@ voiceScreenBtn.addEventListener('click', () => {
 window.addEventListener('beforeunload', () => {
   void voiceController.stop();
 });
+
+// Exposed for native Swift desktop app via callAsyncJavaScript
+(window as any).__startVoice = async (): Promise<string> => {
+  try {
+    if (!voiceEndBtn.disabled) return 'already_active';
+    voiceStartBtn.disabled = true;
+    await voiceController.start();
+    voiceEndBtn.disabled = false;
+    voiceMuteBtn.disabled = false;
+    voiceScreenBtn.disabled = false;
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage('ouvindo');
+    return 'started';
+  } catch (e) {
+    voiceStartBtn.disabled = false;
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage('idle');
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
+
+(window as any).__stopVoice = async (): Promise<string> => {
+  try {
+    await voiceController.stop();
+    voiceStartBtn.disabled = false;
+    voiceEndBtn.disabled = true;
+    voiceMuteBtn.disabled = true;
+    voiceInterruptBtn.disabled = true;
+    voiceScreenBtn.disabled = true;
+    muted = false;
+    voiceMuteBtn.setAttribute('aria-pressed', 'false');
+    voiceMuteBtn.textContent = 'Silenciar microfone';
+    resetAgentIndicator();
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage('idle');
+    return 'stopped';
+  } catch (e) {
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
+
+(window as any).__toggleMute = async (): Promise<string> => {
+  try {
+    if (voiceEndBtn.disabled) return 'not_active';
+    muted = !muted;
+    voiceController.muteMicrophone(muted);
+    voiceMuteBtn.setAttribute('aria-pressed', String(muted));
+    voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+    const stateToSend = muted ? 'mutado' : voiceController.getState();
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage(stateToSend);
+    return muted ? 'muted' : 'unmuted';
+  } catch (e) {
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
+
+(window as any).__toggleVoice = async (): Promise<string> => {
+  if (!voiceEndBtn.disabled) {
+    return (window as any).__stopVoice();
+  }
+  return (window as any).__startVoice();
+};
