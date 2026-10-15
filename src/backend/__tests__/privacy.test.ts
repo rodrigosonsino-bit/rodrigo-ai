@@ -12,7 +12,7 @@ import { findViolations } from './privacyClaims.js';
 import type { ConversationMessage } from '../../shared/voiceProtocol.js';
 
 describe('parsePrivacyConfig (Fase 12)', () => {
-  it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1), a imagem da tela (Fase V) e a busca web', () => {
+  it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1), a imagem da tela (Fase V), a busca web e o Claude Code', () => {
     assert.deepEqual(DEFAULT_PRIVACY, {
       cloud: true,
       cloudIntent: true,
@@ -24,7 +24,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       ttsDictated: true,
       cloudVision: false,
       webSearch: false,
-      outboundGuard: 'redact'
+      outboundGuard: 'redact',
+      claudeCode: false
     });
   });
 
@@ -177,10 +178,21 @@ describe('effectivePrivacy (Fase 12)', () => {
       mode: 'cloud',
       intent: 'gemini',
       keyPresent: true,
-      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true, visionImage: true, webSearch: false },
+      sends: {
+        utteranceForIntent: true,
+        history: true,
+        historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS,
+        memories: true,
+        knowledgeSnippet: true,
+        ttsText: true,
+        visionImage: true,
+        webSearch: false,
+        claudeCodeOrder: false
+      },
       models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
       webSearch: { enabled: false, reason: 'channel-off' },
+      claudeCode: { enabled: false, reason: 'channel-off' },
       neverSends: ['audio'],
       outboundGuard: 'redact'
     };
@@ -188,13 +200,31 @@ describe('effectivePrivacy (Fase 12)', () => {
   });
 
   it('mestre desligado: nada sai, mesmo com os sub-controles ligados', () => {
-    const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1', RODRIGO_WEB_SEARCH: '1', RODRIGO_CLOUD_VISION: '1' });
+    const st = effectivePrivacy({
+      RODRIGO_CLOUD: '0',
+      RODRIGO_SEND_KNOWLEDGE: '1',
+      RODRIGO_SEND_MEMORIES: '1',
+      RODRIGO_WEB_SEARCH: '1',
+      RODRIGO_CLOUD_VISION: '1',
+      RODRIGO_CLAUDE_CODE: '1'
+    });
     assert.equal(st.mode, 'local-only');
     assert.equal(st.intent, 'local');
-    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false, visionImage: false, webSearch: false });
+    assert.deepEqual(st.sends, {
+      utteranceForIntent: false,
+      history: false,
+      historyTurns: null,
+      memories: false,
+      knowledgeSnippet: false,
+      ttsText: false,
+      visionImage: false,
+      webSearch: false,
+      claudeCodeOrder: false
+    });
     assert.deepEqual(st.models, { generation: null, intent: null, tts: null });
     assert.deepEqual(st.tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });
     assert.deepEqual(st.webSearch, { enabled: false, reason: 'master-off' });
+    assert.deepEqual(st.claudeCode, { enabled: false, reason: 'master-off' });
   });
 
   it('nunca expõe o valor da chave (nem tamanho): só keyPresent', () => {

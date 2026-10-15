@@ -13,6 +13,17 @@ __pycache__
 
 # material pessoal (perfil teologico, Virtologia): nunca versionar nem enviar a terceiros
 docs/research/
+memory/
+skill-observations/
+.openclaw-cli-images/
+CLAUDE.md.bak*
+AGENTS.md
+DREAMS.md
+IDENTITY.md
+SOUL.md
+USER.md
+HANDOFF-*.md
 # configuracao local de preview
 .claude/
 desktop/build/
+

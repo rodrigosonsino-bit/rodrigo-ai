@@ -253,7 +253,7 @@ DETECT_CONFIRMATION_SYSTEM_PROMPT = (
 )
 
 
-INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA"}
+INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA", "DELEGAR_CODIGO"}
 CLOUD_INTENT_MODEL = os.environ.get("RODRIGO_CLOUD_INTENT_MODEL", "gemini-3.5-flash-lite")  # fixado pelo nome (sem alias): ver docs/phase-11-addendum-cloud-intent.md §5.2
 CLOUD_INTENT_HTTP_TIMEOUT_MS = 10_000  # mínimo aceito pela API do Gemini
 CLOUD_INTENT_WAIT_S = 4.0  # espera real: passou disso => fallback local (a chamada HTTP segue em 2º plano)
@@ -286,6 +286,10 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "content = o termo de busca, se houver.\n"
     "HORA: quer saber que horas são agora (qualquer jeito coloquial, inclusive 'já passou das dez?').\n"
     "DATA: quer saber o dia, dia da semana, mês ou ano de hoje.\n"
+    "DELEGAR_CODIGO: pede ao assistente para executar uma tarefa no computador/sistema via Claude Code — "
+    "abrir arquivo, criar pasta, buscar no projeto, rodar script, acessar Drive, controlar apps, "
+    "'executa isso', 'faz no computador', 'verifica o código', 'abre o arquivo', 'busca no meu drive'. "
+    "content = a tarefa exata a executar (texto como pedido, preservando detalhes).\n"
     "NENHUMA: todo o resto — conversa, perguntas de conhecimento, e qualquer menção a lembrar/anotar/"
     "apagar/nota/hora/dia que NÃO seja um pedido direto ('eu lembro que você disse', 'nota dez na prova', "
     "'apagar a luz', 'a hora da verdade', 'hora em Lisboa', preferências comuns 'prefiro café, não chá').\n"

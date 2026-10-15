@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parsePrivacyConfig, ttsCloudEffective, ttsDictatedViaCloud, webSearchEffective } from './privacy.js';
+import {
+  claudeCodeEffective,
+  parsePrivacyConfig,
+  ttsCloudEffective,
+  ttsDictatedViaCloud,
+  webSearchEffective
+} from './privacy.js';
 import { validateHost, validatePort } from './config.js';
 import { SENSITIVE_LIST_APPROVED } from './fileAccessRegistry.js';
 
@@ -135,6 +141,7 @@ export function runDoctor(input: DoctorInput): DoctorReport {
       if (ttsCloudEffective(cfg)) on.push('voz (TTS)');
       if (cfg.cloudVision) on.push('visão');
       if (webSearchEffective(cfg)) on.push('busca web');
+      if (claudeCodeEffective(cfg)) on.push('Claude Code');
       checks.push(check('cloud-channels', 'Canais declarados como ligados', 'info', on.length ? on.join(', ') : 'nenhum além da geração de texto'));
     }
 
@@ -150,6 +157,16 @@ export function runDoctor(input: DoctorInput): DoctorReport {
     }
     if (webSearchEffective(cfg)) {
       checks.push(check('risk-web-search', 'Busca web autônoma ligada', 'warn', 'RODRIGO_WEB_SEARCH=1: leitura externa na nuvem sem autorização por pedido.'));
+    }
+    if (claudeCodeEffective(cfg)) {
+      checks.push(
+        check(
+          'risk-claude-code',
+          'Canal Claude Code ligado',
+          'warn',
+          'RODRIGO_CLAUDE_CODE=1: a ordem falada e os arquivos que o Claude ler podem ir à Anthropic sob o plano da assinatura. Toda chamada ainda exige confirmação por voz.'
+        )
+      );
     }
     if (ttsDictatedViaCloud(cfg)) {
       checks.push(check('risk-tts-dictated', 'Conteúdo ditado vai à voz em nuvem', 'warn', 'Confirmações que repetem conteúdo ditado são enviadas ao TTS em nuvem. Desligue com RODRIGO_TTS_DICTATED=0 ou RODRIGO_SEND_MEMORIES=0.'));

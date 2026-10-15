@@ -80,6 +80,16 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
     stays.push('A busca na web está desligada porque a nuvem está desligada.');
   }
 
+  if (status.claudeCode.enabled) {
+    goes.push(
+      'Pedidos confirmados ao Claude Code enviam a ordem (e o conteúdo dos arquivos que ele ler) à Anthropic sob o plano da sua assinatura (canal RODRIGO_CLAUDE_CODE ligado).'
+    );
+  } else if (status.claudeCode.reason === 'channel-off') {
+    stays.push('O Claude Code está desligado (RODRIGO_CLAUDE_CODE=0, padrão).');
+  } else if (status.claudeCode.reason === 'master-off') {
+    stays.push('O Claude Code está desligado porque a nuvem está desligada.');
+  }
+
   if (status.sends.visionImage) {
     goes.push(
       'A imagem da tela só vai ao Gemini quando você autoriza na própria fala, naquele pedido (canal RODRIGO_CLOUD_VISION ligado).'

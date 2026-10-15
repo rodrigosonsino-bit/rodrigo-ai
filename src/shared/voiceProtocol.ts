@@ -10,7 +10,16 @@ export type VoiceState = 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | '
 export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'NEUROCIENCIA' | 'AMBIGUO' | 'TELA';
 
 /** Fase 5b — nomes de ferramentas suportadas pelo sistema e detecção. */
-export const TOOL_NAMES = ['HORA', 'DATA', 'LEMBRETE_CONSULTAR', 'NOTA_CONSULTAR', 'MEMORIA_CONSULTAR', 'NENHUMA'] as const;
+/** Fase 17 — DELEGAR_CODIGO: intenção de nuvem para o ClaudeCodeSubAgent (não é ferramenta local). */
+export const TOOL_NAMES = [
+  'HORA',
+  'DATA',
+  'LEMBRETE_CONSULTAR',
+  'NOTA_CONSULTAR',
+  'MEMORIA_CONSULTAR',
+  'DELEGAR_CODIGO',
+  'NENHUMA'
+] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 export function isToolName(v: unknown): v is ToolName {
   return typeof v === 'string' && (TOOL_NAMES as readonly string[]).includes(v);

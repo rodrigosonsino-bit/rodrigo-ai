@@ -66,7 +66,7 @@ describe('doctor (T5a): cada verificação tem um caso de sucesso e um de falha'
     assert.equal(byId(doctor({ RODRIGO_CLOUD: '0' }), 'risk-history-memories'), undefined);
   });
 
-  it('risk-knowledge, risk-vision, risk-web-search, risk-tts-dictated: aparecem só quando o canal está efetivamente ligado', () => {
+  it('risk-knowledge, risk-vision, risk-web-search, risk-claude-code, risk-tts-dictated: aparecem só quando o canal está efetivamente ligado', () => {
     assert.equal(byId(doctor({}), 'risk-knowledge'), undefined, 'conhecimento é padrão 0');
     assert.equal(byId(doctor({ RODRIGO_SEND_KNOWLEDGE: '1' }), 'risk-knowledge')?.severity, 'warn');
     assert.equal(byId(doctor({}), 'risk-vision'), undefined, 'visão é padrão desligado (decisão 10)');
@@ -74,6 +74,10 @@ describe('doctor (T5a): cada verificação tem um caso de sucesso e um de falha'
     assert.equal(byId(doctor({ RODRIGO_CLOUD_VISION: '1', RODRIGO_CLOUD: '0' }), 'risk-vision'), undefined);
     assert.equal(byId(doctor({}), 'risk-web-search'), undefined, 'busca web é padrão 0');
     assert.equal(byId(doctor({ RODRIGO_WEB_SEARCH: '1' }), 'risk-web-search')?.severity, 'warn');
+    assert.equal(byId(doctor({}), 'risk-claude-code'), undefined, 'Claude Code é padrão 0');
+    assert.equal(byId(doctor({ RODRIGO_CLAUDE_CODE: '1' }), 'risk-claude-code')?.severity, 'warn');
+    assert.equal(byId(doctor({ RODRIGO_CLAUDE_CODE: '1', RODRIGO_CLOUD: '0' }), 'risk-claude-code'), undefined);
+    assert.match(byId(doctor({ GEMINI_API_KEY: 'k', RODRIGO_CLAUDE_CODE: '1' }), 'cloud-channels')!.detail, /Claude Code/);
     assert.equal(byId(doctor({}), 'risk-tts-dictated')?.severity, 'warn');
     assert.equal(byId(doctor({ RODRIGO_TTS_DICTATED: '0' }), 'risk-tts-dictated'), undefined);
   });

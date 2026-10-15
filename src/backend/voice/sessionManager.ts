@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { DEFAULT_PRIVACY, GENERATION_DISABLED_TEXT, OUTBOUND_BLOCKED_TEXT, type PrivacyConfig } from '../privacy.js';
+import {
+  claudeCodeEffective,
+  DEFAULT_PRIVACY,
+  GENERATION_DISABLED_TEXT,
+  OUTBOUND_BLOCKED_TEXT,
+  type PrivacyConfig
+} from '../privacy.js';
 import { guardMessages, guardText, OutboundBlockedError } from '../privacy/outboundGuard.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
@@ -77,6 +83,36 @@ export interface PendingMutation {
   askedAt: number; // performance.now()
   reprompts: number;
   requestedAt: number;
+}
+
+/** Fase 17: delegação ao ClaudeCodeSubAgent esperando confirmação por voz. */
+export interface ArmedDelegation {
+  /** Texto exato da pergunta emitida; /played só promove se o cliente confirmar este texto. */
+  question: string;
+  /** Transcrição original que gerou o pedido de delegação. */
+  transcript: string;
+  turnId: string;
+  requestedAt: number; // performance.now()
+  reprompts: number;
+}
+
+export interface PendingDelegation {
+  transcript: string;
+  askedAtTurnId: string;
+  askedAt: number;
+  reprompts: number;
+  requestedAt: number;
+}
+
+/**
+ * Fase 17 — heurística barata para decidir se vale gastar uma classificação de intenção
+ * em nuvem quando o ClaudeCodeSubAgent está registrado. Não autoriza nada sozinha.
+ */
+const CLAUDE_CODE_HINT =
+  /\b(claude|computador|m[aá]quina|arquivo|arquivos|drive|pasta|pastas|terminal|c[oó]digo|script|execut|roda\b|abre\b|busca no|no meu (projeto|drive|mac|computador)|faz (isso|isto) (no|pelo)|verifica o|cria (um|uma) (arquivo|pasta))\b/i;
+
+export function mightBeClaudeCodeDelegation(transcript: string): boolean {
+  return CLAUDE_CODE_HINT.test(transcript);
 }
 
 /**
@@ -216,6 +252,9 @@ interface Session {
   armedMutation: ArmedMutation | null;
   emittedSentences?: { turnId: string; items: { text: string; consumed: boolean; origin?: 'screen' }[] };
   pendingMutation: PendingMutation | null;
+  /** Fase 17: delegação ao ClaudeCodeSubAgent esperando confirmação. */
+  armedDelegation: ArmedDelegation | null;
+  pendingDelegation: PendingDelegation | null;
   /**
    * Fase V (§4): no máximo UM pedido de captura de tela pendente por sessão. A rota HTTP consome (resolve e
    * zera este campo) de forma síncrona — sem `await` entre checar e marcar consumido — então um POST
@@ -593,6 +632,8 @@ export class SessionManager {
         armedMutation: null,
       captureRequest: null,
         pendingMutation: null,
+        armedDelegation: null,
+        pendingDelegation: null,
         openClawAsyncPollers: new Map()
       };
       clearTimeout(session.idleTimer);
@@ -732,6 +773,8 @@ export class SessionManager {
       if (
         !session.pendingMutation &&
         !session.armedMutation &&
+        !session.pendingDelegation &&
+        !session.armedDelegation &&
         !mightBeMutation(transcript) &&
         mightBeScreenQuery(transcript)
       ) {
@@ -889,6 +932,87 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         }
       }
 
+      // Fase 17: confirmação de delegação ao ClaudeCodeSubAgent (pendingDelegation).
+      if (session.pendingDelegation) {
+        const pend = session.pendingDelegation;
+        const expired =
+          performance.now() - pend.askedAt >= VOICE_LIMITS.PENDING_MUTATION_TTL_MS ||
+          performance.now() - pend.requestedAt >= MUTATION_MAX_AGE_MS;
+        if (expired) {
+          session.pendingDelegation = null;
+        } else {
+          const verdict = classifyConfirmation(transcript, 'LEMBRETE_CRIAR'); // usa mesmo classificador (SIM/NAO/AMBIGUO)
+          console.log(`[claude_code][confirm] turno=${turn.turnId} veredito=${verdict.verdict} (${verdict.reason})`);
+
+          if (verdict.verdict === 'AMBIGUO' && pend.reprompts < 1) {
+            const pend2 = session.pendingDelegation;
+            session.pendingDelegation = null;
+            const question = MUTATION_REPROMPT_TEXT;
+            this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+            this.emit(session, { type: 'state', state: 'falando' });
+            const cleanQ = cleanTextForSpeech(question);
+            turn.expectedSentences.add(0);
+            turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanQ, 0, 'local'));
+            await Promise.allSettled(turn.pendingSynthesis);
+            if (session.activeTurn === turn) {
+              session.armedDelegation = {
+                question: cleanQ,
+                transcript: pend2.transcript,
+                turnId: turn.turnId,
+                reprompts: pend2.reprompts + 1,
+                requestedAt: pend2.requestedAt
+              };
+              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+              this.emit(session, { type: 'state', state: 'ouvindo' });
+              session.activeTurn = null;
+            }
+            return;
+          }
+
+          const confirmed = verdict.verdict === 'SIM' ? 'SIM' : 'NAO';
+          session.pendingDelegation = null;
+          if (session.activeTurn !== turn) return;
+
+          let text: string;
+          if (confirmed === 'SIM') {
+            this.recordMutationConfirmation(turn.turnId);
+            const r = await this.runSubAgentDelegation({
+              turnId: turn.turnId,
+              query: pend.transcript,
+              subAgentId: 'claude_code',
+              prompt: pend.transcript,
+              isMutation: true,
+              signal: turn.abortController.signal,
+              needs: ['shell', 'read_file', 'write_file', 'network']
+            });
+            if (session.activeTurn !== turn) return;
+            if (r.budgetExceeded && r.speech) {
+              text = r.speech;
+            } else if (r.result?.success) {
+              text = r.result.output || 'Concluído.';
+            } else {
+              text = r.result?.error ?? MUTATION_FAILURE_TEXT;
+            }
+          } else {
+            text = MUTATION_CANCELLED_TEXT;
+          }
+          console.log(`[claude_code] turno=${turn.turnId} confirmado=${confirmed}`);
+
+          this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+          this.emit(session, { type: 'state', state: 'falando' });
+          const clean = cleanTextForSpeech(text);
+          turn.expectedSentences.add(0);
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
+          await Promise.allSettled(turn.pendingSynthesis);
+          if (session.activeTurn === turn) {
+            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+            this.emit(session, { type: 'state', state: 'ouvindo' });
+            session.activeTurn = null;
+          }
+          return;
+        }
+      }
+
       // Fatia 4 (A2): "o que você fez?" responde pelo ExecutionTrace — só se já houver trace com tarefas (R1);
       // sem isso, a fala segue o caminho normal (inclusive o filtro de afirmação alucinada da F11).
       const lastTrace = WHAT_DID_YOU_DO.test(transcript) ? this.coordinator.latestTraceWithTasks() : undefined;
@@ -916,7 +1040,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         this.privacy.cloud &&
         this.privacy.cloudIntent &&
         ((this.mutatingTools.length > 0 && mightBeMutation(transcript)) ||
-          (this.tools.length > 0 && mightBeTemporal(transcript)))
+          (this.tools.length > 0 && mightBeTemporal(transcript)) ||
+          (claudeCodeEffective(this.privacy) &&
+            this.coordinator.get('claude_code') !== undefined &&
+            mightBeClaudeCodeDelegation(transcript)))
       ) {
         try {
           // T1: o texto que vai à nuvem passa pelo guarda de saída. No modo block, com achado, nada é enviado
@@ -1065,6 +1192,48 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           }
           return;
         }
+      }
+
+      // Fase 17: detecção de DELEGAR_CODIGO (delegação ao ClaudeCodeSubAgent).
+      if (cloudIntent?.intent === 'DELEGAR_CODIGO') {
+        const ccAgent = this.coordinator.get('claude_code');
+        if (!ccAgent) {
+          // Canal desligado: informa o usuário e cai no caminho normal de geração.
+          this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+          this.emit(session, { type: 'state', state: 'falando' });
+          const disabledText = 'O Claude Code está desligado. Para habilitar, ative RODRIGO_CLAUDE_CODE=1.';
+          const cleanD = cleanTextForSpeech(disabledText);
+          turn.expectedSentences.add(0);
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanD, 0, 'local'));
+          await Promise.allSettled(turn.pendingSynthesis);
+          if (session.activeTurn === turn) {
+            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+            this.emit(session, { type: 'state', state: 'ouvindo' });
+            session.activeTurn = null;
+          }
+          return;
+        }
+        // Arma confirmação: "Vou pedir ao Claude: <transcrição>. Pode ser?"
+        const previewText = `Vou pedir ao Claude: ${transcript}. Pode ser?`;
+        const question = cleanTextForSpeech(previewText);
+        this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+        this.emit(session, { type: 'state', state: 'falando' });
+        turn.expectedSentences.add(0);
+        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, question, 0, 'dictated'));
+        await Promise.allSettled(turn.pendingSynthesis);
+        if (session.activeTurn === turn) {
+          session.armedDelegation = {
+            question,
+            transcript,
+            turnId: turn.turnId,
+            requestedAt: performance.now(),
+            reprompts: 0
+          };
+          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+          this.emit(session, { type: 'state', state: 'ouvindo' });
+          session.activeTurn = null;
+        }
+        return;
       }
 
       // Fase 3: classifica ANTES de "falando" — o estado continua "processando" durante
@@ -1608,6 +1777,23 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         requestedAt: session.armedMutation.requestedAt
       };
       session.armedMutation = null;
+    }
+
+    // Fase 17: promoção armedDelegation → pendingDelegation (mesma invariante da mutação).
+    if (
+      session.armedDelegation &&
+      session.armedDelegation.turnId === turnId &&
+      session.armedDelegation.question === text &&
+      performance.now() - session.armedDelegation.requestedAt < MUTATION_MAX_AGE_MS
+    ) {
+      session.pendingDelegation = {
+        transcript: session.armedDelegation.transcript,
+        askedAtTurnId: turnId,
+        askedAt: performance.now(),
+        reprompts: session.armedDelegation.reprompts,
+        requestedAt: session.armedDelegation.requestedAt
+      };
+      session.armedDelegation = null;
     }
 
     return true;

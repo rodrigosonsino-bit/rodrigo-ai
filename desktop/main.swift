@@ -426,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         web = WKWebView(frame: .zero, configuration: cfg)
         web.navigationDelegate = self
         web.uiDelegate = self
-        if #available(macOS 13.3, *) { web.isInspectable = true }
+        if #available(macOS 13.3, *) { web.isInspectable = false }
         let w: CGFloat = 420, h: CGFloat = 560
         panel = Panel(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
                       styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],

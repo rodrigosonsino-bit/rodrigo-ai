@@ -27,7 +27,9 @@ export const EFFECTIVE_GRANTS: GrantTable = {
   // Ferramentas locais que MUTAM (gravam nos stores de dados do app): exigem e recebem `write_file`.
   tool_lembrete: ['write_file'],
   tool_nota: ['write_file'],
-  tool_memoria: ['write_file']
+  tool_memoria: ['write_file'],
+  // Fase 17: claude -p como proxy para acesso à máquina (D1: escrita desde o início).
+  claude_code: ['shell', 'read_file', 'write_file', 'network', 'browser']
 };
 
 /** Capacidades que a simples existência da operação já exige (ex.: o agente web sempre usa a rede). */

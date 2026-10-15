@@ -21,6 +21,7 @@ import { SubAgentCoordinator } from '../agents/subAgent.js';
 import { registerWiredOpenClawAgents } from '../agents/openClawSubAgent.js';
 import { makeOpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import { PendingAsyncTaskStore, parseAsyncTaskTtlHours } from '../agents/pendingAsyncStore.js';
+import { registerClaudeCodeAgent } from '../agents/claudeCodeSubAgent.js';
 
 export type TtsStatusResponse = TtsStatus;
 
@@ -135,6 +136,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const coordinator = new SubAgentCoordinator();
   const openClawClient = makeOpenClawHttpClient();
   registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
+  registerClaudeCodeAgent(coordinator, privacy, rootDir);
   const pendingAsyncStore = new PendingAsyncTaskStore(dataDir);
   const sessionManager = new SessionManager(
     engine,
