@@ -313,7 +313,9 @@ final class FloatingIconWindow: NSPanel {
             m.addItem(NSMenuItem(title: "Iniciar conversa por voz", action: #selector(AppDelegate.startVoice), keyEquivalent: "v"))
             m.addItem(.separator())
         }
-        m.addItem(NSMenuItem(title: "Mostrar/ocultar janela (⌘⇧Espaço)", action: #selector(AppDelegate.togglePanel), keyEquivalent: ""))
+        let spTitle = d.isSpeakerphone ? "Desligar viva-voz" : "Ligar viva-voz"
+        m.addItem(NSMenuItem(title: spTitle, action: #selector(AppDelegate.toggleSpeakerphone), keyEquivalent: ""))
+        m.addItem(NSMenuItem(title: "Mostrar/ocultar janela (⌘⌥R)", action: #selector(AppDelegate.togglePanel), keyEquivalent: ""))
         m.addItem(NSMenuItem(title: "Recarregar", action: #selector(AppDelegate.reload), keyEquivalent: ""))
         m.addItem(.separator())
         m.addItem(NSMenuItem(title: "Sair do Rodrigo AI", action: #selector(AppDelegate.quit), keyEquivalent: "q"))
@@ -327,7 +329,7 @@ final class Panel: NSPanel {
     override func cancelOperation(_ sender: Any?) { (NSApp.delegate as? AppDelegate)?.hidePanel() } // Esc fecha e devolve o foco
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSWindowDelegate {
     var status: NSStatusItem!
     var panel: Panel!
     var web: WKWebView!
@@ -423,13 +425,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.userContentController.add(self, name: "iconState")
         cfg.userContentController.add(self, name: "consoleLog")
+        cfg.userContentController.add(self, name: "closePanel")
+        cfg.userContentController.add(self, name: "minimizePanel")
+        cfg.userContentController.add(self, name: "speakerphoneGet")
+        cfg.userContentController.add(self, name: "speakerphoneSet")
+        // Persistência fora do WKWebsiteDataStore.nonPersistent (localStorage morre a cada reload).
+        let spOn = UserDefaults.standard.bool(forKey: "rodrigo.voice.speakerphone")
+        let spScript = WKUserScript(
+            source: "window.__speakerphoneInitial = '\(spOn ? "1" : "0")';",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        cfg.userContentController.addUserScript(spScript)
         web = WKWebView(frame: .zero, configuration: cfg)
         web.navigationDelegate = self
         web.uiDelegate = self
         if #available(macOS 13.3, *) { web.isInspectable = false }
         let w: CGFloat = 420, h: CGFloat = 560
         panel = Panel(contentRect: NSRect(x: 0, y: 0, width: w, height: h),
-                      styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
+                      styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView],
                       backing: .buffered, defer: false)
         panel.title = "Rodrigo AI"
         panel.titlebarAppearsTransparent = true
@@ -438,10 +452,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+        panel.delegate = self
         panel.contentView = web
         // O WKWebView consome o Esc antes de ele chegar ao painel (cancelOperation não dispara): captura aqui.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             if e.keyCode == 53, let self = self, self.panel.isKeyWindow { self.hidePanel(); return nil }
+            if e.keyCode == 46 && e.modifierFlags.contains(.command), let self = self, self.panel.isKeyWindow { self.panel.miniaturize(nil); return nil }
             return e
         }
     }
@@ -476,7 +492,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         previousApp = nil
     }
     @objc func togglePanel() {
-        if panel.isVisible { hidePanel() } else { keyTime = Date(); showPanel() }
+        if panel.isMiniaturized {
+            panel.deminiaturize(nil)
+            showPanel()
+        } else if panel.isVisible {
+            hidePanel()
+        } else {
+            keyTime = Date()
+            showPanel()
+        }
     }
 
     /// Contador local de uso (plano §3.6): só dois carimbos de tempo por abertura. NENHUM conteúdo, nenhum nome de app.
@@ -500,7 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             b.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Mostrar/ocultar (⌘⇧Espaço)", action: #selector(togglePanel), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Mostrar/ocultar (⌘⌥R)", action: #selector(togglePanel), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Recarregar painel", action: #selector(reload), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Sair", action: #selector(quit), keyEquivalent: "q"))
@@ -515,23 +539,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc func reload() { web.load(URLRequest(url: URL(string: origin)!)) }
     @objc func quit() { NSApp.terminate(nil) }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        hidePanel()
+        return false
+    }
+
     // --- atalho global (Carbon: não pede permissão de Acessibilidade) ---
     func registerHotKey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, ud in
             let d = Unmanaged<AppDelegate>.fromOpaque(ud!).takeUnretainedValue()
-            DispatchQueue.main.async { d.toggleVoice() }
+            DispatchQueue.main.async { d.togglePanel() }
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
         let id = EventHotKeyID(signature: OSType(0x52414931), id: 1)
-        let st = RegisterEventHotKey(UInt32(kVK_Space), UInt32(cmdKey | shiftKey), id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        let st = RegisterEventHotKey(UInt32(kVK_ANSI_R), UInt32(cmdKey | optionKey), id, GetApplicationEventTarget(), 0, &hotKeyRef)
         dlog("RegisterEventHotKey status=\(st)")
-        if st != noErr { NSLog("Rodrigo AI: atalho ⌘⇧Espaço indisponível (status \(st)); use o ícone da barra de menus.") }
+        if st != noErr { NSLog("Rodrigo AI: atalho ⌘⌥R indisponível (status \(st)); use o ícone da barra de menus.") }
     }
 
     // --- voz via ícone flutuante e atalho ---
     var isVoiceSessionActive: Bool { voiceActive }
     var isMuted: Bool = false
+    var isSpeakerphone: Bool { UserDefaults.standard.bool(forKey: "rodrigo.voice.speakerphone") }
     private var voiceActive = false
 
     @objc func handleIconClick() {
@@ -653,9 +683,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
+    @objc func toggleSpeakerphone() {
+        let js = "return await window.__toggleSpeakerphone();"
+        web.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let val):
+                dlog("toggleSpeakerphone: \(val as? String ?? "nil")")
+            case .failure(let err):
+                dlog("toggleSpeakerphone falhou: \(err)")
+            }
+        }
+    }
+
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "closePanel" {
+            DispatchQueue.main.async { [weak self] in self?.hidePanel() }
+            return
+        }
+        if message.name == "minimizePanel" {
+            DispatchQueue.main.async { [weak self] in self?.panel.miniaturize(nil) }
+            return
+        }
         if message.name == "consoleLog", let text = message.body as? String {
             dlog(text)
+            return
+        }
+        if message.name == "speakerphoneSet" {
+            let raw: String
+            if let dict = message.body as? [String: Any], let v = dict["value"] as? String {
+                raw = v
+            } else if let s = message.body as? String {
+                raw = s
+            } else {
+                raw = "0"
+            }
+            let on = (raw == "1" || raw.lowercased() == "true")
+            UserDefaults.standard.set(on, forKey: "rodrigo.voice.speakerphone")
+            dlog("speakerphoneSet: \(on ? "1" : "0")")
+            return
+        }
+        if message.name == "speakerphoneGet" {
+            // O JS já lê window.__speakerphoneInitial; este handler existe para o contrato do plano.
+            let on = UserDefaults.standard.bool(forKey: "rodrigo.voice.speakerphone")
+            let js = "window.__speakerphoneInitial = '\(on ? "1" : "0")';"
+            DispatchQueue.main.async { [weak self] in
+                self?.web.evaluateJavaScript(js, completionHandler: nil)
+            }
             return
         }
         guard message.name == "iconState", let stateStr = message.body as? String else { return }

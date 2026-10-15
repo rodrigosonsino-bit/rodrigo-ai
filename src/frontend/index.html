@@ -10,26 +10,19 @@
   <body>
     <div class="app-container">
       <header class="app-header">
-        <h1 class="app-title">Rodrigo AI</h1>
-        <p class="app-phase">Fase 4 — Multi-Agent (v0.3.0)</p>
+        <div class="header-row">
+          <div class="header-titles">
+            <h1 class="app-title">Rodrigo AI</h1>
+            <p class="app-phase">Fase 4 — Multi-Agent (v0.3.0)</p>
+          </div>
+          <div class="header-actions">
+            <button id="minimize-panel-btn" type="button" class="btn-panel-action" title="Minimizar janela (⌘M)" aria-label="Minimizar janela">−</button>
+            <button id="close-panel-btn" type="button" class="btn-panel-action" title="Fechar janela (Esc ou ⌘⌥R)" aria-label="Fechar janela">✕</button>
+          </div>
+        </div>
       </header>
 
       <main class="main-content">
-        <!-- Card de Privacidade (Fase 12): lido de GET /api/privacy, visível antes de iniciar a conversa -->
-        <section class="card privacy-card" aria-labelledby="privacy-title">
-          <h2 id="privacy-title">Privacidade desta conversa</h2>
-          <p id="privacy-headline" class="privacy-headline" role="status" aria-live="polite">Lendo a configuração de privacidade…</p>
-          <div id="privacy-details" hidden>
-            <h3>Fica neste computador</h3>
-            <ul id="privacy-stays"></ul>
-            <h3>Vai ao Gemini (Google)</h3>
-            <ul id="privacy-goes"></ul>
-            <ul id="privacy-warnings" class="privacy-warnings"></ul>
-          </div>
-          <p id="privacy-footnote" class="cost-note"></p>
-          <p id="tts-status" class="cost-note" role="status" aria-live="polite" hidden></p>
-        </section>
-
         <!-- Card de Conversa por Voz -->
         <section class="card voice-card" aria-labelledby="voice-title">
           <h2 id="voice-title">Conversa por Voz</h2>
@@ -45,7 +38,9 @@
             <button id="voice-mute-btn" type="button" class="btn" disabled aria-pressed="false">Silenciar microfone</button>
             <button id="voice-interrupt-btn" type="button" class="btn" disabled>Interromper resposta</button>
             <button id="voice-screen-btn" type="button" class="btn" disabled aria-pressed="false">Compartilhar tela</button>
+            <button id="voice-speakerphone-btn" type="button" class="btn" aria-pressed="false" title="Alto-falante: limiares mais altos e cancelamento de eco pedido ao sistema">Viva-voz</button>
           </div>
+          <p id="voice-speakerphone-note" class="cost-note" hidden></p>
           <p id="voice-screen-note" class="cost-note" hidden>
             Compartilhando a tela: perguntas que citem "tela", "monitor" ou "janela" podem ver um quadro dela. Por
             padrão a imagem é lida só neste computador; ela só vai ao Gemini se você disser isso na própria pergunta
@@ -57,10 +52,29 @@
           <div id="voice-transcript-log" class="transcript-log" role="log" aria-live="polite" aria-label="Transcrição da conversa"></div>
 
           <p class="voice-note">
-            Recomendado usar fone de ouvido no primeiro teste — sem ele, o eco do alto-falante pode
-            confundir a detecção de fala. Seu áudio é transcrito neste computador e não é enviado a nenhum serviço; veja acima o que o texto da conversa envia ao Gemini.
+            Áudio processado localmente. Atalho global: <code>Cmd + Option + R</code>.
           </p>
         </section>
+
+        <!-- Card de Privacidade (Fase 12): colapsado por padrão -->
+        <section class="card privacy-card" aria-labelledby="privacy-title">
+          <details id="privacy-accordion">
+            <summary style="cursor: pointer; font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+              <span id="privacy-title">Privacidade e Canais</span>
+              <span id="privacy-headline" class="privacy-headline-badge" style="font-size: 0.8rem; font-weight: 500; color: var(--color-text-muted);">Ver detalhes ▸</span>
+            </summary>
+            <div id="privacy-details" hidden style="margin-top: 1rem;">
+              <h3>Fica neste computador</h3>
+              <ul id="privacy-stays"></ul>
+              <h3>Vai ao Gemini (Google)</h3>
+              <ul id="privacy-goes"></ul>
+              <ul id="privacy-warnings" class="privacy-warnings"></ul>
+            </div>
+            <p id="privacy-footnote" class="cost-note"></p>
+            <p id="tts-status" class="cost-note" role="status" aria-live="polite" hidden></p>
+          </details>
+        </section>
+
 
         <!-- Card de Conexão com o Sistema -->
         <section class="card status-card" aria-labelledby="status-title">

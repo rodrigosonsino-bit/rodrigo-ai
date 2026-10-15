@@ -4,6 +4,15 @@ import type {
   AudioTurnResponse,
   OrchestratorLabel
 } from '../shared/voiceProtocol.ts';
+import {
+  aecStatusMessage,
+  parseSpeakerphoneFlag,
+  playbackDuckGain,
+  shouldClearSource,
+  speakingForVad,
+  SPEAKERPHONE_STORAGE_KEY,
+  vadThresholds
+} from '../shared/speakerphoneProfile.ts';
 
 // --- Parâmetros de VAD (Fase 2 v2 + adendo) ---
 const PRE_ROLL_MS = 400; // Preserva 400ms de áudio pré-início para garantir integridade do onset com tolerância
@@ -13,9 +22,6 @@ const PRE_ROLL_MS = 400; // Preserva 400ms de áudio pré-início para garantir 
 const SILENCE_THRESHOLD_MS = 1000;
 const MIN_VOICE_DURATION_MS = 220; // Achado v2-5: 200-250ms, não os 400ms originais (corta "Sim"/"Não"/"Oi")
 const MAX_SEGMENT_MS = 20_000;
-const BARGE_IN_HYSTERESIS_MS = 250; // sustentar fala acima do limiar por 250ms durante "falando"
-const RMS_THRESHOLD = 0.012;
-const RMS_THRESHOLD_WHILE_SPEAKING = 0.045; // limiar elevado durante playback (histerese)
 const ONSET_GRACE_MS = 60; // tolerância de micro-pausas/consoantes antes de resetar candidato a fala
 
 type VoiceState = 'idle' | 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | 'erro';
@@ -59,10 +65,18 @@ export class VoiceController {
   private bargeInCandidateMs = 0;
   private sampleRate = 16000;
 
+  /** Modo viva-voz (alto-falante). Padrão off. */
+  private speakerphone = false;
+  /** Último status AEC lido de getSettings (só informativo). */
+  private aecOk: boolean | undefined = undefined;
+  private onSpeakerphoneChange: ((on: boolean, aecMessage: string) => void) | null = null;
+
   // --- Playback ---
   private playbackQueue: QueuedChunk[] = [];
   private playbackActive = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  /** Gain único no caminho de TTS (duck do viva-voz). */
+  private playbackGain: GainNode | null = null;
   /**
    * Incrementado SINCRONAMENTE em triggerBargeIn(), antes de source.stop(). O evento
    * onended do Web Audio dispara de forma assíncrona — currentTurnId sozinho não muda
@@ -82,10 +96,95 @@ export class VoiceController {
     private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void,
     private readonly onScreenSharingChange: (sharing: boolean) => void = () => {},
     private readonly onNotice: (message: string) => void = () => {}
-  ) {}
+  ) {
+    this.speakerphone = this.loadSpeakerphonePreference();
+  }
 
   getState(): VoiceState {
     return this.state;
+  }
+
+  isSpeakerphone(): boolean {
+    return this.speakerphone;
+  }
+
+  getAecStatusMessage(): string {
+    return aecStatusMessage(this.aecOk);
+  }
+
+  setSpeakerphoneChangeHandler(handler: (on: boolean, aecMessage: string) => void): void {
+    this.onSpeakerphoneChange = handler;
+  }
+
+  /**
+   * Liga/desliga viva-voz. Persiste via bridge Swift (painel) ou localStorage (browser).
+   */
+  async setSpeakerphone(on: boolean): Promise<void> {
+    this.speakerphone = on;
+    this.persistSpeakerphone(on);
+    this.applyPlaybackDuck();
+    if (this.mediaStream) {
+      await this.reinforceCaptureConstraints();
+    }
+    this.onSpeakerphoneChange?.(on, this.getAecStatusMessage());
+  }
+
+  private persistSpeakerphone(on: boolean): void {
+    const value = on ? '1' : '0';
+    // Mantém o espelho em memória: start() relê __speakerphoneInitial no painel (UserDefaults
+    // não é síncrono no JS; nonPersistent apaga localStorage a cada reload).
+    (window as unknown as { __speakerphoneInitial?: string }).__speakerphoneInitial = value;
+    const bridge = (window as unknown as { webkit?: { messageHandlers?: Record<string, { postMessage: (v: unknown) => void }> } })
+      .webkit?.messageHandlers?.speakerphoneSet;
+    if (bridge) {
+      bridge.postMessage({ value });
+      return;
+    }
+    try {
+      localStorage.setItem(SPEAKERPHONE_STORAGE_KEY, value);
+    } catch {
+      /* private mode */
+    }
+  }
+
+  private loadSpeakerphonePreference(): boolean {
+    const win = window as unknown as { __speakerphoneInitial?: unknown; webkit?: { messageHandlers?: Record<string, unknown> } };
+    // Painel: Swift injeta __speakerphoneInitial (UserDefaults). Bridge presente ⇒ não usar localStorage
+    // (WKWebsiteDataStore.nonPersistent apaga a cada reload).
+    if (win.webkit?.messageHandlers?.speakerphoneGet || win.webkit?.messageHandlers?.speakerphoneSet) {
+      return parseSpeakerphoneFlag(win.__speakerphoneInitial);
+    }
+    if (typeof win.__speakerphoneInitial !== 'undefined') {
+      return parseSpeakerphoneFlag(win.__speakerphoneInitial);
+    }
+    try {
+      return parseSpeakerphoneFlag(localStorage.getItem(SPEAKERPHONE_STORAGE_KEY));
+    } catch {
+      return false;
+    }
+  }
+
+  private applyPlaybackDuck(): void {
+    if (this.playbackGain) {
+      this.playbackGain.gain.value = playbackDuckGain(this.speakerphone);
+    }
+  }
+
+  private async reinforceCaptureConstraints(): Promise<void> {
+    const track = this.mediaStream?.getAudioTracks()[0];
+    if (!track) return;
+    try {
+      // AGC off no viva-voz: AGC pode amplificar eco (ressalva da auditoria v3-min).
+      await track.applyConstraints({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: !this.speakerphone
+      });
+    } catch (err) {
+      console.warn('[viva-voz] applyConstraints falhou:', err);
+    }
+    const settings = track.getSettings() as MediaTrackSettings & { echoCancellation?: boolean };
+    this.aecOk = settings.echoCancellation;
   }
 
   private setState(state: VoiceState): void {
@@ -115,8 +214,11 @@ export class VoiceController {
       this.token = data.token;
 
       try {
+        this.speakerphone = this.loadSpeakerphonePreference();
         this.connectEvents();
         await this.startCapture();
+        this.applyPlaybackDuck();
+        this.onSpeakerphoneChange?.(this.speakerphone, this.getAecStatusMessage());
         this.setState('ouvindo');
       } catch (err) {
         this.teardown();
@@ -197,11 +299,20 @@ export class VoiceController {
   private async startCapture(): Promise<void> {
     console.log('[capture:1] getUserMedia...');
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: !this.speakerphone,
+        channelCount: 1
+      }
     });
     console.log('[capture:2] stream ok, tracks=' + this.mediaStream.getAudioTracks().length);
+    await this.reinforceCaptureConstraints();
 
     this.audioContext = new AudioContext({ sampleRate: 16000 });
+    this.playbackGain = this.audioContext.createGain();
+    this.playbackGain.gain.value = playbackDuckGain(this.speakerphone);
+    this.playbackGain.connect(this.audioContext.destination);
     console.log('[capture:3] audioCtx state=' + this.audioContext.state);
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
@@ -247,21 +358,23 @@ export class VoiceController {
 
   private processAudioBlock(rms: number, samples: Float32Array): void {
     const durationMs = this.blockDurationMs(samples);
-    const speaking = this.state === 'falando';
-    const threshold = speaking ? RMS_THRESHOLD_WHILE_SPEAKING : RMS_THRESHOLD;
+    const profile = vadThresholds(this.speakerphone);
+    const speaking = speakingForVad(this.speakerphone, this.playbackActive, this.state === 'falando');
+    const threshold = speaking ? profile.rmsWhileOutput : profile.rmsListen;
     const isVoice = rms >= threshold;
 
     if (this.debugBlockCounter++ % 50 === 0) {
-      console.log(`[vad:meter] rms=${rms.toFixed(4)} thr=${threshold.toFixed(4)} isVoice=${isVoice} rec=${this.recording} st=${this.state}`);
+      console.log(
+        `[vad:meter] rms=${rms.toFixed(4)} thr=${threshold.toFixed(4)} isVoice=${isVoice} rec=${this.recording} st=${this.state} spk=${this.speakerphone} pb=${this.playbackActive}`
+      );
     }
 
     if (speaking) {
-      // Barge-in: exige fala sustentada acima do limiar elevado por BARGE_IN_HYSTERESIS_MS
-      // antes de interromper — evita que o vazamento acústico do próprio TTS no
-      // alto-falante dispare autointerrupção (Achado v2-9 + Refinamento do adendo).
+      // Barge-in: exige fala sustentada acima do limiar elevado antes de interromper —
+      // evita que o vazamento acústico do próprio TTS no alto-falante dispare autointerrupção.
       if (isVoice) {
         this.bargeInCandidateMs += durationMs;
-        if (this.bargeInCandidateMs >= BARGE_IN_HYSTERESIS_MS) {
+        if (this.bargeInCandidateMs >= profile.bargeInHysteresisMs) {
           this.triggerBargeIn();
         }
       } else {
@@ -506,11 +619,15 @@ export class VoiceController {
     await new Promise<void>((resolve) => {
       const source = this.audioContext!.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(this.audioContext!.destination);
+      const dest = this.playbackGain ?? this.audioContext!.destination;
+      source.connect(dest);
       this.currentSource = source;
 
       source.onended = () => {
-        this.currentSource = null;
+        // Corrida: um onended atrasado não pode apagar um source mais novo.
+        if (shouldClearSource(source, this.currentSource)) {
+          this.currentSource = null;
+        }
         resolve();
       };
 
@@ -561,6 +678,7 @@ export class VoiceController {
     this.workletNode = null;
     this.mediaStream?.getTracks().forEach((t) => t.stop());
     this.mediaStream = null;
+    this.playbackGain = null;
     void this.audioContext?.close();
     this.audioContext = null;
     this.sessionId = null;

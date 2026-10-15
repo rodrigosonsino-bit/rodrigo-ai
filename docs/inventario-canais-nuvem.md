@@ -28,6 +28,10 @@ Gerado a partir do código em `main` (`4369973`), com os pontos de aplicação c
 
 Não fazem parte do que o app envia, mas **recebem código ou documentos do projeto** quando um agente de desenvolvimento os usa para auditar ou delegar: Codex, agy, DeepSeek/Kimi (NVIDIA NIM), MiMo, Jev (TypeSafe), Hermes (nuvem da Nous). Regra do projeto: nunca enviar `docs/research/`, `.env`, `memory/` nem material pessoal; exportar só código quando for auditar.
 
+## Controles locais sem canal novo
+
+- **Viva-voz (2026-10-15):** toggle opt-in no painel/browser; limiares VAD mais altos, duck 0,85 e `echoCancellation`/`noiseSuppression` pedidos ao sistema; AGC desligado no modo. **Não cria canal de nuvem** — áudio do usuário continua só no STT local. Eco residual e calibração acústica ficam na dívida T8. Voz pessoal (enrolamento) **fora** desta fatia.
+
 ## Lacunas conhecidas (honestidade)
 
 1. **A imagem da tela não passa por nenhum guarda** (senha ou dado pessoal visível na tela vai junto, se o canal estiver ligado e você autorizar). Mitigação atual: desligado por padrão e autorização por pedido.
