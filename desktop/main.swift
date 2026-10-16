@@ -347,6 +347,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         buildStatusItem()
         registerHotKey()
         buildFloatingIcon()
+        requestAccessibilityIfNeeded()
+        requestAutomationIfNeeded()
         // O servidor sobe em segundo plano (pode levar segundos): a interface nunca fica bloqueada esperando por ele.
         DispatchQueue.global(qos: .userInitiated).async {
             self.startServerIfNeeded()
@@ -354,6 +356,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 self.web.load(URLRequest(url: URL(string: origin)!))
                 if self.showOnStart { self.showPanel() }
                 if debugLog { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.probe() } }
+            }
+        }
+    }
+
+    private func requestAccessibilityIfNeeded() {
+        let trustedNow = AXIsProcessTrusted()
+        dlog("launch accessibilityTrusted=\(trustedNow)")
+        guard !trustedNow else { return }
+
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    private func requestAutomationIfNeeded() {
+        DispatchQueue.global(qos: .utility).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            p.arguments = [
+                "-e",
+                "tell application id \"com.apple.systemevents\" to return name of first application process whose frontmost is true"
+            ]
+            let out = Pipe()
+            let err = Pipe()
+            p.standardOutput = out
+            p.standardError = err
+            do {
+                try p.run()
+                p.waitUntilExit()
+                guard p.terminationStatus != 0 else { return }
+                let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                guard stderr.contains("-1743") || stderr.localizedCaseInsensitiveContains("not authorized to send Apple events") else {
+                    return
+                }
+                dlog("Automação para System Events ainda não concedida: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+            } catch {
+                dlog("falha ao checar Automação: \(error)")
             }
         }
     }

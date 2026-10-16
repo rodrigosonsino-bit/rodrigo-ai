@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DynamicVoiceProvider, SayVoiceProvider, type VoiceProviderDeps } from '../ttsProviders.js';
+import { DynamicVoiceProvider, SayVoiceProvider, type VoiceProviderDeps, parseSayVoiceNames, resolveSayVoiceName } from '../ttsProviders.js';
 import { ConfigurarVozTool } from '../../tools/desktopControlTool.js';
 import { DEFAULT_PRIVACY, type PrivacyConfig } from '../../privacy.js';
 import type { IVoiceProvider, SynthesizeOptions } from '../../../shared/extensions/index.js';
@@ -29,6 +29,23 @@ function makeDummyEngine(): VoiceProviderDeps['engine'] {
 }
 
 describe('Pilar 3 — DynamicVoiceProvider & ConfigurarVozTool', () => {
+  it('aceita qualquer voz local instalada do macOS por nome, inclusive nomes fora da lista fixa antiga', () => {
+    const installed = ['Fernanda (Enhanced)', 'Personal Voice'];
+    assert.equal(resolveSayVoiceName('Fernanda', installed), 'Fernanda (Enhanced)');
+    assert.equal(resolveSayVoiceName('Personal', installed), 'Personal Voice');
+  });
+
+  it('faz parse da listagem do say preservando nomes completos das vozes do sistema', () => {
+    const listed = parseSayVoiceNames(
+      [
+        'Felipe (Enhanced)   pt_BR    # Olá, meu nome é Felipe.',
+        'Fernanda (Enhanced) pt_BR    # Olá, meu nome é Fernanda.',
+        'Personal Voice      en_US    # Hello! My name is Personal Voice.'
+      ].join('\n')
+    );
+    assert.deepEqual(listed, ['Felipe (Enhanced)', 'Fernanda (Enhanced)', 'Personal Voice']);
+  });
+
   it('bloqueia troca para voz do Gemini quando a política de privacidade desliga TTS em nuvem', async () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-voice-switch-'));
     try {
@@ -76,6 +93,32 @@ describe('Pilar 3 — DynamicVoiceProvider & ConfigurarVozTool', () => {
       const saved = JSON.parse(fs.readFileSync(prefFile, 'utf-8'));
       assert.equal(saved.engine, 'gemini');
       assert.equal(saved.voice, 'Aoede');
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('troca para uma voz local instalada fora da lista antiga e persiste a escolha', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-voice-switch-'));
+    try {
+      const base = new SayVoiceProvider();
+      const dynamic = new DynamicVoiceProvider(base, {
+        engine: makeDummyEngine(),
+        privacy: DEFAULT_PRIVACY,
+        rootDir: tmpRoot,
+        installedSayVoices: ['Fernanda (Enhanced)', 'Personal Voice']
+      });
+      const tool = new ConfigurarVozTool(dynamic);
+
+      const res = tool.execute('CONFIGURAR_VOZ', 'voz:Personal');
+      assert.match(res, /Personal Voice do sistema/);
+      assert.equal(dynamic.id, 'say');
+      assert.match(dynamic.name, /Personal Voice/);
+
+      const prefFile = path.join(tmpRoot, '.runtime', 'voice-preference.json');
+      const saved = JSON.parse(fs.readFileSync(prefFile, 'utf-8'));
+      assert.equal(saved.engine, 'say');
+      assert.equal(saved.voice, 'Personal Voice');
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
