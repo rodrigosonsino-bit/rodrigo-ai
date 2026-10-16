@@ -130,6 +130,26 @@ retryButton.addEventListener('click', () => {
   checkHealth();
 });
 
+const closePanelBtn = document.getElementById('close-panel-btn') as HTMLButtonElement | null;
+if (closePanelBtn) {
+  closePanelBtn.addEventListener('click', () => {
+    try {
+      (window as any).webkit?.messageHandlers?.closePanel?.postMessage('close');
+    } catch {
+      window.close();
+    }
+  });
+}
+
+const minimizePanelBtn = document.getElementById('minimize-panel-btn') as HTMLButtonElement | null;
+if (minimizePanelBtn) {
+  minimizePanelBtn.addEventListener('click', () => {
+    try {
+      (window as any).webkit?.messageHandlers?.minimizePanel?.postMessage('minimize');
+    } catch {}
+  });
+}
+
 // --- Privacidade (Fase 12): lê GET /api/privacy e mostra o que fica local e o que vai ao Gemini ---
 
 function isPrivacyStatus(value: unknown): value is PrivacyStatus {
