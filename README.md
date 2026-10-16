@@ -210,7 +210,7 @@ rodrigo-ai/
 
 | O quê | Quando | Como desligar |
 |---|---|---|
-| Texto da conversa recente (as últimas `RODRIGO_HISTORY_TURNS` trocas, 8 por padrão): o que você disse e o que o assistente respondeu, **inclusive conteúdo de notas ou memórias repetido na conversa** | em toda resposta gerada | `RODRIGO_SEND_HISTORY=0` (só a fala atual vai) |
+| Texto da conversa recente (as últimas `RODRIGO_HISTORY_TURNS` trocas, 30 por padrão, configurável de 1 a 100): o que você disse e o que o assistente respondeu, **inclusive conteúdo de notas ou memórias repetido na conversa** | em toda resposta gerada | `RODRIGO_SEND_HISTORY=0` (só a fala atual vai) |
 | Memórias salvas | junto com cada resposta | `RODRIGO_SEND_MEMORIES=0` |
 | Trecho de `docs/research/` (Teologia/Virtologia) | só se ligado; **desligado por padrão** | `RODRIGO_SEND_KNOWLEDGE=1` liga |
 | **Imagem da tela** (Fase V) | só se o canal estiver ligado **e** você autorizar na própria fala, naquele pedido; **desligado por padrão** | `RODRIGO_CLOUD_VISION=1` liga; `0` (padrão) mantém a imagem fora do Gemini |
@@ -230,4 +230,4 @@ rodrigo-ai/
 
 **Variáveis só de teste** (não fazem parte do uso normal): `RODRIGO_TEST=1`, `RODRIGO_GEMINI_BASE_URL` (aponta o worker para um Gemini falso em loopback; só vale com `RODRIGO_TEST=1`, só aceita `http://127.0.0.1:<porta>` ou `http://[::1]:<porta>` com porta de 1024 a 65535, usa uma chave sintética e nunca a sua), `RODRIGO_WORKER_NO_MODELS=1` e `RODRIGO_TEST_GEMINI_TIMEOUT_MS`. Fora do modo de teste, `RODRIGO_GEMINI_BASE_URL` é ignorada com um aviso. O worker nunca segue redirecionamentos do Gemini.
 
-Valores aceitos são exatamente `0` ou `1` (e um inteiro de 1 a 8 para `RODRIGO_HISTORY_TURNS`); qualquer outro valor impede a inicialização. A tela inicial mostra a configuração em vigor (`GET /api/privacy`), que é a configuração declarada, não uma medição do tráfego real.
+Valores aceitos são exatamente `0` ou `1` (um inteiro de 1 a 100 para `RODRIGO_HISTORY_TURNS` e de 1 a 1440 minutos para `RODRIGO_IDLE_TIMEOUT_MINUTES`); qualquer outro valor impede a inicialização. A tela inicial mostra a configuração em vigor (`GET /api/privacy`), que é a configuração declarada, não uma medição do tráfego real.

@@ -187,6 +187,8 @@ export interface SessionTuning {
   screenCaptureTimeoutMs?: number;
   /** Fase 15 §6: relógio injetável para o orçamento de orquestração (60s). */
   nowMs?: () => number;
+  /** Timeout de ociosidade em ms antes de encerrar a sessão (padrão de produção: 60 minutos ou privacy.idleTimeoutMinutes * 60_000). */
+  idleTimeoutMs?: number;
 }
 
 /**
@@ -314,6 +316,7 @@ export class SessionManager {
    */
   private readonly confirmedMutationTokens = new Map<string, string>();
   private readonly nowMs: () => number;
+  private readonly idleTimeoutMs: number;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -359,6 +362,7 @@ export class SessionManager {
     this.pendingAsyncStore = pendingAsyncStore;
     this.coordinator = coordinator;
     this.nowMs = tuning.nowMs ?? (() => Date.now());
+    this.idleTimeoutMs = tuning.idleTimeoutMs ?? (privacy.idleTimeoutMinutes ? privacy.idleTimeoutMinutes * 60_000 : VOICE_LIMITS.IDLE_TIMEOUT_MS);
     // Fatia 4 (§2.2): ferramentas locais como subagentes, todas atrás do gatekeeper de token.
     for (const t of [...this.tools, ...this.mutatingTools]) {
       this.coordinator.register(new ToolSubAgent(t, (turnId, token) => this.consumeMutationToken(turnId, token)));
@@ -575,7 +579,7 @@ export class SessionManager {
       if (this.current === session) {
         this.terminate(session, false);
       }
-    }, VOICE_LIMITS.IDLE_TIMEOUT_MS);
+    }, this.idleTimeoutMs);
   }
 
   private async terminate(session: Session, notifyPreempted: boolean): Promise<void> {
@@ -653,6 +657,10 @@ export class SessionManager {
     return this.current;
   }
 
+  isAuthorized(sessionId: string, token: string): boolean {
+    return this.getAuthorized(sessionId, token) !== null;
+  }
+
   attachEvents(sessionId: string, token: string, res: ServerResponse): boolean {
     const session = this.getAuthorized(sessionId, token);
     if (!session) return false;
@@ -688,10 +696,7 @@ export class SessionManager {
   }
 
   private trimHistory(session: Session): void {
-    const maxMessages = VOICE_LIMITS.MAX_CONTEXT_TURNS * 2;
-    if (session.history.length > maxMessages) {
-      session.history = session.history.slice(session.history.length - maxMessages);
-    }
+    session.history = trimHistory(session.history);
   }
 
   async submitAudio(
@@ -1915,6 +1920,19 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
   }
 }
 
+/**
+ * Retenção em memória do histórico da sessão: no máximo MAX_CONTEXT_TURNS * 2 mensagens.
+ */
+export function trimHistory(
+  history: readonly ConversationMessage[],
+  maxTurns = VOICE_LIMITS.MAX_CONTEXT_TURNS
+): ConversationMessage[] {
+  const maxMessages = maxTurns * 2;
+  if (history.length > maxMessages) {
+    return history.slice(history.length - maxMessages);
+  }
+  return [...history];
+}
 
 /**
  * Fase 12: parte do histórico que pode ir à geração. SEND_HISTORY=0 => só a fala do turno atual

@@ -17,7 +17,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       cloud: true,
       cloudIntent: true,
       sendHistory: true,
-      historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS,
+      historyTurns: VOICE_LIMITS.DEFAULT_CONTEXT_TURNS,
+      idleTimeoutMinutes: 60,
       sendMemories: true,
       sendKnowledge: false,
       cloudTts: true,
@@ -52,8 +53,19 @@ describe('parsePrivacyConfig (Fase 12)', () => {
 
   it('HISTORY_TURNS: inteiro 1..MAX, sem zero à esquerda, sem texto', () => {
     assert.equal(parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: '3' }).historyTurns, 3);
+    assert.equal(parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: '30' }).historyTurns, 30);
+    assert.equal(parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: '100' }).historyTurns, 100);
     for (const bad of ['0', '09', '-1', '3.5', 'abc', String(VOICE_LIMITS.MAX_CONTEXT_TURNS + 1), '１２']) {
       assert.throws(() => parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: bad }), /RODRIGO_HISTORY_TURNS/, bad);
+    }
+  });
+
+  it('IDLE_TIMEOUT_MINUTES: inteiro 1..1440, sem zero à esquerda, sem texto ou notação científica', () => {
+    assert.equal(parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: '1' }).idleTimeoutMinutes, 1);
+    assert.equal(parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: '60' }).idleTimeoutMinutes, 60);
+    assert.equal(parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: '1440' }).idleTimeoutMinutes, 1440);
+    for (const bad of ['0', '09', '-1', '1.5', '1e3', '1441', 'abc', ' 1 x']) {
+      assert.throws(() => parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: bad }), /RODRIGO_IDLE_TIMEOUT_MINUTES/, bad);
     }
   });
 
@@ -181,7 +193,7 @@ describe('effectivePrivacy (Fase 12)', () => {
       sends: {
         utteranceForIntent: true,
         history: true,
-        historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS,
+        historyTurns: VOICE_LIMITS.DEFAULT_CONTEXT_TURNS,
         memories: true,
         knowledgeSnippet: true,
         ttsText: true,
@@ -309,7 +321,7 @@ describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 1
   it('nuvem ligada: o histórico, a intenção, as memórias e o trecho aparecem com o estado certo', () => {
     const on = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_KNOWLEDGE: '1' }));
     assert.match(on.headline, /usa a nuvem \(Gemini\)/);
-    assert.ok(on.goes.some((l) => /últimas 8 trocas/.test(l) && /nota ou memória/.test(l)), 'declara que conteúdo de nota/memória repetido na conversa vai junto');
+    assert.ok(on.goes.some((l) => new RegExp(`últimas ${VOICE_LIMITS.DEFAULT_CONTEXT_TURNS} trocas`).test(l) && /nota ou memória/.test(l)), 'declara que conteúdo de nota/memória repetido na conversa vai junto');
     assert.ok(on.goes.some((l) => /memórias que você salvou são enviadas/.test(l)));
     assert.ok(on.goes.some((l) => /Trechos dos seus textos de pesquisa .* são enviados/.test(l)));
     assert.ok(on.goes.some((l) => /hora, data, lembretes e notas também vai ao Gemini/.test(l)));
