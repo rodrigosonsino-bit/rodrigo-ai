@@ -743,9 +743,9 @@ export class MemoriaTool implements IMutatingTool {
   }
 }
 
-/** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2 e atualizado na Fase 7 §4.1 e Fase 8 §4.4. */
+/** Filtro permissivo especificado em docs/phase-5c-v3.md §4.2 e atualizado na Fase 7 §4.1, Fase 8 §4.4 e Controle Desktop v5. */
 const MUTATION_GATE =
-  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar|avis|delet|alter|some|toque|acord|bota|zera|reescrev|desfaz|limp|errad|confund)\w*\b|\b(edita|editar|edite|editou|editando|troca|trocar|troque|trocou|trocando|corrige|corrigir|corrija|corrigiu|corrigindo)\b/;
+  /\b(lembr|anot|guard|escrev|salv|apag|esquec|cancel|nota|lembrete|aviso|tarefa|compromisso|registr|memor|grava|grave|gravou|gravand|gravar|avis|delet|alter|some|toque|acord|bota|zera|reescrev|desfaz|limp|errad|confund|volum|som|mudo|muta|desmuta|paus|toca|musica|faixa|proxim|anterior|abr|fech|encerr|modo|escur|clar|minimiz|janel|pasta|download|document|desktop|lixeir|bloque|repous|dorm|suspens|digit|colar|cola|ditad|traduz|voz|luciana|felipe|charon|puck|kokoro|aoede|fenrir|kore|zephyr|autocorrig|melhoria|refator|codigo)\w*\b|\b(edita|editar|edite|editou|editando|troca|trocar|troque|trocou|trocando|corrige|corrigir|corrija|corrigiu|corrigindo|auto\s*corrig\w*|auto\s*correc\w*)\b/;
 
 export function mightBeMutation(transcript: string): boolean {
   const n = transcript
@@ -760,15 +760,19 @@ export function mightBeMutation(transcript: string): boolean {
  * Deriva o prefixo da ação (LEMBRETE_/NOTA_) e encontra a MESMA instância que trata as duas
  * ações desse prefixo — especificado em docs/phase-5c-v2.md §6.4.
  */
-export function selectMutatingToolByAction(
+export type SyncMutatingTool = Omit<IMutatingTool, 'execute'> & {
+  execute(kind: IntentName, content: string | null): string;
+};
+
+export function selectMutatingToolByAction<T extends IMutatingTool = IMutatingTool>(
   kind: string,
-  tools: readonly IMutatingTool[]
-): IMutatingTool | null {
+  tools: readonly T[]
+): T | null {
   const prefix = kind.split('_')[0].toUpperCase();
   return tools.find((t) => t.name.toUpperCase() === prefix && t.isAvailable()) ?? null;
 }
 export interface MutatingToolsResult {
-  tools: IMutatingTool[];
+  tools: SyncMutatingTool[];
   scheduler: ReminderScheduler;
   memoriaStore: JsonStore<StoredItem>;
 }

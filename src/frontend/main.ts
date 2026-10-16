@@ -336,8 +336,6 @@ const voiceEndBtn = document.getElementById('voice-end-btn') as HTMLButtonElemen
 const voiceMuteBtn = document.getElementById('voice-mute-btn') as HTMLButtonElement;
 const voiceInterruptBtn = document.getElementById('voice-interrupt-btn') as HTMLButtonElement;
 const voiceScreenBtn = document.getElementById('voice-screen-btn') as HTMLButtonElement;
-const voiceSpeakerphoneBtn = document.getElementById('voice-speakerphone-btn') as HTMLButtonElement;
-const voiceSpeakerphoneNote = document.getElementById('voice-speakerphone-note') as HTMLParagraphElement;
 const voiceScreenNote = document.getElementById('voice-screen-note') as HTMLParagraphElement;
 const voiceTranscriptLog = document.getElementById('voice-transcript-log') as HTMLDivElement;
 const voiceAgentIndicator = document.getElementById('voice-agent-indicator') as HTMLSpanElement;
@@ -373,7 +371,7 @@ function resetAgentIndicator(): void {
   voiceAgentIndicator.textContent = '';
 }
 
-function appendTranscriptEntry(speaker: 'Você' | 'Rodrigo AI', text: string): void {
+function appendTranscriptEntry(speaker: 'Você' | 'Orque', text: string): void {
   const entry = document.createElement('p');
   entry.className = 'transcript-entry';
   const strong = document.createElement('strong');
@@ -413,7 +411,7 @@ const voiceController = new VoiceController(
     (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
   },
   (text) => appendTranscriptEntry('Você', text),
-  (text) => appendTranscriptEntry('Rodrigo AI', text),
+  (text) => appendTranscriptEntry('Orque', text),
   (message) => appendErrorEntry(message),
   (_turnId, label, _handled) => {
     // Checa o rótulo explicitamente (não `handled`) — `!handled` sozinho não garante
@@ -431,22 +429,6 @@ const voiceController = new VoiceController(
   },
   (message) => appendNoticeEntry(message)
 );
-
-function syncSpeakerphoneUi(on: boolean, aecMessage: string): void {
-  voiceSpeakerphoneBtn.setAttribute('aria-pressed', String(on));
-  voiceSpeakerphoneBtn.textContent = on ? 'Viva-voz ligado' : 'Viva-voz';
-  voiceSpeakerphoneBtn.classList.toggle('btn-speakerphone-on', on);
-  if (on) {
-    voiceSpeakerphoneNote.hidden = false;
-    voiceSpeakerphoneNote.textContent = aecMessage;
-  } else {
-    voiceSpeakerphoneNote.hidden = true;
-    voiceSpeakerphoneNote.textContent = '';
-  }
-}
-
-voiceController.setSpeakerphoneChangeHandler(syncSpeakerphoneUi);
-syncSpeakerphoneUi(voiceController.isSpeakerphone(), voiceController.getAecStatusMessage());
 
 voiceStartBtn.addEventListener('click', () => {
   void (async () => {
@@ -483,10 +465,6 @@ voiceMuteBtn.addEventListener('click', () => {
   voiceController.muteMicrophone(muted);
   voiceMuteBtn.setAttribute('aria-pressed', String(muted));
   voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
-});
-
-voiceSpeakerphoneBtn.addEventListener('click', () => {
-  void voiceController.setSpeakerphone(!voiceController.isSpeakerphone());
 });
 
 voiceInterruptBtn.addEventListener('click', () => {
@@ -569,18 +547,4 @@ window.addEventListener('beforeunload', () => {
     return (window as any).__stopVoice();
   }
   return (window as any).__startVoice();
-};
-
-(window as any).__toggleSpeakerphone = async (): Promise<string> => {
-  try {
-    const next = !voiceController.isSpeakerphone();
-    await voiceController.setSpeakerphone(next);
-    return next ? 'speakerphone_on' : 'speakerphone_off';
-  } catch (e) {
-    return 'error:' + (e instanceof Error ? e.message : String(e));
-  }
-};
-
-(window as any).__getSpeakerphone = (): string => {
-  return voiceController.isSpeakerphone() ? '1' : '0';
 };

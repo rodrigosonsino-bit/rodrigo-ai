@@ -9,6 +9,12 @@ import {
   createSpecialistAgents,
   selectAgentForLabel
 } from '../agents/specialistAgents.js';
+import {
+  isStandaloneOrqueCall,
+  normalizeOrqueTranscript,
+  ORQUE_ATTENDANCE_TEXT,
+  stripLeadingOrqueVocative
+} from '../voice/sessionManager.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 
 describe('Agentes especialistas (Fase 4 + Fase 16)', () => {
@@ -72,5 +78,24 @@ describe('Agentes especialistas (Fase 4 + Fase 16)', () => {
         `${id}: prompt sem a instrução de não adivinhar`
       );
     }
+  });
+
+  it('Orque: todos os agentes especialistas conhecem o nome Orque e o atendimento imediato funciona', () => {
+    const agents = createSpecialistAgents();
+    for (const agent of agents) {
+      assert.match(agent.getSystemPrompt(), /\bOrque\b/);
+    }
+    assert.match(ORQUE_ATTENDANCE_TEXT, /\bOrque\b/);
+    assert.equal(normalizeOrqueTranscript('Oi Orc, tudo bem?'), 'Oi Orque, tudo bem?');
+    assert.equal(normalizeOrqueTranscript('Fala Ork!'), 'Fala Orque!');
+    assert.equal(normalizeOrqueTranscript('Orqui, que horas são?'), 'Orque, que horas são?');
+    assert.equal(isStandaloneOrqueCall('Orque'), true);
+    assert.equal(isStandaloneOrqueCall('Oi Orque!'), true);
+    assert.equal(isStandaloneOrqueCall('Fala, Ork?'), true);
+    assert.equal(isStandaloneOrqueCall('Orque, tá me ouvindo?'), true);
+    assert.equal(isStandaloneOrqueCall('Tá aí, Orque?'), true);
+    assert.equal(isStandaloneOrqueCall('Orque, que horas são?'), false);
+    assert.equal(stripLeadingOrqueVocative('Orque, que horas são?'), 'que horas são?');
+    assert.equal(stripLeadingOrqueVocative('Oi Orque, aumenta o volume'), 'aumenta o volume');
   });
 });

@@ -141,21 +141,22 @@ MUTATION_NAMES = {
     "LEMBRETE_CRIAR", "LEMBRETE_EDITAR", "LEMBRETE_APAGAR", "LEMBRETE_REAGENDAR", "LEMBRETE_CONSULTAR",
     "NOTA_CRIAR", "NOTA_EDITAR", "NOTA_APAGAR", "NOTA_CONSULTAR",
     "MEMORIA_GUARDAR", "MEMORIA_EDITAR", "MEMORIA_ESQUECER", "MEMORIA_CONSULTAR",
+    "DESKTOP_COMANDO", "DESKTOP_CRITICO", "DIGITAR_TEXTO", "DITADO_LOCAL", "CONFIGURAR_VOZ", "AUTO_CORRECAO",
     "NENHUMA"
 }
-# Fase 14: as 3 ações *_CONSULTAR são LEITURA, não mutação — mas detectadas pelo mesmo
-# handler (detect_mutation) porque é ele que já extrai conteúdo/filtro da fala. O Node
-# (sessionManager.ts) sabe que estas não passam por confirmação; ver IMutatingTool.
-QUERY_NAMES = {"LEMBRETE_CONSULTAR", "NOTA_CONSULTAR", "MEMORIA_CONSULTAR"}
+# Fase 14 + Controle de Desktop/Voz: ações em QUERY_NAMES têm isMutation=False no Node
+# (sessionManager.ts) e executam sem confirmação de 2 fases; ações fora de QUERY_NAMES
+# exigem confirmação explícita SIM.
+OPTIONAL_CONTENT_QUERY_NAMES = {"LEMBRETE_CONSULTAR", "NOTA_CONSULTAR", "MEMORIA_CONSULTAR"}
+QUERY_NAMES = OPTIONAL_CONTENT_QUERY_NAMES | {"DESKTOP_COMANDO", "DITADO_LOCAL", "CONFIGURAR_VOZ"}
+STRUCTURED_ACTION_NAMES = {"DESKTOP_COMANDO", "DESKTOP_CRITICO", "CONFIGURAR_VOZ"}
+PREFIXED_CONTENT_RE = re.compile(r"^(?:texto|limpar|traduzir_pt|traduzir:[a-z]{2,5})\s*:\s*", re.IGNORECASE)
 MAX_MUTATION_CONTENT_CHARS = 200
 
 DETECT_MUTATION_SYSTEM_PROMPT = (
-    "Você decide se a frase do usuário pede para CRIAR, EDITAR, APAGAR, REAGENDAR ou CONSULTAR "
-    "um LEMBRETE, uma NOTA ou uma MEMÓRIA, ou NENHUMA das treze. Responda em UMA LINHA: AÇÃO, ou "
-    "AÇÃO|conteúdo para *_CRIAR, *_EDITAR, *_REAGENDAR, *_CONSULTAR e MEMORIA_GUARDAR (o texto do "
-    "que deve ser lembrado/anotado/guardado/corrigido/reagendado/procurado, sem aspas, sem "
-    "explicação extra; em *_CONSULTAR o conteúdo é o termo de busca e pode ficar vazio se o "
-    "pedido for 'todos'/'tudo').\n"
+    "Você decide se a frase do usuário pede uma ação de LEMBRETE, NOTA, MEMÓRIA, CONTROLE DO COMPUTADOR, "
+    "DIGITAÇÃO/DITADO, CONFIGURAÇÃO DE VOZ, AUTO-CORREÇÃO DE CÓDIGO, ou NENHUMA. Responda em UMA LINHA: "
+    "AÇÃO, ou AÇÃO|conteúdo.\n"
     "LEMBRETE_CRIAR: um compromisso, tarefa ou coisa temporária a fazer — 'lembra de', 'não "
     "deixa eu esquecer', 'anota aí que eu preciso', 'bota um lembrete pra'.\n"
     "LEMBRETE_EDITAR: pede pra CORRIGIR ou TROCAR o TEXTO do lembrete mais recente, sem criar "
@@ -180,21 +181,28 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "NOTA_CONSULTAR: pede pra OUVIR o que foi anotado, sem mudar nada — 'o que eu anotei sobre "
     "X', 'minhas notas sobre viagem'. content = o termo de busca, ou vazio por todas.\n"
     "MEMORIA_GUARDAR: um FATO ou PREFERÊNCIA sobre o próprio usuário, pra você lembrar quem ele é — "
-    "'lembra que eu prefiro', 'guarda que meu nome é', 'anota que eu gosto de'. Diferença de "
-    "LEMBRETE_CRIAR: aqui não é uma TAREFA a fazer num momento futuro, é uma INFORMAÇÃO SOBRE A "
-    "PESSOA que vale pra sempre. Diferença de NOTA_CRIAR: nota é uma ideia ou observação qualquer "
-    "(sobre qualquer assunto); memória é especificamente um fato sobre QUEM O USUÁRIO É — nome, "
-    "preferência, restrição, característica pessoal.\n"
+    "'lembra que eu prefiro', 'guarda que meu nome é', 'anota que eu gosto de'.\n"
     "MEMORIA_EDITAR: mesma ideia, mas pra memória.\n"
-    "MEMORIA_ESQUECER: pede pra apagar o fato mais recente guardado sobre o usuário — 'apaga essa "
-    "memória sobre mim', 'apaga o que você guardou sobre mim'. Diferença de LEMBRETE_APAGAR: aquele "
-    "apaga uma TAREFA pendente; este apaga um FATO sobre a pessoa.\n"
-    "MEMORIA_CONSULTAR: pede pra OUVIR o que você guardou sobre ele, sem mudar nada — 'o que você "
-    "lembra sobre mim', 'o que você sabe sobre meu time'. content = o termo de busca, ou vazio "
-    "por tudo.\n"
-    "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum, e qualquer "
-    "menção a lembrar/anotar que não seja um pedido direto de ação (ex.: 'eu lembro que você "
-    "me falou isso' é NENHUMA, é o usuário lembrando de algo, não pedindo pra você lembrar).\n"
+    "MEMORIA_ESQUECER: pede pra apagar o fato mais recente guardado sobre o usuário.\n"
+    "MEMORIA_CONSULTAR: pede pra OUVIR o que você guardou sobre ele, sem mudar nada.\n"
+    "DESKTOP_COMANDO: comando imediato e reversível do computador macOS: "
+    "'volume_up' (aumentar volume), 'volume_down' (abaixar volume), 'volume_set:<0..100>' (volume em X%), "
+    "'volume_mute' (mutar som), 'volume_unmute' (desmutar som), 'media_play_pause' (tocar/pausar música), "
+    "'media_next' (próxima música), 'media_prev' (música anterior), 'open_app:<Nome>' (abrir Safari, Notas, "
+    "Calendário, Música, Spotify, Finder, Calculadora, Ajustes, WhatsApp, Mail, Mensagens, DitadoLocal), "
+    "'dark_mode:on' (modo escuro), 'dark_mode:off' (modo claro), 'dark_mode:toggle' (alternar tema), "
+    "'window_minimize' (minimizar janela atual), 'open_folder:downloads|documentos|desktop'.\n"
+    "DESKTOP_CRITICO: comando destrutivo ou de bloqueio do macOS (exige confirmação): "
+    "'app_quit:<Nome>' (fechar aplicativo), 'empty_trash' (esvaziar lixeira), "
+    "'lock_screen' (bloquear tela), 'system_sleep' (suspender/dormir o Mac).\n"
+    "DIGITAR_TEXTO: digitar/colar texto no aplicativo em foco ('texto:<conteúdo>') ou acionar atalho do "
+    "Ditado Local no app focado ('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', "
+    "'atalho:ditar_traduzir').\n"
+    "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir um ditado localmente sem "
+    "injetar teclas ('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
+    "CONFIGURAR_VOZ: trocar a voz do próprio assistente ('voz:<Felipe|Luciana|Kokoro|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>').\n"
+    "AUTO_CORRECAO: pedir para o próprio Orque (Rodrigo AI) inspecionar e corrigir algo no seu próprio código-fonte em worktree isolada ('<descrição da correção>').\n"
+    "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum.\n"
     "Exemplos:\n"
     "Quais são meus lembretes pra hoje? -> LEMBRETE_CONSULTAR|hoje\n"
     "Tem algum lembrete de remédio? -> LEMBRETE_CONSULTAR|remédio\n"
@@ -212,6 +220,24 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "Troca essa nota pra: comprar materiais na segunda -> NOTA_EDITAR|Comprar materiais na segunda\n"
     "Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR|seu nome é Rodrigo\n"
     "Na verdade, corrige isso que eu falei: meu nome é Rodrigo Sonsino -> MEMORIA_EDITAR|seu nome é Rodrigo Sonsino\n"
+    "Aumenta o volume -> DESKTOP_COMANDO|volume_up\n"
+    "Abaixa o som -> DESKTOP_COMANDO|volume_down\n"
+    "Coloca o volume em 40 por cento -> DESKTOP_COMANDO|volume_set:40\n"
+    "Pausa a música -> DESKTOP_COMANDO|media_play_pause\n"
+    "Próxima faixa -> DESKTOP_COMANDO|media_next\n"
+    "Abre o Safari -> DESKTOP_COMANDO|open_app:Safari\n"
+    "Ativa o modo escuro -> DESKTOP_COMANDO|dark_mode:on\n"
+    "Abre a pasta Downloads -> DESKTOP_COMANDO|open_folder:downloads\n"
+    "Fecha o Spotify -> DESKTOP_CRITICO|app_quit:Spotify\n"
+    "Esvazia a lixeira -> DESKTOP_CRITICO|empty_trash\n"
+    "Bloqueia a tela do Mac -> DESKTOP_CRITICO|lock_screen\n"
+    "Suspende o computador -> DESKTOP_CRITICO|system_sleep\n"
+    "Digita aí: Olá, tudo bem com você? -> DIGITAR_TEXTO|texto:Olá, tudo bem com você?\n"
+    "Aciona o ditado local para traduzir a seleção -> DIGITAR_TEXTO|atalho:traduzir_selecao\n"
+    "Limpa esse ditado: hã tipo assim vamos fechar o contrato hoje -> DITADO_LOCAL|limpar:hã tipo assim vamos fechar o contrato hoje\n"
+    "Muda sua voz para Luciana -> CONFIGURAR_VOZ|voz:Luciana\n"
+    "Troca para a voz Charon do Gemini -> CONFIGURAR_VOZ|voz:Charon\n"
+    "Corrige no seu próprio código o texto do botão de voz -> AUTO_CORRECAO|Corrigir o texto do botão de voz\n"
     "Vamos trocar de assunto agora -> NENHUMA\n"
     "Me avisa amanhã cedo que eu preciso levar o carro na oficina -> LEMBRETE_CRIAR|Levar o carro na oficina\n"
     "Muda só a frase do lembrete pra devolver o livro na biblioteca -> LEMBRETE_EDITAR|Devolver o livro na biblioteca\n"
@@ -292,9 +318,20 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "content = o termo de busca, se houver.\n"
     "HORA: quer saber que horas são agora (qualquer jeito coloquial, inclusive 'já passou das dez?').\n"
     "DATA: quer saber o dia, dia da semana, mês ou ano de hoje.\n"
-    "DELEGAR_CODIGO: pede ao assistente para acionar, conversar, delegar ou executar uma tarefa no computador/sistema via Claude Code — "
-    "abrir arquivo, criar pasta, buscar no projeto, rodar script, acessar Drive, controlar apps, falar ou mandar mensagem para o Claude, "
-    "'converse com o Claude', 'fala com o Claude', 'pede pro Claude', 'mande pro Claude', 'executa isso', 'faz no computador', 'verifica o código', 'abre o arquivo', 'busca no meu drive'. "
+    "DESKTOP_COMANDO: comando imediato e reversível do computador macOS. content = um de: "
+    "'volume_up', 'volume_down', 'volume_set:<0..100>', 'volume_mute', 'volume_unmute', "
+    "'media_play_pause', 'media_next', 'media_prev', 'open_app:<Nome>', 'dark_mode:on', 'dark_mode:off', "
+    "'dark_mode:toggle', 'window_minimize', 'open_folder:downloads', 'open_folder:documentos', 'open_folder:desktop'.\n"
+    "DESKTOP_CRITICO: comando destrutivo ou de bloqueio do macOS (exige confirmação). content = um de: "
+    "'app_quit:<Nome>', 'empty_trash', 'lock_screen', 'system_sleep'.\n"
+    "DIGITAR_TEXTO: digitar/colar texto no aplicativo focado ('texto:<conteúdo>') ou disparar atalho do "
+    "Ditado Local ('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir').\n"
+    "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir ditado localmente sem colar "
+    "('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
+    "CONFIGURAR_VOZ: trocar a voz do próprio assistente. content = 'voz:<Felipe|Luciana|Kokoro|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>'.\n"
+    "AUTO_CORRECAO: pedir para o próprio Orque (Rodrigo AI) corrigir ou ajustar algo em seu próprio código-fonte em branch isolada. content = a correção pedida.\n"
+    "DELEGAR_CODIGO: pede ao assistente para acionar, conversar, delegar ou executar uma tarefa genérica no computador/sistema via Claude Code — "
+    "abrir arquivo, criar pasta, buscar no projeto, rodar script, acessar Drive, falar ou mandar mensagem para o Claude. "
     "content = a tarefa ou pedido exato a executar (texto como pedido, preservando detalhes).\n"
     "NENHUMA: todo o resto — conversa, perguntas de conhecimento, e qualquer menção a lembrar/anotar/"
     "apagar/nota/hora/dia que NÃO seja um pedido direto ('eu lembro que você disse', 'nota dez na prova', "
@@ -342,15 +379,20 @@ def parse_intent_json(raw: str, text: str = ""):
     content = content.strip() if isinstance(content, str) else None
     if intent in ("HORA", "DATA", "NENHUMA") or intent.endswith("_APAGAR") or intent == "MEMORIA_ESQUECER":
         return (intent, None)
-    if intent in QUERY_NAMES:
-        # Consulta: termo de busca é opcional — nunca degrada para NENHUMA por falta de
+    if intent in OPTIONAL_CONTENT_QUERY_NAMES:
+        # Consulta (*_CONSULTAR): termo de busca é opcional — nunca degrada para NENHUMA por falta de
         # conteúdo, só descarta um termo longo demais ou não ancorado na fala.
         if content and (len(content) > MAX_MUTATION_CONTENT_CHARS or (text and not content_grounded(content, text))):
             content = None
         return (intent, content)
     if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
-        return ("NENHUMA", None)  # criar/editar/guardar sem conteúdo utilizável
-    if text and not content_grounded(content, text):
+        return ("NENHUMA", None)  # criar/editar/guardar/desktop/digitar/voz/auto sem conteúdo utilizável
+    if intent in STRUCTURED_ACTION_NAMES:
+        return (intent, content)
+    if intent == "DIGITAR_TEXTO" and content.lower().startswith("atalho:"):
+        return (intent, content)
+    grounding_target = PREFIXED_CONTENT_RE.sub("", content) if intent in ("DIGITAR_TEXTO", "DITADO_LOCAL") else content
+    if text and not content_grounded(grounding_target, text):
         return ("NENHUMA", None)  # conteúdo não ancorado na fala: não propõe mutação
     return (intent, content)
 
@@ -374,12 +416,15 @@ def parse_mutation_output(raw: str, truncated: bool) -> tuple[str, str | None]:
         return ("NENHUMA", None)
     if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR",
                   "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR",
-                  "LEMBRETE_REAGENDAR"):
+                  "LEMBRETE_REAGENDAR",
+                  "DESKTOP_COMANDO", "DESKTOP_CRITICO",
+                  "DIGITAR_TEXTO", "DITADO_LOCAL",
+                  "CONFIGURAR_VOZ", "AUTO_CORRECAO"):
         if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
             return ("NENHUMA", None)
         return (action, content)
-    if action in QUERY_NAMES:
-        # Consulta: o termo de busca é opcional (vazio = "todos"); nunca degrada para NENHUMA
+    if action in OPTIONAL_CONTENT_QUERY_NAMES:
+        # Consulta (*_CONSULTAR): o termo de busca é opcional (vazio = "todos"); nunca degrada para NENHUMA
         # por falta de conteúdo, só descarta um conteúdo longo demais pra ser um termo de busca.
         if content and len(content) > MAX_MUTATION_CONTENT_CHARS:
             content = None
@@ -1060,8 +1105,10 @@ class Worker:
                 path_or_hf_repo=self._stt_model_id,
                 language="pt",
                 fp16=True,
+                initial_prompt="Orque, orquestrador e assistente de voz pessoal de Rodrigo Sonsino.",
             )
             text = (result.get("text") or "").strip()
+            text = re.sub(r"\b(orc|ork|orqui|orq|[oó]rqu[eê])\b", "Orque", text, flags=re.IGNORECASE)
             emit({"event": "transcript", "reqId": req_id, "text": text})
         except Exception as exc:  # noqa: BLE001
             log_diag(f"Erro na transcrição: {safe_exc(exc)}")

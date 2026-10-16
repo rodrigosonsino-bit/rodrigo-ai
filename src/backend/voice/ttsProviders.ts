@@ -168,6 +168,232 @@ export interface VoiceProviderDeps {
   log?: (msg: string) => void;
 }
 
+import type { SynthesizeOptions } from '../../shared/extensions/voice.js';
+import { ttsOffReason } from '../privacy.js';
+
+export interface VoicePreferenceRecord {
+  engine: 'gemini' | 'say' | 'kokoro';
+  voice: string;
+  updatedAt: string;
+}
+
+const GEMINI_VOICES: Readonly<Record<string, string>> = {
+  charon: 'Charon',
+  puck: 'Puck',
+  aoede: 'Aoede',
+  fenrir: 'Fenrir',
+  kore: 'Kore',
+  zephyr: 'Zephyr',
+  orbit: 'Orbit',
+  gemini: 'Charon',
+  google: 'Charon',
+  nuvem: 'Charon'
+};
+
+const SAY_VOICES: Readonly<Record<string, string>> = {
+  felipe: 'Felipe (Enhanced)',
+  'felipe (enhanced)': 'Felipe (Enhanced)',
+  luciana: 'Luciana (Enhanced)',
+  'luciana (enhanced)': 'Luciana (Enhanced)',
+  sistema: DEFAULT_SAY_VOICE,
+  local: DEFAULT_SAY_VOICE,
+  mac: DEFAULT_SAY_VOICE
+};
+
+/**
+ * Pilar 3 — Provedor dinâmico que permite troca autônoma de voz em runtime sem quebrar
+ * sínteses em voo nem violar `ttsCloudEffective(privacy)`.
+ */
+export class DynamicVoiceProvider implements IVoiceProvider {
+  private currentProvider: IVoiceProvider;
+  private fallbackHandler?: (info: { turnId?: string; reason: string }) => void;
+  private readonly deps: VoiceProviderDeps;
+  private readonly preferencePath: string;
+  private sharedBudget: TtsBudget | null = null;
+
+  constructor(initialProvider: IVoiceProvider, deps: VoiceProviderDeps) {
+    this.currentProvider = initialProvider;
+    this.deps = deps;
+    this.preferencePath = path.join(deps.rootDir, '.runtime', 'voice-preference.json');
+    this.bindFallback(initialProvider);
+  }
+
+  private bindFallback(provider: IVoiceProvider): void {
+    provider.onFallback = (info): void => {
+      this.fallbackHandler?.(info);
+    };
+  }
+
+  get id(): string {
+    return this.currentProvider.id;
+  }
+
+  get name(): string {
+    return this.currentProvider.name;
+  }
+
+  get prefersCoalescing(): boolean | undefined {
+    return this.currentProvider.prefersCoalescing;
+  }
+
+  get onFallback(): ((info: { turnId?: string; reason: string }) => void) | undefined {
+    return this.fallbackHandler;
+  }
+
+  set onFallback(fn: ((info: { turnId?: string; reason: string }) => void) | undefined) {
+    this.fallbackHandler = fn;
+    this.bindFallback(this.currentProvider);
+  }
+
+  isAvailable(): boolean {
+    return this.currentProvider.isAvailable();
+  }
+
+  getActiveProvider(): IVoiceProvider {
+    return this.currentProvider;
+  }
+
+  /**
+   * Captura `const provider = this.currentProvider` no início da chamada: se `switchVoice()`
+   * ocorrer durante uma síntese em andamento, a síntese em voo termina íntegra no provedor
+   * original e a próxima frase já usa o novo provedor.
+   */
+  async synthesize(text: string, outputPath: string, signal?: AbortSignal, options?: SynthesizeOptions): Promise<void> {
+    const provider = this.currentProvider;
+    return provider.synthesize(text, outputPath, signal, options);
+  }
+
+  endTurn(turnId: string): void {
+    this.currentProvider.endTurn?.(turnId);
+  }
+
+  switchVoice(rawRequest: string): { ok: boolean; speech: string; engine?: string; voice?: string } {
+    const normalized = rawRequest
+      .trim()
+      .toLowerCase()
+      .replace(/^voz\s*[:|]?\s*/i, '')
+      .trim();
+
+    if (!normalized) {
+      return {
+        ok: false,
+        speech: 'Não entendi qual voz você quer usar. Você pode escolher Felipe, Luciana, Kokoro ou vozes do Gemini como Charon, Puck e Aoede.'
+      };
+    }
+
+    // 1. Kokoro local
+    if (normalized === 'kokoro' || normalized === 'dora' || normalized === 'pf_dora') {
+      const kokoro = new KokoroVoiceProvider();
+      if (!kokoro.isAvailable()) {
+        return {
+          ok: false,
+          speech: 'A voz local Kokoro não está disponível neste computador no momento.'
+        };
+      }
+      this.setProvider(kokoro, { engine: 'kokoro', voice: 'pf_dora' });
+      return { ok: true, speech: 'Pronto, mudei para a voz local Kokoro.', engine: 'kokoro', voice: 'pf_dora' };
+    }
+
+    // 2. macOS say local (Felipe / Luciana / sistema)
+    const sayMatch = SAY_VOICES[normalized] ?? (normalized.includes('luciana') ? 'Luciana (Enhanced)' : normalized.includes('felipe') ? 'Felipe (Enhanced)' : null);
+    if (sayMatch) {
+      const sayProvider = new SayVoiceProvider('ffmpeg', sayMatch);
+      if (!sayProvider.isAvailable()) {
+        return {
+          ok: false,
+          speech: `A voz do sistema ${sayMatch} não está disponível neste computador.`
+        };
+      }
+      this.setProvider(sayProvider, { engine: 'say', voice: sayMatch });
+      const friendlyName = sayMatch.replace(' (Enhanced)', '');
+      return { ok: true, speech: `Pronto, mudei minha voz para ${friendlyName} do sistema.`, engine: 'say', voice: sayMatch };
+    }
+
+    // 3. Vozes em nuvem do Gemini
+    const geminiMatch =
+      GEMINI_VOICES[normalized] ??
+      Object.entries(GEMINI_VOICES).find(([k]) => normalized.includes(k))?.[1] ??
+      null;
+
+    if (geminiMatch) {
+      if (!ttsCloudEffective(this.deps.privacy)) {
+        const reason = ttsOffReason(this.deps.privacy);
+        const explanation =
+          reason === 'master-off'
+            ? 'o modo de nuvem está desligado nas configurações de privacidade'
+            : reason === 'history-off'
+              ? 'o envio de histórico está desligado por privacidade'
+              : 'o canal de voz em nuvem está desligado nas configurações de privacidade';
+        return {
+          ok: false,
+          speech: `Não posso ativar a voz em nuvem ${geminiMatch} porque ${explanation}.`
+        };
+      }
+
+      const env = this.deps.env ?? process.env;
+      const key = env.GEMINI_API_KEY;
+      if (typeof key !== 'string' || key.trim().length === 0 || typeof this.deps.engine.synthesize !== 'function') {
+        return {
+          ok: false,
+          speech: `Não consegui ativar a voz ${geminiMatch} porque a chave do Gemini ou o motor de síntese em nuvem não está disponível.`
+        };
+      }
+
+      const cfg = parseTtsEnv(env);
+      const log = this.deps.log ?? ((m: string) => console.warn(m));
+      if (!this.sharedBudget) {
+        this.sharedBudget = new TtsBudget({
+          filePath: path.join(this.deps.rootDir, '.runtime', 'tts-budget.json'),
+          rpm: cfg.rpm,
+          rpd: cfg.rpd,
+          log
+        });
+      }
+      const localFallback = new SayVoiceProvider();
+      const geminiProvider = new GeminiVoiceProvider(
+        this.deps.engine,
+        localFallback,
+        this.sharedBudget,
+        this.deps.privacy,
+        DEFAULT_GEMINI_VOICE_CONFIG(cfg.model, geminiMatch),
+        () => Date.now(),
+        log
+      );
+      this.setProvider(geminiProvider, { engine: 'gemini', voice: geminiMatch });
+      return { ok: true, speech: `Pronto, mudei para a voz ${geminiMatch} do Gemini.`, engine: 'gemini', voice: geminiMatch };
+    }
+
+    return {
+      ok: false,
+      speech: `Não reconheci a voz ${rawRequest}. As opções são Felipe, Luciana, Kokoro, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr.`
+    };
+  }
+
+  private setProvider(next: IVoiceProvider, pref: { engine: 'gemini' | 'say' | 'kokoro'; voice: string }): void {
+    this.bindFallback(next);
+    this.currentProvider = next;
+    this.savePreference(pref);
+  }
+
+  private savePreference(pref: { engine: 'gemini' | 'say' | 'kokoro'; voice: string }): void {
+    try {
+      const dir = path.dirname(this.preferencePath);
+      fs.mkdirSync(dir, { recursive: true });
+      const tmp = `${this.preferencePath}.${process.pid}.${Date.now()}.tmp`;
+      const record: VoicePreferenceRecord = {
+        engine: pref.engine,
+        voice: pref.voice,
+        updatedAt: new Date().toISOString()
+      };
+      fs.writeFileSync(tmp, JSON.stringify(record, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      fs.renameSync(tmp, this.preferencePath);
+    } catch (err) {
+      const log = this.deps.log ?? ((m: string) => console.warn(m));
+      log(`[voice] falha ao persistir preferência de voz: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
 /**
  * Fase 13a: escolhe a voz do app. TTS_ENGINE: `gemini` (padrão quando ausente) usa o TTS do Gemini com a voz do sistema de
  * reserva; `say`/`kokoro` forçam uma voz local. O Gemini só é escolhido se o canal estiver EFETIVAMENTE ligado (mestre +
@@ -201,4 +427,25 @@ export function createVoiceProvider(deps: VoiceProviderDeps): IVoiceProvider {
     log
   });
   return new GeminiVoiceProvider(deps.engine, local, budget, deps.privacy, DEFAULT_GEMINI_VOICE_CONFIG(cfg.model, cfg.voice), () => Date.now(), log);
+}
+
+/**
+ * Cria um `DynamicVoiceProvider` envelopando o provedor base e restaurando preferência salva em
+ * `.runtime/voice-preference.json` (somente se compatível com a política de privacidade atual).
+ */
+export function createDynamicVoiceProvider(deps: VoiceProviderDeps): DynamicVoiceProvider {
+  const base = createVoiceProvider(deps);
+  const dynamic = new DynamicVoiceProvider(base, deps);
+  const prefPath = path.join(deps.rootDir, '.runtime', 'voice-preference.json');
+  if (fs.existsSync(prefPath)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(prefPath, 'utf-8')) as Partial<VoicePreferenceRecord>;
+      if (raw && typeof raw.voice === 'string' && raw.voice.trim()) {
+        dynamic.switchVoice(raw.voice);
+      }
+    } catch {
+      // preferência corrompida — ignora e mantém o padrão
+    }
+  }
+  return dynamic;
 }

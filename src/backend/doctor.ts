@@ -119,6 +119,21 @@ export function runDoctor(input: DoctorInput): DoctorReport {
     checks.push(check('file-policy', 'Política de arquivos sensíveis', 'ok', 'Lista de arquivos sensíveis aprovada e presente.'));
   }
 
+  // 3c. Controle de desktop e TCC (só variável declarada + existência do bundle compilado; nunca abre arquivos).
+  const rawDesktop = env.RODRIGO_DESKTOP_CONTROL;
+  if (rawDesktop !== undefined && rawDesktop !== '0' && rawDesktop !== '1') {
+    checks.push(check('desktop-control', 'Controle do computador (macOS)', 'error', 'Valor inválido em RODRIGO_DESKTOP_CONTROL. Use 0 ou 1.'));
+  } else if (rawDesktop === '0') {
+    checks.push(check('desktop-control', 'Controle do computador (macOS)', 'info', 'Controle de desktop desabilitado explicitamente (RODRIGO_DESKTOP_CONTROL=0).'));
+  } else {
+    const appPlist = path.join(rootDir, 'desktop', 'build', 'Rodrigo AI.app', 'Contents', 'Info.plist');
+    if (exists(appPlist)) {
+      checks.push(check('desktop-control', 'Controle do computador (macOS)', 'ok', 'RODRIGO_DESKTOP_CONTROL=1 e bundle desktop presente (requer Acessibilidade e Automação no macOS).'));
+    } else {
+      checks.push(check('desktop-control', 'Controle do computador (macOS)', 'info', 'RODRIGO_DESKTOP_CONTROL=1; compile desktop/build.sh para gerar o bundle assinado com DitadoLocal Dev.'));
+    }
+  }
+
   if (cfg !== null) {
     const keyPresent = typeof env.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim().length > 0;
 

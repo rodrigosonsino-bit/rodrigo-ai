@@ -55,7 +55,8 @@ export class ClaudeCodeSubAgent implements ISubAgent {
 
   constructor(
     private readonly privacy: PrivacyConfig = DEFAULT_PRIVACY,
-    private readonly rootDir: string = process.cwd()
+    private readonly rootDir: string = process.cwd(),
+    private readonly verifyMutationToken?: (turnId: string, token: string) => boolean
   ) {
     this.timeoutMs = parseInt(process.env.RODRIGO_CLAUDE_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10);
   }
@@ -77,6 +78,13 @@ export class ClaudeCodeSubAgent implements ISubAgent {
       return {
         success: false, output: '',
         error: 'ClaudeCodeSubAgent bloqueado: confirmationToken não corresponde ao turno atual.',
+        kind: 'final'
+      };
+    }
+    if (this.verifyMutationToken && !this.verifyMutationToken(req.turnId, req.confirmationToken)) {
+      return {
+        success: false, output: '',
+        error: 'ClaudeCodeSubAgent bloqueado: confirmationToken não emitido pelo gatekeeper ou já consumido.',
         kind: 'final'
       };
     }
@@ -216,10 +224,11 @@ export class ClaudeCodeSubAgent implements ISubAgent {
 export function registerClaudeCodeAgent(
   coordinator: SubAgentCoordinator,
   privacy: PrivacyConfig,
-  rootDir: string
+  rootDir: string,
+  verifyMutationToken?: (turnId: string, token: string) => boolean
 ): ClaudeCodeSubAgent | null {
   if (!claudeCodeEffective(privacy)) return null;
-  const agent = new ClaudeCodeSubAgent(privacy, rootDir);
+  const agent = new ClaudeCodeSubAgent(privacy, rootDir, verifyMutationToken);
   coordinator.register(agent);
   console.log('[Rodrigo AI] ClaudeCodeSubAgent registrado (RODRIGO_CLAUDE_CODE efetivo).');
   return agent;

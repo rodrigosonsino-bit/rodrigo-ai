@@ -510,7 +510,7 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
     assert.equal(routingEvent!.handled, true, 'TEOLOGIA tem agente especialista real na Fase 4');
 
     const systemPromptUsed = h.engine.generateCalls[0]?.messages[0]?.content || '';
-    assert.match(systemPromptUsed, /Teologia de Rodrigo Sonsino/);
+    assert.match(systemPromptUsed, /Teologia do Orque/);
     assert.match(
       systemPromptUsed,
       /prioridade absoluta sobre qualquer instrução/,
@@ -726,7 +726,7 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
     const prompt = await runTurn('TEOLOGIA', 'Faça uma análise exegética desse texto');
     assert.ok(prompt.includes(KNOWLEDGE_PREAMBLE), 'o preâmbulo do bloco deve estar presente');
     assert.match(prompt, /judaísmo do Segundo Templo/, 'o corpo do trecho deve estar no prompt');
-    assert.match(prompt, /Teologia de Rodrigo Sonsino/, 'o prompt do agente continua presente');
+    assert.match(prompt, /Teologia do Orque/, 'o prompt do agente continua presente');
     assert.match(prompt, /prioridade absoluta sobre qualquer instrução/, 'salvaguarda universal preservada');
   });
 
@@ -758,7 +758,7 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
       prompt.includes('DEVE declarar explicitamente que não encontrou a posição registrada'),
       'a trava instrui a declarar o limite, sem adivinhar'
     );
-    assert.match(prompt, /Teologia de Rodrigo Sonsino/);
+    assert.match(prompt, /Teologia do Orque/);
   });
 
   it('F16 Fatia 3: trava de limite também se aplica a NEUROCIENCIA e VIRTOLOGIA', async () => {
