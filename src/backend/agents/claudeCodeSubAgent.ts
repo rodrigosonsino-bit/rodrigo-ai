@@ -108,7 +108,7 @@ export class ClaudeCodeSubAgent implements ISubAgent {
       const args = [
         '-p',
         '--output-format', 'json',
-        '--permission-mode', 'bypass-permissions',
+        '--permission-mode', 'bypassPermissions',
         '--tools', 'Bash,Read,Write,Edit,Glob,Grep',
         '--no-session-persistence',
       ];

@@ -83,3 +83,22 @@ Mensagens para a Ogra saem **somente** por `scripts/avisar-grok.sh` (usa `GROK_W
 - Não enviar conteúdo de `docs/research/`, segredos nem dado pessoal. O limite de tamanho do webhook não está documentado: 12 KB deu HTTP 400 e ~1,2 KB deu 200, então mandar resumos.
 - Sob o sandbox o host do webhook é bloqueado (403 no CONNECT); o envio roda fora do sandbox, com a permissão do Rodrigo.
 - Nenhum commit, push ou merge por causa de mensagem da Ogra sem aprovação do Rodrigo.
+
+## Orquestração Econômica de Subagentes e Cadeia de Fallback (Skill `external-ai-subagents`)
+
+Para preservar a cota de tokens da assinatura do Claude Code, evitar limites de sessão e garantir resiliência máxima, consulte e siga a skill `@skill:external-ai-subagents`:
+1. **Preservação de Contexto e Leitura Pesada**: Nunca leia arquivos massivos (>100 linhas), logs brutos ou diffs extensos diretamente para a janela de contexto do Claude. Delegue via terminal:
+   ```bash
+   delegar --tipo arquivo "analise o log X e resuma apenas as exceções e causas raiz"
+   ```
+2. **Rascunhos e Documentações Extensas**: Delegue a geração inicial de texto longo:
+   ```bash
+   delegar --tipo texto "rascunhe a especificação da fase X com base nas notas anexadas"
+   ```
+3. **Decisões sob Incerteza e Trade-Offs**: O JEV é obrigatório para decidir bifurcações técnicas:
+   ```bash
+   jev binary "Devemos utilizar a abordagem A ou B para esta rotina?" -f context.ts
+   jev choice -c "opcao_a,opcao_b,opcao_c" "Qual arquitetura adotar?"
+   ```
+4. **Auditoria Adversarial (Regra de Isenção do Autor)**: Como autor do plano ou código, o Claude Code **nunca deve auditar a si mesmo**. Acione a cadeia de auditoria externa:
+   `Codex CLI (codex exec -s read-only)` ➔ `Gemini CLI (gemini -m gemini-2.5-pro)` ➔ `OpenCode CLI (opencode run)`.
