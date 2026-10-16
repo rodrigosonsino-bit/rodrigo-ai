@@ -504,6 +504,64 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
     assert.deepEqual(inserted, [{ text: 'e complemento', mode: 'append' }]);
   });
 
+  it('sem permissão de Acessibilidade: inserção simples cai para colagem via Cmd+V', async () => {
+    const keystrokes: string[][] = [];
+    let clipboardText = 'anterior';
+    let changeCount = 1;
+    const tool = new DigitarTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      accessibility: {
+        inspectFocusedTarget: async () => {
+          throw new Error('AXError -25204');
+        },
+        insertText: async () => {
+          throw new Error('não deveria ser chamado sem leitura AX');
+        }
+      },
+      clipboard: {
+        getSnapshot: async () => ({ text: clipboardText, changeCount }),
+        setText: async (text: string) => {
+          clipboardText = text;
+          changeCount += 1;
+          return { changeCount };
+        },
+        getChangeCount: async () => changeCount
+      },
+      exec: (async (cmd: string, args: string[]) => {
+        keystrokes.push([cmd, ...args]);
+        return { stdout: '', stderr: '' };
+      }) as never
+    });
+
+    tool.preview('DIGITAR_TEXTO', 'texto:Olá mundo');
+    const result = await tool.execute('DIGITAR_TEXTO', 'texto:Olá mundo');
+    assert.match(result, /Pronto, digitei o texto em Notes/);
+    assert.ok(
+      keystrokes.some((k) => k.join(' ').includes('keystroke "v"')),
+      'deveria disparar Cmd+V sintético'
+    );
+  });
+
+  it('sem permissão de Acessibilidade: anexar continua recusado (precisa ler o campo)', async () => {
+    const tool = new DigitarTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      accessibility: {
+        inspectFocusedTarget: async () => {
+          throw new Error('AX_BAD_JSON: (empty stdout)');
+        },
+        insertText: async () => 'ax' as never
+      }
+    });
+
+    tool.preview('DIGITAR_ANEXAR', ' e complemento');
+    const result = await tool.execute('DIGITAR_ANEXAR', ' e complemento');
+    assert.match(result, /só a inserção simples por colagem/i);
+  });
+
   it('DigitarTool responde honestamente quando traduzir-e-inserir não está disponível', async () => {
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },

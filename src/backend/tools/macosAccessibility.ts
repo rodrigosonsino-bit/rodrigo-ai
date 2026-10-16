@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CommandExecutor, FrontmostAppInfo } from './desktopControlTool.js';
@@ -53,16 +54,25 @@ interface HelperJson {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_HELPER_PATH = path.resolve(__dirname, '../../../../scripts/desktop_accessibility.swift');
+const DEFAULT_SWIFT_PATH = path.resolve(__dirname, '../../../../scripts/desktop_accessibility.swift');
+// Binário pré-compilado (setup-voice): executa em ms e tem identidade estável para a
+// permissão de Acessibilidade do macOS. `swift` JIT muda de processo e demora segundos.
+const DEFAULT_BIN_PATH = path.resolve(__dirname, '../../../../.runtime/bin/desktop-accessibility');
 
 export class DefaultMacAccessibilityAdapter implements AccessibilityAdapter {
   private readonly helperPath: string;
 
   constructor(
     private readonly exec: CommandExecutor,
-    helperPath = DEFAULT_HELPER_PATH
+    helperPath?: string
   ) {
-    this.helperPath = helperPath;
+    if (helperPath) {
+      this.helperPath = helperPath;
+    } else if (fs.existsSync(DEFAULT_BIN_PATH)) {
+      this.helperPath = DEFAULT_BIN_PATH;
+    } else {
+      this.helperPath = DEFAULT_SWIFT_PATH;
+    }
   }
 
   async inspectFocusedTarget(): Promise<FocusedTargetSnapshot> {
@@ -105,7 +115,12 @@ export class DefaultMacAccessibilityAdapter implements AccessibilityAdapter {
   }
 
   private async runHelper(args: readonly string[]): Promise<HelperJson> {
-    const { stdout } = await this.exec('/usr/bin/xcrun', ['swift', this.helperPath, ...args], {
+    // Fonte .swift roda via JIT (lento, identidade instável); binário executa direto.
+    const cmd = this.helperPath.endsWith('.swift') ? '/usr/bin/xcrun' : this.helperPath;
+    const cmdArgs = this.helperPath.endsWith('.swift')
+      ? ['swift', this.helperPath, ...args]
+      : [...args];
+    const { stdout } = await this.exec(cmd, cmdArgs, {
       timeout: 15_000
     });
     let parsed: HelperJson;

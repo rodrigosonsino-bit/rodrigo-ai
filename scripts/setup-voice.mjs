@@ -85,6 +85,25 @@ function main() {
   if (fs.existsSync(MANIFEST_PATH)) {
     console.log(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
   }
+
+  // Helper de Acessibilidade (DIGITAR_TEXTO): pré-compila o Swift para um binário estável
+  // (.runtime/bin/desktop-accessibility) — o JIT (`xcrun swift`) demora segundos por chamada
+  // e tem identidade instável para a permissão de Acessibilidade. Só macOS + swiftc; falha
+  // aqui NÃO aborta o setup (a digitação cai no erro honesto de permissão/ausência).
+  if (process.platform === 'darwin') {
+    const binDir = path.join(RUNTIME_DIR, 'bin');
+    const helperSrc = path.join(ROOT, 'scripts', 'desktop_accessibility.swift');
+    const helperBin = path.join(binDir, 'desktop-accessibility');
+    if (fs.existsSync(helperSrc) && which('swiftc')) {
+      fs.mkdirSync(binDir, { recursive: true });
+      const cc = spawnSync('swiftc', ['-O', helperSrc, '-o', helperBin], { stdio: 'inherit', shell: false });
+      if (cc.status === 0) {
+        console.log(`[setup:voice] Helper de Acessibilidade compilado em ${helperBin}`);
+      } else {
+        console.warn('[setup:voice] Aviso: não compilei o helper de Acessibilidade (swiftc falhou); a digitação usará o modo JIT.');
+      }
+    }
+  }
 }
 
 main();

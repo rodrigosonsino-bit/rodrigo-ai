@@ -211,15 +211,16 @@ func snapshot() throws -> TargetSnapshot {
     let title = try stringAttribute(ctx.element, kAXTitleAttribute as CFString)
     let focused = try boolAttribute(ctx.element, kAXFocusedAttribute as CFString) ?? true
     let enabled = try boolAttribute(ctx.element, kAXEnabledAttribute as CFString) ?? true
-    let editableAttr = try boolAttribute(ctx.element, kAXEditableAttribute as CFString) ?? false
     let value = try stringAttribute(ctx.element, kAXValueAttribute as CFString)
     let selectedText = try stringAttribute(ctx.element, kAXSelectedTextAttribute as CFString)
     let selectedRange = try rangeAttribute(ctx.element, kAXSelectedTextRangeAttribute as CFString)
-    let supportsValue = (value != nil) || (try isAttributeSettable(ctx.element, kAXValueAttribute as CFString))
+    // Não existe kAXEditableAttribute na API de Acessibilidade: editabilidade = papel de texto + valor gravável.
+    let textRoles = Set(["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea"])
+    let settable = try isAttributeSettable(ctx.element, kAXValueAttribute as CFString)
+    let supportsValue = (value != nil) || settable
     let directInsertSupported = supportsValue && selectedRange != nil
     let appendSupported = supportsValue && value != nil
-    let textRoles = Set(["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea"])
-    let editable = editableAttr || (supportsValue && textRoles.contains(role ?? ""))
+    let editable = supportsValue && textRoles.contains(role ?? "")
     let rangeSnapshot = selectedRange.map { TargetSnapshot.SelectedRangeSnapshot(location: $0.location, length: $0.length) }
 
     return TargetSnapshot(
@@ -297,6 +298,17 @@ guard let command = args.first else {
 
 do {
     switch command {
+    case "prompt":
+        // Pede o consentimento: abre os Ajustes no painel certo COM este binário já
+        // listado (a permissão é atribuída a QUEM chama a API de Acessibilidade, ou seja,
+        // a este helper — não ao node). Devolve trusted=false até o usuário ligar a chave.
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let trusted = AXIsProcessTrustedWithOptions(options)
+        struct PromptOutput: Encodable {
+            let ok: Bool
+            let trusted: Bool
+        }
+        encode(PromptOutput(ok: true, trusted: trusted))
     case "inspect":
         encode(SuccessOutput(snapshot: try snapshot(), strategy: nil))
     case "insert":

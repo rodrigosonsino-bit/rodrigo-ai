@@ -36,11 +36,11 @@ export const ALLOWLIST_APPS: readonly AllowedAppSpec[] = [
   { canonicalName: 'Google Chrome', bundleId: 'com.google.Chrome', aliases: ['google chrome', 'chrome'] },
   { canonicalName: 'Slack', bundleId: 'com.tinyspeck.slackmacgap', aliases: ['slack'] },
   { canonicalName: 'Spotify', bundleId: 'com.spotify.client', aliases: ['spotify'] },
-  { canonicalName: 'TextEdit', bundleId: 'com.apple.TextEdit', aliases: ['textedit', 'editor de texto', 'bloco de notas'] },
+  { canonicalName: 'TextEdit', bundleId: 'com.apple.TextEdit', aliases: ['textedit', 'editor de texto'] },
   { canonicalName: 'WhatsApp', bundleId: 'net.whatsapp.WhatsApp', aliases: ['whatsapp', 'whats', 'zap'] },
   { canonicalName: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92', aliases: ['cursor'] },
   { canonicalName: 'Music', bundleId: 'com.apple.Music', aliases: ['music', 'musica', 'música', 'apple music'] },
-  { canonicalName: 'Notes', bundleId: 'com.apple.Notes', aliases: ['notes', 'notas', 'bloco de notas da apple'] },
+  { canonicalName: 'Notes', bundleId: 'com.apple.Notes', aliases: ['notes', 'notas', 'bloco de notas', 'bloco de notas da apple'] },
   { canonicalName: 'Finder', bundleId: 'com.apple.finder', aliases: ['finder', 'arquivos'] },
   {
     canonicalName: 'DitadoLocal',
@@ -711,8 +711,13 @@ function buildDigitarSuccess(appName: string, request: TextRequest, strategy: 'a
     : `Pronto, digitei o texto em ${appName}.`;
 }
 
-function formatAccessibilityFailure(err: unknown, targetLabel: string): string {
+/** Erro de leitura AX por falta de permissão/helper (não por alvo inseguro): vale o fallback via paste. */
+function isAxUnavailableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
+  return /AX_BAD|accessibilityDisabled|AXError|apiDisabled|AX_TRUST|not trusted/i.test(msg);
+}
+
+function formatAccessibilityFailure(err: unknown, targetLabel: string): string {  const msg = err instanceof Error ? err.message : String(err);
   if (/not editable/i.test(msg)) {
     return `Cancelado por segurança: ${targetLabel} está em foco, mas o elemento atual não é um campo editável.`;
   }
@@ -888,34 +893,50 @@ export class DigitarTool implements IMutatingTool {
       return 'Não havia texto válido para digitar.';
     }
 
-    let focusedTarget: FocusedTargetSnapshot;
+    let focusedTarget: FocusedTargetSnapshot | null = null;
+    let axUnavailable = false;
     try {
       focusedTarget = await this.accessibility.inspectFocusedTarget();
     } catch (err) {
-      return formatAccessibilityFailure(err, currentFront.name);
+      // Sem permissão de Acessibilidade (AXError -25204) ou helper ausente: a leitura
+      // fina do campo é impossível, mas a colagem via System Events (Cmd+V) NÃO exige
+      // essa permissão. Inserção simples cai para o paste; modos que dependem de ler o
+      // campo (anexar/substituir seleção) continuam recusados abaixo.
+      if (isAxUnavailableError(err)) {
+        axUnavailable = true;
+      } else {
+        return formatAccessibilityFailure(err, currentFront.name);
+      }
     }
 
-    if (focusedTarget.app.bundleId !== armed.bundleId) {
-      return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
-    }
-    if (!focusedTarget.enabled) {
-      return `Cancelado por segurança: o campo atual em ${currentFront.name} está desativado.`;
-    }
-    if (!focusedTarget.editable) {
-      return `Cancelado por segurança: ${currentFront.name} está em foco, mas o elemento atual não é um campo editável.`;
-    }
-    if (
-      request.mode === 'replaceSelection' &&
-      !(focusedTarget.selectedText && focusedTarget.selectedText.length > 0) &&
-      !(focusedTarget.selectedRange && focusedTarget.selectedRange.length > 0)
-    ) {
-      return 'Cancelado por segurança: não encontrei texto selecionado para substituir.';
+    if (focusedTarget) {
+      if (focusedTarget.app.bundleId !== armed.bundleId) {
+        return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
+      }
+      if (!focusedTarget.enabled) {
+        return `Cancelado por segurança: o campo atual em ${currentFront.name} está desativado.`;
+      }
+      if (!focusedTarget.editable) {
+        return `Cancelado por segurança: ${currentFront.name} está em foco, mas o elemento atual não é um campo editável.`;
+      }
+      if (
+        request.mode === 'replaceSelection' &&
+        !(focusedTarget.selectedText && focusedTarget.selectedText.length > 0) &&
+        !(focusedTarget.selectedRange && focusedTarget.selectedRange.length > 0)
+      ) {
+        return 'Cancelado por segurança: não encontrei texto selecionado para substituir.';
+      }
+    } else if (request.mode !== 'insert') {
+      // Sem leitura AX não há como verificar seleção nem anexar com segurança.
+      return `Não consegui verificar o campo atual em ${currentFront.name} (sem permissão de Acessibilidade); só a inserção simples por colagem está disponível.`;
     }
 
     const preferredAxMode =
-      request.mode === 'append'
+      !axUnavailable &&
+      focusedTarget &&
+      (request.mode === 'append'
         ? focusedTarget.appendSupported
-        : focusedTarget.directInsertSupported;
+        : focusedTarget.directInsertSupported);
     if (preferredAxMode) {
       try {
         await this.accessibility.insertText(resolvedText.text, request.mode);

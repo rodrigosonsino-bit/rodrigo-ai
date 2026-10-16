@@ -32,6 +32,7 @@ export const FILE_ACCESS_REGISTRY: readonly FileAccessEntry[] = [
   { file: 'src/backend/voice/tmpSweeper.ts', cls: 'exception', reason: 'varre e apaga SOMENTE dentro de .runtime/tmp (lstat; nunca segue symlink para fora)' },
   { file: 'src/backend/voice/usageLedger.ts', cls: 'exception', reason: 'livro-caixa do gasto próprio (.runtime/usage-ledger.jsonl): só números por (fonte, modelo), nunca texto de conversa; append + leitura filtrada pelo dia' },
   { file: 'src/backend/voice/ttsBudget.ts', cls: 'exception', reason: 'arquivo operacional do app (.runtime/tts-budget.json): contadores, sem dado do usuário; escrita tmp + rename' },
+  { file: 'src/backend/tools/macosAccessibility.ts', cls: 'exception', reason: 'só verifica a existência do binário pré-compilado (.runtime/bin/desktop-accessibility); a execução do helper passa pelo executor de comandos auditado' },
   { file: 'src/backend/voice/ttsProviders.ts', cls: 'exception', reason: 'verifica binários/vozes e apaga o AIFF temporário que ele mesmo gerou para o `say` (nome gerado pelo app)' },
   { file: 'src/backend/voice/voiceRuntime.ts', cls: 'existence-only', reason: 'só verifica a existência do runtime de voz e do manifesto' }
 ];
