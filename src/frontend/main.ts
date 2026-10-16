@@ -1,4 +1,4 @@
-import type { HealthResponse, PrivacyStatus, TtsStatus } from '../shared/types.ts';
+import type { HealthResponse, PrivacyStatus, TtsStatus, UsageStatus } from '../shared/types.ts';
 import { describePrivacy, describeTtsStatus, PRIVACY_UNAVAILABLE_TEXT, PRIVACY_FOOTNOTE } from '../shared/privacyText.ts';
 import { VoiceController } from './voice.ts';
 
@@ -231,12 +231,100 @@ async function loadTtsStatus(): Promise<void> {
   }
 }
 
+// --- Uso hoje: gasto PRÓPRIO com o Gemini (GET /api/usage, só números agregados) ---
+
+const USAGE_SOURCE_NAMES: Record<string, string> = {
+  geracao: 'Respostas',
+  intencao: 'Intenções',
+  visao: 'Tela (nuvem)',
+  tts: 'Voz'
+};
+
+function isUsageStatus(value: unknown): value is UsageStatus {
+  const v = value as Partial<UsageStatus> | null;
+  return (
+    !!v &&
+    typeof v.day === 'string' &&
+    typeof v.resetInMs === 'number' &&
+    Array.isArray(v.models) &&
+    v.models.every(
+      (m) =>
+        !!m &&
+        typeof (m as { source?: unknown }).source === 'string' &&
+        typeof (m as { model?: unknown }).model === 'string' &&
+        typeof (m as { req?: unknown }).req === 'number' &&
+        typeof (m as { pct?: unknown }).pct === 'number'
+    )
+  );
+}
+
+function formatResetIn(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${String(m).padStart(2, '0')}min` : `${m}min`;
+}
+
+async function loadUsage(): Promise<void> {
+  const resetEl = document.getElementById('usage-reset') as HTMLParagraphElement;
+  const rowsEl = document.getElementById('usage-rows') as HTMLDivElement;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('/api/usage', { headers: { Accept: 'application/json' }, signal: controller.signal });
+    if (!response.ok) throw new Error(`código ${response.status}`);
+    const data: unknown = await response.json();
+    if (!isUsageStatus(data)) throw new Error('formato não reconhecido');
+    resetEl.textContent = `Zera em ${formatResetIn(data.resetInMs)}.`;
+    rowsEl.replaceChildren();
+    if (data.models.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'cost-note';
+      p.textContent = 'Nenhuma chamada ao Gemini hoje — tudo local, custo zero.';
+      rowsEl.appendChild(p);
+      return;
+    }
+    for (const row of data.models) {
+      const pct = Math.max(0, Math.min(1, row.pct));
+      const wrap = document.createElement('div');
+      wrap.className = 'usage-row';
+      const label = document.createElement('div');
+      label.className = 'usage-label';
+      const name = document.createElement('span');
+      name.textContent = `${USAGE_SOURCE_NAMES[row.source] ?? row.source} · ${row.model}`;
+      const nums = document.createElement('span');
+      nums.className = 'usage-nums';
+      const tokens = row.inTokens + row.outTokens;
+      nums.textContent = `${Math.round(pct * 100)}% · ${row.req} req · ${tokens.toLocaleString('pt-BR')} tok (teto ${row.cap}/dia)`;
+      label.append(name, nums);
+      const bar = document.createElement('div');
+      bar.className = 'usage-bar';
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-valuenow', String(Math.round(pct * 100)));
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      const fill = document.createElement('div');
+      fill.className = 'usage-fill' + (pct >= 1 ? ' usage-fill-full' : '');
+      fill.style.width = `${Math.round(pct * 100)}%`;
+      bar.appendChild(fill);
+      wrap.append(label, bar);
+      rowsEl.appendChild(wrap);
+    }
+  } catch {
+    resetEl.textContent = 'Gasto do dia indisponível (voz local desligada ou sem resposta).';
+    rowsEl.replaceChildren();
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
 // Verificação inicial ao carregar a página
 document.addEventListener('DOMContentLoaded', () => {
   checkHealth();
   void loadPrivacy();
   void loadTtsStatus();
+  void loadUsage();
   window.setInterval(() => void loadTtsStatus(), 15_000);
+  window.setInterval(() => void loadUsage(), 60_000);
 });
 
 // --- Conversa por Voz (Fase 2) ---

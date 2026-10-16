@@ -578,6 +578,21 @@ def log_usage(source: str, turn_id: str, model: str, usage: Any, extra: str = ""
     log_diag(line)
 
 
+def usage_dict(model: str, usage: Any, extra: dict | None = None) -> dict | None:
+    """O mesmo conteúdo do [uso], em dicionário SÓ COM NÚMEROS, para o Node acumular no
+    livro-caixa (GET /api/usage). None quando a resposta não trouxe usage_metadata
+    (o Node ainda conta o pedido, que a cota do Google conta também)."""
+    d: dict = {"model": model,
+               "in": getattr(usage, "prompt_token_count", None) if usage is not None else None,
+               "out": getattr(usage, "candidates_token_count", None) if usage is not None else None}
+    reasoning = getattr(usage, "thoughts_token_count", None) if usage is not None else None
+    if reasoning is not None:
+        d["reasoning"] = reasoning
+    if extra:
+        d.update(extra)
+    return d
+
+
 def emit(event: dict[str, Any]) -> None:
     """Único ponto de escrita em stdout — protocolo NDJSON."""
     sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -1311,7 +1326,10 @@ class Worker:
                         "turnId": turn_id,
                         "text": out_text,
                         "engine": "gemini",
-                        "ms": duration_ms
+                        "ms": duration_ms,
+                        "usage": usage_dict("gemini-flash-latest",
+                                            getattr(res, "usage_metadata", None),
+                                            extra={"image": 1})
                     })
                     return
                 except Exception as exc:  # noqa: BLE001
@@ -1473,7 +1491,8 @@ class Worker:
                 return unavailable("saída inválida")
             intent, content = parsed
             emit({"event": "intent_detection", "reqId": req_id, "turnId": turn_id, "available": True,
-                  "intent": intent, "content": content, "model": model_version})
+                  "intent": intent, "content": content, "model": model_version,
+                  "usage": usage_dict(model_version, getattr(resp, "usage_metadata", None))})
         except Exception as exc:  # noqa: BLE001
             unavailable(f"erro: {safe_exc(exc)}")
 
@@ -1564,7 +1583,8 @@ class Worker:
         finally:
             with self._synth_lock:
                 self._syntheses.pop(req_id, None)
-        emit({"event": "synth_result", "reqId": req_id, **result})
+        emit({"event": "synth_result", "reqId": req_id,
+              "model": msg.get("model") or TTS_DEFAULT_MODEL, **result})
 
     def _synthesize(self, msg: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
         if entry["cancel"].is_set():
@@ -1705,9 +1725,11 @@ class Worker:
             first_chunk_logged = False
             last_finish: Any = None
             last_usage: Any = None
+            used_model: str | None = None
             for attempt, (model, timeout_ms) in enumerate(GENERATION_MODELS):
                 if handle.cancel_event.is_set():
                     break  # cancelado antes de qualquer chamada: nada sai para o Gemini
+                used_model = model
                 try:
                     client = self._gemini_client_for(genai, timeout_ms)
                     stream = client.models.generate_content_stream(
@@ -1809,7 +1831,8 @@ class Worker:
                             "index": sentence_index,
                             "text": leftover,
                         })
-                emit({"event": "done", "reqId": req_id, "turnId": turn_id})
+                emit({"event": "done", "reqId": req_id, "turnId": turn_id,
+                      "usage": usage_dict(used_model, last_usage) if used_model else None})
 
         except Exception as exc:  # noqa: BLE001 — chave ausente, timeout de rede (20s, acima),
                                     # erro de cota/API do Gemini, ValueError de to_gemini_contents —

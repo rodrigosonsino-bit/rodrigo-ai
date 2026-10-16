@@ -5,10 +5,12 @@ import { prepareProcessTmpDir } from './tmpSweeper.js';
 import { DecisionLog, unavailableAuditFs } from '../audit/decisionLog.js';
 import path from 'node:path';
 import type { TtsStatus } from '../../shared/types.js';
+import type { UsageStatus } from '../../shared/types.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
+import { UsageLedger, parseUsageCaps } from './usageLedger.js';
 import { SessionManager } from './sessionManager.js';
 import { createVoiceProvider } from './ttsProviders.js';
 import { GeminiVoiceProvider } from './geminiVoiceProvider.js';
@@ -33,6 +35,8 @@ export interface VoiceRuntime {
   scheduler?: ReminderScheduler;
   /** Fase 13a: estado da voz (qual motor, orçamento do dia). Nunca contém texto de frase. */
   ttsStatus?: () => TtsStatusResponse;
+  /** Gasto próprio com o Gemini (GET /api/usage). Só números; nenhum texto de conversa. */
+  usageSummary?: () => UsageStatus;
   shutdown: () => Promise<void>;
 }
 
@@ -83,11 +87,19 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // Fase 12: a mesma configuração de privacidade governa o Node e o worker. Valor inválido lança
   // aqui (falhar alto em privacidade), e o mestre RODRIGO_CLOUD chega ao worker como defesa em profundidade.
   const privacy = parsePrivacyConfig(process.env);
+  // Livro-caixa do gasto próprio (GET /api/usage): teto inválido também derruba o startup, mesma regra.
+  const usageCaps = parseUsageCaps(process.env);
+  const usageLedger = new UsageLedger({
+    filePath: path.join(rootDir, '.runtime', 'usage-ledger.jsonl'),
+    rpd: usageCaps.rpd,
+    rpdTts: usageCaps.rpdTts
+  });
   const engine = new MlxWorkerEngine({
     pythonBin: venvPython,
     workerScript,
     hfCacheDir,
-    env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) }
+    env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) },
+    usageLedger
   });
   const ttsProvider = createVoiceProvider({ engine, privacy, rootDir });
   console.log(`[Rodrigo AI] Voz das respostas: ${ttsProvider.name}`);
@@ -182,6 +194,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     sessionManager,
     audioStore,
     scheduler: reminderScheduler,
+    usageSummary: () => usageLedger.summary(),
     ttsStatus: () => {
       if (ttsProvider instanceof GeminiVoiceProvider) {
         const b = ttsProvider.budgetStatus();

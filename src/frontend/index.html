@@ -74,6 +74,17 @@
         </section>
 
 
+        <!-- Uso hoje: gasto PRÓPRIO com o Gemini (GET /api/usage, só números) -->
+        <section class="card usage-card" aria-labelledby="usage-title">
+          <h2 id="usage-title">Uso hoje</h2>
+          <p id="usage-reset" class="cost-note" role="status" aria-live="polite">Lendo o gasto do dia…</p>
+          <div id="usage-rows" class="usage-rows"></div>
+          <p class="cost-note">
+            Só o que este app consumiu — a conta da chave no Google pode ter mais, de outras ferramentas.
+            Zera à meia-noite (horário do Pacífico). Caminhos locais (visão local, voz do sistema) não gastam nada.
+          </p>
+        </section>
+
         <!-- Card de Conexão com o Sistema -->
         <section class="card status-card" aria-labelledby="status-title">
           <h2 id="status-title">Conexão com o Sistema</h2>
