@@ -35,6 +35,7 @@ import { DecisionLog, normalizeName, withAudit } from '../audit/decisionLog.js';
 import { selectAgentForLabel } from '../agents/specialistAgents.js';
 import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/systemTools.js';
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
+import { ToolPreviewRefusedError } from '../tools/desktopControlTool.js';
 import { mightBeScreenQuery, screenCloudAuthorized } from '../tools/screenQuery.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { AudioStore } from './audioStore.js';
@@ -147,6 +148,37 @@ const ACTION_CLAIM_STANDALONE = /\b(anotei|salvei|guardei|agendei|apaguei|regist
 /** Fatia 4 (A2): pergunta determinística de rastreabilidade ("o que você fez?"). */
 const WHAT_DID_YOU_DO = /\bo que (voc[eê]|vc) (j[aá] )?fez\b/i;
 
+/** Resposta determinística imediata quando o usuário chama apenas pelo nome "Orque". */
+export const ORQUE_ATTENDANCE_TEXT = 'Pronto, Rodrigo! O Orque está ouvindo, pode falar.';
+
+const ORQUE_PHONETIC_VARIANTS = /\b(orc|ork|orqui|orq|[oó]rqu[eê])\b/gi;
+const ORQUE_STANDALONE_CALL =
+  /^(?:(?:oi|ol[aá]|ei|fala|e\s+a[ií]|al[oô]|bom\s+dia|boa\s+tarde|boa\s+noite|me\s+atende|atende)\s*,?\s*)?orque(?:\s*,?\s*(?:t[aá]\s+a[ií]|est[aá]\s+a[ií]|t[aá]\s+me\s+ouvindo|est[aá]\s+me\s+ouvindo|me\s+ouve|me\s+escuta|pode\s+falar|pode\s+me\s+ouvir|tudo\s+bem))?[\s.!?,;:]*$/i;
+const ORQUE_TRAILING_CALL =
+  /^(?:t[aá]\s+a[ií]|est[aá]\s+a[ií]|t[aá]\s+me\s+ouvindo|est[aá]\s+me\s+ouvindo|me\s+atende|atende)\s*,?\s*orque[\s.!?,;:]*$/i;
+const ORQUE_LEADING_VOCATIVE =
+  /^(?:(?:oi|ol[aá]|ei|fala|e\s+a[ií]|al[oô]|bom\s+dia|boa\s+tarde|boa\s+noite)\s*,?\s+)?orque\b[\s,!?:.-]+/i;
+
+/** Normaliza variações fonéticas do Whisper ("Orc", "Ork", "Orqui", "Orq") para "Orque". */
+export function normalizeOrqueTranscript(raw: string): string {
+  if (!raw) return raw;
+  return raw.replace(ORQUE_PHONETIC_VARIANTS, 'Orque');
+}
+
+/** Detecta quando o usuário apenas chama o Orque pelo nome para ser atendido. */
+export function isStandaloneOrqueCall(transcript: string): boolean {
+  const trimmed = normalizeOrqueTranscript(transcript).trim();
+  if (!trimmed) return false;
+  return ORQUE_STANDALONE_CALL.test(trimmed) || ORQUE_TRAILING_CALL.test(trimmed);
+}
+
+/** Remove o vocativo inicial ("Orque, ...") para que detectores de ferramentas/mutações recebam o comando limpo. */
+export function stripLeadingOrqueVocative(transcript: string): string {
+  const normalized = normalizeOrqueTranscript(transcript).trim();
+  const stripped = normalized.replace(ORQUE_LEADING_VOCATIVE, '').trim();
+  return stripped.length > 0 ? stripped : normalized;
+}
+
 /** F11: afirmação em 1ª pessoa de ação concluída sobre lembrete/nota/memória (sem ferramenta executada). */
 export function claimsUnexecutedAction(text: string): boolean {
   if (ACTION_CLAIM_STANDALONE.test(text)) return true;
@@ -257,6 +289,8 @@ interface Session {
   /** Fase 17: delegação ao ClaudeCodeSubAgent esperando confirmação. */
   armedDelegation: ArmedDelegation | null;
   pendingDelegation: PendingDelegation | null;
+  /** Controle Desktop v5 (R1): ação de SO pós-fala (lock_screen / system_sleep), disparada exclusivamente em markPlayed(). */
+  pendingPostSpeechAction: { turnId: string; expectedText: string; run: () => Promise<void> } | null;
   /**
    * Fase V (§4): no máximo UM pedido de captura de tela pendente por sessão. A rota HTTP consome (resolve e
    * zera este campo) de forma síncrona — sem `await` entre checar e marcar consumido — então um POST
@@ -598,6 +632,7 @@ export class SessionManager {
     }
     this.clearOpenClawPollers(session);
     this.confirmedMutationTokens.clear();
+    session.pendingPostSpeechAction = null;
 
     if (notifyPreempted) {
       this.emit(session, { type: 'session_preempted' });
@@ -612,6 +647,17 @@ export class SessionManager {
     }
 
     await this.audioStore.cleanupSession(session.id);
+  }
+
+  /**
+   * Registra uma ação crítica de SO (`lock_screen` / `system_sleep`) para disparar somente
+   * quando `markPlayed()` confirmar a reprodução da fala final do turno atual.
+   */
+  schedulePostSpeechAction(action: () => Promise<void>): void {
+    const s = this.current;
+    const t = s?.activeTurn;
+    if (!s || !t) return;
+    s.pendingPostSpeechAction = { turnId: t.turnId, expectedText: '', run: action };
   }
 
   /** Cria (e preempta a anterior, se houver) uma nova sessão. Sempre aceita — nunca bloqueia. */
@@ -634,10 +680,11 @@ export class SessionManager {
         lastTurnId: null,
         cancelledTurnIds: new Set(),
         armedMutation: null,
-      captureRequest: null,
+        captureRequest: null,
         pendingMutation: null,
         armedDelegation: null,
         pendingDelegation: null,
+        pendingPostSpeechAction: null,
         openClawAsyncPollers: new Map()
       };
       clearTimeout(session.idleTimer);
@@ -755,7 +802,8 @@ export class SessionManager {
         if (session.activeTurn !== turn) return;
       }
 
-      const transcript = await this.engine.transcribe(audioPath);
+      const transcript = normalizeOrqueTranscript(await this.engine.transcribe(audioPath));
+      const commandTranscript = stripLeadingOrqueVocative(transcript);
       this.mark(turn, 'stt');
       if (session.activeTurn !== turn) return; // superado por cancelamento/preempção
 
@@ -780,8 +828,8 @@ export class SessionManager {
         !session.armedMutation &&
         !session.pendingDelegation &&
         !session.armedDelegation &&
-        !mightBeMutation(transcript) &&
-        mightBeScreenQuery(transcript)
+        !mightBeMutation(commandTranscript) &&
+        mightBeScreenQuery(commandTranscript)
       ) {
         turn.provenance = 'screen';
       }
@@ -906,9 +954,15 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             } else {
               // Fatia 4 (A1): a mutação passa pelo gatekeeper do coordenador, que consome o token emitido acima.
               const r = await this.delegateToolInTurn(turn, transcript, tool, mutation.kind, mutation.content, true); // achado 3 — kind completo
-              if (session.activeTurn !== turn) return;
+              if (session.activeTurn !== turn) {
+                session.pendingPostSpeechAction = null;
+                return;
+              }
               text = r.text ?? MUTATION_FAILURE_TEXT; // achado 7 — texto literal definido em voiceProtocol.ts
-              if (r.text === null) console.error('[mutation] execução falhou:', r.error);
+              if (r.text === null || text === AUDIT_REFUSED_TEXT) {
+                session.pendingPostSpeechAction = null;
+                if (r.text === null) console.error('[mutation] execução falhou:', r.error);
+              }
             }
           } else {
             text = MUTATION_CANCELLED_TEXT; // achado 7
@@ -924,6 +978,9 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           this.emit(session, { type: 'state', state: 'falando' });
 
           const clean = cleanTextForSpeech(text);
+          if (session.pendingPostSpeechAction && session.pendingPostSpeechAction.turnId === turn.turnId) {
+            session.pendingPostSpeechAction.expectedText = clean;
+          }
           turn.expectedSentences.add(0);
           turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
           await Promise.allSettled(turn.pendingSynthesis);
@@ -981,22 +1038,43 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           let text: string;
           if (confirmed === 'SIM') {
             this.recordMutationConfirmation(turn.turnId);
-            const r = await this.runSubAgentDelegation({
-              turnId: turn.turnId,
-              query: pend.transcript,
-              subAgentId: 'claude_code',
-              prompt: pend.transcript,
-              isMutation: true,
-              signal: turn.abortController.signal,
-              needs: ['shell', 'read_file', 'write_file', 'network']
-            });
+            const audited = await withAudit(
+              this.decisionLog,
+              {
+                mid: crypto.randomUUID(),
+                turnId: turn.turnId,
+                action: 'DELEGAR_CODIGO',
+                tool: 'claude_code',
+                executor: 'subagent',
+                dataClass: 'unknown'
+              },
+              () =>
+                this.runSubAgentDelegation({
+                  turnId: turn.turnId,
+                  query: pend.transcript,
+                  subAgentId: 'claude_code',
+                  prompt: pend.transcript,
+                  isMutation: true,
+                  signal: turn.abortController.signal,
+                  needs: ['shell', 'read_file', 'write_file', 'network']
+                }),
+              (r) => (r.ok && r.result?.success ? 'ok' : 'failed')
+            );
             if (session.activeTurn !== turn) return;
-            if (r.budgetExceeded && r.speech) {
-              text = r.speech;
-            } else if (r.result?.success) {
-              text = r.result.output || 'Concluído.';
+            if (audited.refused) {
+              text = AUDIT_REFUSED_TEXT;
             } else {
-              text = r.result?.error ?? MUTATION_FAILURE_TEXT;
+              const r = audited.result;
+              if (r.budgetExceeded && r.speech) {
+                text = r.speech;
+              } else if (r.result?.success) {
+                text = r.result.output || 'Concluído.';
+              } else {
+                text = r.result?.error ?? MUTATION_FAILURE_TEXT;
+              }
+              if (audited.conclusionLost && r.result?.success) {
+                text = `${text} ${AUDIT_CONCLUSION_LOST_TEXT}`;
+              }
             }
           } else {
             text = MUTATION_CANCELLED_TEXT;
@@ -1036,6 +1114,22 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         return;
       }
 
+      // Atendimento imediato ao chamar pelo nome "Orque" (sem comando acoplado).
+      if (isStandaloneOrqueCall(transcript)) {
+        this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+        this.emit(session, { type: 'state', state: 'falando' });
+        const clean = cleanTextForSpeech(ORQUE_ATTENDANCE_TEXT);
+        turn.expectedSentences.add(0);
+        turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
+        await Promise.allSettled(turn.pendingSynthesis);
+        if (session.activeTurn === turn) {
+          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+          this.emit(session, { type: 'state', state: 'ouvindo' });
+          session.activeTurn = null;
+        }
+        return;
+      }
+
       // F11 adendo (decisão do usuário, 2026-10-03): UMA classificação de intenção em nuvem (Gemini) para
       // falas que passam por qualquer filtro; só o TEXTO da fala atual. null => nuvem indisponível =>
       // detectores locais abaixo, exatamente como antes. A nuvem só PROPÕE: toda mutação segue pela
@@ -1044,16 +1138,16 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       if (
         this.privacy.cloud &&
         this.privacy.cloudIntent &&
-        ((this.mutatingTools.length > 0 && mightBeMutation(transcript)) ||
-          (this.tools.length > 0 && mightBeTemporal(transcript)) ||
+        ((this.mutatingTools.length > 0 && mightBeMutation(commandTranscript)) ||
+          (this.tools.length > 0 && mightBeTemporal(commandTranscript)) ||
           (claudeCodeEffective(this.privacy) &&
             this.coordinator.get('claude_code') !== undefined &&
-            mightBeClaudeCodeDelegation(transcript)))
+            mightBeClaudeCodeDelegation(commandTranscript)))
       ) {
         try {
           // T1: o texto que vai à nuvem passa pelo guarda de saída. No modo block, com achado, nada é enviado
           // e o turno usa os detectores locais (cloudIntent fica null); a transcrição local segue intacta.
-          const intentGuard = guardText(transcript, this.privacy.outboundGuard);
+          const intentGuard = guardText(commandTranscript, this.privacy.outboundGuard);
           cloudIntent = intentGuard.blocked
             ? null
             : await this.engine.detectIntent(turn.turnId, turn.epoch, intentGuard.text);
@@ -1070,13 +1164,13 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         this.mutatingTools.length > 0 &&
         (cloudIntent
           ? (isMutationName(cloudIntent.intent) || isQueryName(cloudIntent.intent)) && cloudIntent.intent !== 'NENHUMA'
-          : mightBeMutation(transcript))
+          : mightBeMutation(commandTranscript))
       ) {
         let detected: [IntentName, string | null] = ['NENHUMA', null];
         try {
           detected = cloudIntent
             ? [cloudIntent.intent, cloudIntent.content]
-            : await this.engine.detectMutation(turn.turnId, turn.epoch, transcript);
+            : await this.engine.detectMutation(turn.turnId, turn.epoch, commandTranscript);
         } catch (err) {
           detected = ['NENHUMA', null];
           console.error('[mutation] detecção falhou, seguindo pelo caminho normal:', err);
@@ -1092,7 +1186,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           } else if (isQueryName(action)) {
             // Fase 14 (achado 1 da auditoria r1): *_CONSULTAR é LEITURA, nunca mutação — executa
             // direto e fala o resultado, sem preview()/armedMutation/confirmação por voz.
-            const r = await this.delegateToolInTurn(turn, transcript, tool, action, content, false);
+            const r = await this.delegateToolInTurn(turn, commandTranscript, tool, action, content, false);
             if (session.activeTurn !== turn) return;
             const text = r.text ?? MUTATION_FAILURE_TEXT;
             if (r.text === null) console.error('[query] execução falhou:', r.error);
@@ -1119,7 +1213,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             } catch (err) {
               // Achado 5 da rodada 4 (Hermes) — preview() sem try/catch deixava uma falha subir
               // até o catch externo de runTurn (state:'erro' cru).
-              question = MUTATION_FAILURE_TEXT;
+              question = err instanceof ToolPreviewRefusedError ? err.message : MUTATION_FAILURE_TEXT;
               previewFailed = true;
               console.error('[mutation] preview falhou:', err);
             }
@@ -1156,11 +1250,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       // Fase 5b: três camadas — filtro permissivo, modelo decide, código responde.
       if (
         this.tools.length > 0 &&
-        (cloudIntent ? cloudIntent.intent === 'HORA' || cloudIntent.intent === 'DATA' : mightBeTemporal(transcript))
+        (cloudIntent ? cloudIntent.intent === 'HORA' || cloudIntent.intent === 'DATA' : mightBeTemporal(commandTranscript))
       ) {
         let detected = 'NENHUMA';
         try {
-          detected = cloudIntent ? cloudIntent.intent : await this.engine.detectTool(turn.turnId, turn.epoch, transcript);
+          detected = cloudIntent ? cloudIntent.intent : await this.engine.detectTool(turn.turnId, turn.epoch, commandTranscript);
         } catch (err) {
           // §4.4: a intenção nunca foi estabelecida — cair no caminho normal é o correto.
           detected = 'NENHUMA';
@@ -1801,6 +1895,20 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       session.armedDelegation = null;
     }
 
+    // Controle Desktop v5 (R1): dispara ação de SO pós-fala (lock_screen / system_sleep)
+    // exclusivamente após confirmação de que a frase final daquele turnId foi reproduzida.
+    if (
+      session.pendingPostSpeechAction &&
+      session.pendingPostSpeechAction.turnId === turnId &&
+      session.pendingPostSpeechAction.expectedText === text
+    ) {
+      const postAction = session.pendingPostSpeechAction;
+      session.pendingPostSpeechAction = null;
+      void postAction.run().catch((err) => {
+        console.error(`[desktop] falha na ação pós-fala (turno=${turnId}):`, err);
+      });
+    }
+
     return true;
   }
 
@@ -1890,6 +1998,9 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     // confirmação de reprodução tardia desse turno interrompido (achado de consulta ao
     // Codex CLI, 2026-09-29, confirmado por leitura de código).
     session.cancelledTurnIds.add(turnId);
+    if (session.pendingPostSpeechAction?.turnId === turnId) {
+      session.pendingPostSpeechAction = null;
+    }
 
     if (session.activeTurn && session.activeTurn.turnId === turnId) {
       this.engine.cancel(turnId);

@@ -17,6 +17,9 @@ export const TOOL_NAMES = [
   'LEMBRETE_CONSULTAR',
   'NOTA_CONSULTAR',
   'MEMORIA_CONSULTAR',
+  'DESKTOP_COMANDO',
+  'DITADO_LOCAL',
+  'CONFIGURAR_VOZ',
   'DELEGAR_CODIGO',
   'NENHUMA'
 ] as const;
@@ -37,6 +40,9 @@ export const MUTATION_NAMES = [
   'MEMORIA_GUARDAR',
   'MEMORIA_EDITAR',
   'MEMORIA_ESQUECER',
+  'DESKTOP_CRITICO',
+  'DIGITAR_TEXTO',
+  'AUTO_CORRECAO',
   'NENHUMA'
 ] as const;
 export type MutationName = (typeof MUTATION_NAMES)[number];
@@ -45,12 +51,18 @@ export function isMutationName(v: unknown): v is MutationName {
 }
 
 /**
- * Fase 14 — as 3 ações `*_CONSULTAR` são LEITURA, não mutação (vivem em TOOL_NAMES, não em
- * MUTATION_NAMES), mas são detectadas pelo mesmo pipeline de detecção de mutação (é ele que
- * extrai o termo de busca da fala). Este predicado existe pra quem precisa reconhecer as duas
- * famílias juntas (o gate de entrada no pipeline) sem também aceitar HORA/DATA/NENHUMA.
+ * Fase 14 — as ações `*_CONSULTAR` e os comandos imediatos com parâmetro (`DESKTOP_COMANDO`,
+ * `DITADO_LOCAL`, `CONFIGURAR_VOZ`) não exigem confirmação de duas fases (vivem em TOOL_NAMES,
+ * não em MUTATION_NAMES), mas são detectadas pelo mesmo pipeline que extrai `content` da fala.
  */
-export const QUERY_NAMES = ['LEMBRETE_CONSULTAR', 'NOTA_CONSULTAR', 'MEMORIA_CONSULTAR'] as const;
+export const QUERY_NAMES = [
+  'LEMBRETE_CONSULTAR',
+  'NOTA_CONSULTAR',
+  'MEMORIA_CONSULTAR',
+  'DESKTOP_COMANDO',
+  'DITADO_LOCAL',
+  'CONFIGURAR_VOZ'
+] as const;
 export type QueryName = (typeof QUERY_NAMES)[number];
 export function isQueryName(v: unknown): v is QueryName {
   return typeof v === 'string' && (QUERY_NAMES as readonly string[]).includes(v);

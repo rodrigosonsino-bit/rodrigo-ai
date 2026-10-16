@@ -1,10 +1,11 @@
 #!/bin/zsh
-# Compila o app de barra de menus. Saída: desktop/build/Rodrigo AI.app (assinatura ad hoc, uso local).
+# Compila o app de barra de menus. Saída: desktop/build/Rodrigo AI.app (assinatura estável com DitadoLocal Dev para preservar TCC).
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd -P)"
 NODE="$(command -v node)"
 APP="build/Rodrigo AI.app"
+SIGN_ID="${RODRIGO_CODESIGN_IDENTITY:-DitadoLocal Dev}"
 rm -rf build && mkdir -p "$APP/Contents/MacOS"
 swiftc -O -swift-version 5 -o "$APP/Contents/MacOS/RodrigoAI" main.swift
 cat > "$APP/Contents/Info.plist" <<PL
@@ -20,10 +21,17 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>NSMicrophoneUsageDescription</key><string>O Rodrigo AI usa o microfone para ouvir você falar.</string>
+<key>NSAppleEventsUsageDescription</key><string>O Rodrigo AI usa Automação do macOS para controlar mídia, aplicativos e digitação autorizados por voz.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 <key>RodrigoRepoRoot</key><string>$ROOT</string>
 <key>RodrigoNodePath</key><string>$NODE</string>
 </dict></plist>
 PL
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1
-echo "ok: $PWD/$APP"
+if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_ID"; then
+  echo "ERRO: Certificado de assinatura '$SIGN_ID' não encontrado no Keychain." >&2
+  echo "Para preservar permissões TCC (Acessibilidade/Automação) entre rebuilds, o fallback ad-hoc (-) não é permitido." >&2
+  exit 1
+fi
+codesign --force --deep --sign "$SIGN_ID" "$APP"
+echo "ok: $PWD/$APP (assinado com '$SIGN_ID')"
+

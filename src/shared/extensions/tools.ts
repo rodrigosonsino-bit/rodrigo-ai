@@ -20,6 +20,6 @@ export interface IMutatingTool {
   readonly description: string;
   isAvailable(): boolean;
   preview(kind: IntentName, content: string | null): string;
-  execute(kind: IntentName, content: string | null): string;
+  execute(kind: IntentName, content: string | null): string | Promise<string>;
 }
 

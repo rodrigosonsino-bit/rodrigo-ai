@@ -371,7 +371,7 @@ function resetAgentIndicator(): void {
   voiceAgentIndicator.textContent = '';
 }
 
-function appendTranscriptEntry(speaker: 'Você' | 'Rodrigo AI', text: string): void {
+function appendTranscriptEntry(speaker: 'Você' | 'Orque', text: string): void {
   const entry = document.createElement('p');
   entry.className = 'transcript-entry';
   const strong = document.createElement('strong');
@@ -411,7 +411,7 @@ const voiceController = new VoiceController(
     (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
   },
   (text) => appendTranscriptEntry('Você', text),
-  (text) => appendTranscriptEntry('Rodrigo AI', text),
+  (text) => appendTranscriptEntry('Orque', text),
   (message) => appendErrorEntry(message),
   (_turnId, label, _handled) => {
     // Checa o rótulo explicitamente (não `handled`) — `!handled` sozinho não garante

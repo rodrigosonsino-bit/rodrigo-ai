@@ -64,7 +64,7 @@ docs/           — phase plans (phase-N-vX.md), implementation reports, and doc
 
 ## Development workflow for this repo
 
-Non-trivial changes go through an adversarial plan audit before implementation, not after — see the `auditoria-plano-codex` skill. In practice for this repo: write `docs/phase-N-vX.md`, run it past Codex CLI (`codex exec -s read-only`) and/or Antigravity CLI (`agy --mode plan`) for adversarial review, only implement once there are no pending high-severity findings, then verify against reality afterward (build/test/manual check) — approval to implement is not the same as "done." Audit prompts and full logs for past rounds live in `docs/audits/`; check there before re-litigating a decision that was already audited (e.g. the `say` vs. Kokoro TTS choice, or the session-preemption design) — the reasoning and rejected alternatives are recorded, not just the final answer.
+Non-trivial changes go through an adversarial plan audit before implementation, not after. In practice for this repo: write `docs/phase-N-vX.md`, run it past Cursor Agent CLI (`cursor-agent -p`), Gemini CLI (`gemini -m gemini-2.5-pro`), or Antigravity CLI (`agy --mode plan`) for adversarial review (**do NOT use Codex `codex` unless explicitly requested by the user**, as it is too expensive), only implement once there are no pending high-severity findings, then verify against reality afterward (build/test/manual check) — approval to implement is not the same as "done." Audit prompts and full logs for past rounds live in `docs/audits/`; check there before re-litigating a decision that was already audited (e.g. the `say` vs. Kokoro TTS choice, or the session-preemption design) — the reasoning and rejected alternatives are recorded, not just the final answer.
 
 ## Canal Claude → Ogra (Grok) por webhook
 
@@ -101,4 +101,5 @@ Para preservar a cota de tokens da assinatura do Claude Code, evitar limites de 
    jev choice -c "opcao_a,opcao_b,opcao_c" "Qual arquitetura adotar?"
    ```
 4. **Auditoria Adversarial (Regra de Isenção do Autor)**: Como autor do plano ou código, o Claude Code **nunca deve auditar a si mesmo**. Acione a cadeia de auditoria externa:
-   `Codex CLI (codex exec -s read-only)` ➔ `Gemini CLI (gemini -m gemini-2.5-pro)` ➔ `OpenCode CLI (opencode run)`.
+   `Cursor Agent (agent -p --mode plan, modelo não-Claude)` ➔ `Gemini CLI (gemini -m gemini-2.5-pro)` ➔ `OpenCode CLI (opencode run)`.
+   **Codex só quando o Rodrigo pedir nominalmente** (decisão de 2026-10-16: ficou caro demais). Não usar como primeira opção nem como fallback.

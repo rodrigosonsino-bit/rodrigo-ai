@@ -12,11 +12,12 @@ import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { UsageLedger, parseUsageCaps } from './usageLedger.js';
 import { SessionManager } from './sessionManager.js';
-import { createVoiceProvider } from './ttsProviders.js';
+import { createDynamicVoiceProvider } from './ttsProviders.js';
 import { GeminiVoiceProvider } from './geminiVoiceProvider.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
 import { createSystemTools } from '../tools/systemTools.js';
 import { createMutatingTools } from '../tools/mutatingTools.js';
+import { createDesktopAndSelfTools } from '../tools/desktopControlTool.js';
 import { ReminderScheduler } from '../tools/reminderScheduler.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { SubAgentCoordinator } from '../agents/subAgent.js';
@@ -101,7 +102,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) },
     usageLedger
   });
-  const ttsProvider = createVoiceProvider({ engine, privacy, rootDir });
+  const ttsProvider = createDynamicVoiceProvider({ engine, privacy, rootDir });
   console.log(`[Rodrigo AI] Voz das respostas: ${ttsProvider.name}`);
   ExtensionRegistry.getInstance().registerVoiceProvider(ttsProvider);
 
@@ -131,7 +132,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     ? path.resolve(process.env.RODRIGO_DATA_DIR)
     : path.join(rootDir, 'data');
   // Factory retorna as ferramentas, a instância única do agendador e o store de memórias
-  const { tools: mutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
+  const { tools: baseMutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
+  const { desktopTool, allTools: desktopAndSelfTools } = createDesktopAndSelfTools({
+    rootDir,
+    privacy,
+    voiceProvider: ttsProvider
+  });
+  const mutatingTools = [...baseMutatingTools, ...desktopAndSelfTools];
   for (const mTool of mutatingTools) ExtensionRegistry.getInstance().registerMutatingTool(mTool);
 
   // Inicializa o agendador carregando lembretes persistidos
@@ -147,8 +154,6 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const audioStore = new AudioStore(tmp.dir);
   const coordinator = new SubAgentCoordinator();
   const openClawClient = makeOpenClawHttpClient();
-  registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
-  registerClaudeCodeAgent(coordinator, privacy, rootDir);
   const pendingAsyncStore = new PendingAsyncTaskStore(dataDir);
   const sessionManager = new SessionManager(
     engine,
@@ -163,6 +168,11 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     {},
     pendingAsyncStore,
     coordinator
+  );
+  desktopTool.setPostSpeechScheduler((action) => sessionManager.schedulePostSpeechAction(action));
+  registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
+  registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
+    sessionManager.consumeMutationToken(turnId, token)
   );
 
   // T4: registro de decisões das mutações (duas fases, cadeia de hashes). Se não puder abrir, fica INDISPONÍVEL e as
@@ -196,12 +206,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     scheduler: reminderScheduler,
     usageSummary: () => usageLedger.summary(),
     ttsStatus: () => {
-      if (ttsProvider instanceof GeminiVoiceProvider) {
-        const b = ttsProvider.budgetStatus();
-        const c = ttsProvider.counters;
+      const active = ttsProvider.getActiveProvider();
+      if (active instanceof GeminiVoiceProvider) {
+        const b = active.budgetStatus();
+        const c = active.counters;
         return {
-          engine: ttsProvider.id,
-          name: ttsProvider.name,
+          engine: active.id,
+          name: active.name,
           budget: { used: b.used, limit: b.limit, minuteUsed: b.minuteUsed, rpm: b.rpm, exhausted: b.exhausted, blockedForMs: b.blockedForMs },
           counters: { gemini: c.gemini, fallback: c.fallback, failures: c.failures }
         };
