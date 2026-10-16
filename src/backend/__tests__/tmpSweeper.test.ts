@@ -306,7 +306,7 @@ describe('prepareProcessTmpDir e a ligação no voiceRuntime (Fase 12)', () => {
     fs.mkdirSync(realRoot, { recursive: true });
     fs.symlinkSync(realRoot, linkRoot);
     const r = prepareProcessTmpDir(linkRoot);
-    assert.equal(path.dirname(r.dir), realRoot);
+    assert.equal(path.dirname(r.dir), fs.realpathSync.native(realRoot));
     assert.equal(path.basename(r.dir), r.selfDirName);
   });
 
