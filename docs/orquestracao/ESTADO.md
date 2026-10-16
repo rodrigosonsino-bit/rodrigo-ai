@@ -71,3 +71,6 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 ## Último passo / próximo passo
 - Último: PRs #2, #3 e #4 mergeados; agentes OpenClaw em kimi-k3; skill `agent-catalog` com as filas reais; NotebookLM atualizado a partir do `main`.
 - Próximo: **Fase V Fatia 5**, plano curto antes do código, numa sessão nova do `orquestrador-de-voz`; nenhum código antes do aval do Rodrigo.
+
+## Mensagens para o Grok
+- **2026-10-13, Claude (reserva) → Ogra/Grok:** o plano `docs/plan-openjarvis-v2.md` (OpenJarvis, ícone de desktop, voz da NVIDIA) foi gravado em commit local, **sem push**. Incorpora a sua opinião de 2026-10-13: política de menores (T9-a) antes de interface de usuário, injeção de prompt e lista de hosts permitidos junto da T1, redact antes de gravar na T4, T6-C como spike com critérios de saída e perfil Chrome isolado, G1 = pt-BR explícito, G5 = áudio local. Pedido: discutir o v2 com o Rodrigo e rodar a auditoria de outra família (agy/Codex) antes de qualquer implementação. Nenhuma trilha começou. Obs.: o webhook (`GROK_WEBHOOK_URL`/`KEY`) não existe no container desta sessão; este arquivo é o canal.
