@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -166,6 +166,7 @@ export interface VoiceProviderDeps {
   rootDir: string;
   env?: NodeJS.ProcessEnv;
   log?: (msg: string) => void;
+  installedSayVoices?: readonly string[];
 }
 
 import type { SynthesizeOptions } from '../../shared/extensions/voice.js';
@@ -199,6 +200,74 @@ const SAY_VOICES: Readonly<Record<string, string>> = {
   local: DEFAULT_SAY_VOICE,
   mac: DEFAULT_SAY_VOICE
 };
+
+function normalizeVoiceLookupKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function parseSayVoiceNames(output: string): string[] {
+  const voices: string[] = [];
+  const seen = new Set<string>();
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^(.+?)\s+\S+\s+#/);
+    const voice = match?.[1]?.trim();
+    if (!voice || seen.has(voice)) continue;
+    seen.add(voice);
+    voices.push(voice);
+  }
+  return voices;
+}
+
+let cachedSayVoices: readonly string[] | null = null;
+
+function getInstalledSayVoices(): readonly string[] {
+  if (cachedSayVoices) return cachedSayVoices;
+  if (process.platform !== 'darwin') return [];
+  try {
+    const output = execFileSync('/usr/bin/say', ['-v', '?'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    cachedSayVoices = parseSayVoiceNames(output);
+  } catch {
+    cachedSayVoices = [];
+  }
+  return cachedSayVoices;
+}
+
+export function resolveSayVoiceName(
+  rawRequest: string,
+  installedVoices: readonly string[] = getInstalledSayVoices()
+): string | null {
+  const normalized = normalizeVoiceLookupKey(rawRequest);
+  if (!normalized) return null;
+
+  const alias = SAY_VOICES[normalized];
+  if (alias) return alias;
+  if (normalized.includes('luciana')) return 'Luciana (Enhanced)';
+  if (normalized.includes('felipe')) return 'Felipe (Enhanced)';
+
+  const candidates = Array.from(
+    new Map(installedVoices.map((voice) => [normalizeVoiceLookupKey(voice), voice])).entries(),
+    ([key, name]) => ({ key, name })
+  ).filter((candidate) => candidate.key.length > 0);
+
+  const exact = candidates.find((candidate) => candidate.key === normalized);
+  if (exact) return exact.name;
+
+  const fuzzy = candidates.filter((candidate) => candidate.key.includes(normalized) || normalized.includes(candidate.key));
+  return fuzzy.length === 1 ? fuzzy[0].name : null;
+}
+
+function formatSystemVoiceName(voice: string): string {
+  return voice.replace(/\s+\((enhanced|aprimorada)\)$/i, '');
+}
 
 /**
  * Pilar 3 — Provedor dinâmico que permite troca autônoma de voz em runtime sem quebrar
@@ -277,7 +346,7 @@ export class DynamicVoiceProvider implements IVoiceProvider {
     if (!normalized) {
       return {
         ok: false,
-        speech: 'Não entendi qual voz você quer usar. Você pode escolher Felipe, Luciana, Kokoro ou vozes do Gemini como Charon, Puck e Aoede.'
+        speech: 'Não entendi qual voz você quer usar. Você pode escolher Kokoro, uma voz do Gemini como Charon, Puck e Aoede, ou qualquer voz local instalada do macOS.'
       };
     }
 
@@ -294,8 +363,8 @@ export class DynamicVoiceProvider implements IVoiceProvider {
       return { ok: true, speech: 'Pronto, mudei para a voz local Kokoro.', engine: 'kokoro', voice: 'pf_dora' };
     }
 
-    // 2. macOS say local (Felipe / Luciana / sistema)
-    const sayMatch = SAY_VOICES[normalized] ?? (normalized.includes('luciana') ? 'Luciana (Enhanced)' : normalized.includes('felipe') ? 'Felipe (Enhanced)' : null);
+    // 2. macOS say local (qualquer voz instalada no sistema)
+    const sayMatch = resolveSayVoiceName(normalized, this.deps.installedSayVoices);
     if (sayMatch) {
       const sayProvider = new SayVoiceProvider('ffmpeg', sayMatch);
       if (!sayProvider.isAvailable()) {
@@ -305,7 +374,7 @@ export class DynamicVoiceProvider implements IVoiceProvider {
         };
       }
       this.setProvider(sayProvider, { engine: 'say', voice: sayMatch });
-      const friendlyName = sayMatch.replace(' (Enhanced)', '');
+      const friendlyName = formatSystemVoiceName(sayMatch);
       return { ok: true, speech: `Pronto, mudei minha voz para ${friendlyName} do sistema.`, engine: 'say', voice: sayMatch };
     }
 
@@ -365,7 +434,7 @@ export class DynamicVoiceProvider implements IVoiceProvider {
 
     return {
       ok: false,
-      speech: `Não reconheci a voz ${rawRequest}. As opções são Felipe, Luciana, Kokoro, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr.`
+      speech: `Não reconheci a voz ${rawRequest}. Você pode pedir Kokoro, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr, ou dizer o nome de qualquer voz local instalada no macOS.`
     };
   }
 

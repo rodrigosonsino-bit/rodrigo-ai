@@ -164,5 +164,6 @@ export function prepareProcessTmpDir(
 ): { dir: string; selfDirName: string; removed: string[] } {
   const selfDirName = processDirName(process.pid, ownStartEpochMs());
   const swept = sweepStaleTmpDirs(tmpRoot, { selfDirName, log });
-  return { dir: path.join(tmpRoot, selfDirName), selfDirName, removed: swept.removed };
+  const baseDir = fs.existsSync(tmpRoot) ? fs.realpathSync.native(tmpRoot) : tmpRoot;
+  return { dir: path.join(baseDir, selfDirName), selfDirName, removed: swept.removed };
 }

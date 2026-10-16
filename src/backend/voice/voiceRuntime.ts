@@ -95,11 +95,26 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     rpd: usageCaps.rpd,
     rpdTts: usageCaps.rpdTts
   });
+  // Fase 12 (§2.4): cada processo usa .runtime/tmp/<pid>-<startEpochMs>/. Antes de aceitar sessões, varre os
+  // subdiretórios de processos mortos/reciclados; os de instâncias vivas ficam intactos (nada de rm -rf da base).
+  const tmpRoot = path.join(rootDir, '.runtime', 'tmp');
+  const tmp = prepareProcessTmpDir(tmpRoot, (m) => console.warn(m));
+  const workerFileRoots = new Set(
+    (process.env.RODRIGO_FILE_ROOTS ?? '')
+      .split(path.delimiter)
+      .map((v) => v.trim())
+      .filter(Boolean)
+  );
+  workerFileRoots.add(tmp.dir);
   const engine = new MlxWorkerEngine({
     pythonBin: venvPython,
     workerScript,
     hfCacheDir,
-    env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) },
+    env: {
+      ...workerPrivacyEnv(privacy),
+      ...workerGeminiEnv(process.env, (m) => console.warn(m)),
+      RODRIGO_FILE_ROOTS: Array.from(workerFileRoots).join(path.delimiter)
+    },
     usageLedger
   });
   const ttsProvider = createDynamicVoiceProvider({ engine, privacy, rootDir });
@@ -144,10 +159,6 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // Inicializa o agendador carregando lembretes persistidos
   reminderScheduler.bootstrap();
 
-  // Fase 12 (§2.4): cada processo usa .runtime/tmp/<pid>-<startEpochMs>/. Antes de aceitar sessões, varre os
-  // subdiretórios de processos mortos/reciclados; os de instâncias vivas ficam intactos (nada de rm -rf da base).
-  const tmpRoot = path.join(rootDir, '.runtime', 'tmp');
-  const tmp = prepareProcessTmpDir(tmpRoot, (m) => console.warn(m));
   if (tmp.removed.length > 0) {
     console.log(`[Rodrigo AI] Limpeza de resíduos de áudio: ${tmp.removed.length} diretório(s) órfão(s) removido(s).`);
   }
