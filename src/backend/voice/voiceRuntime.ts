@@ -11,7 +11,7 @@ import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { UsageLedger, parseUsageCaps } from './usageLedger.js';
-import { SessionManager } from './sessionManager.js';
+import { SessionManager, parseAutoConfirm } from './sessionManager.js';
 import { createDynamicVoiceProvider } from './ttsProviders.js';
 import { GeminiVoiceProvider } from './geminiVoiceProvider.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
@@ -166,6 +166,9 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const coordinator = new SubAgentCoordinator();
   const openClawClient = makeOpenClawHttpClient();
   const pendingAsyncStore = new PendingAsyncTaskStore(dataDir);
+  // Autonomia direta (RODRIGO_AUTO_CONFIRM=1): mutações executam sem pergunta falada.
+  // Valor inválido derruba o startup, mesma regra fail-high da privacidade.
+  const autoConfirm = parseAutoConfirm(process.env);
   const sessionManager = new SessionManager(
     engine,
     ttsProvider,
@@ -176,7 +179,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     mutatingTools,
     memoriaStore,
     privacy,
-    {},
+    { autoConfirm },
     pendingAsyncStore,
     coordinator
   );

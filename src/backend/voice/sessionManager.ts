@@ -221,6 +221,21 @@ export interface SessionTuning {
   nowMs?: () => number;
   /** Timeout de ociosidade em ms antes de encerrar a sessão (padrão de produção: 60 minutos ou privacy.idleTimeoutMinutes * 60_000). */
   idleTimeoutMs?: number;
+  /** Autonomia direta (RODRIGO_AUTO_CONFIRM=1): mutações executam já, sem pergunta falada.
+   * Auditoria (T4), capacidades (T3), guardas e deny-lists continuam valendo; o retorno
+   * (sucesso ou falha honesta) é sempre falado. DESKTOP_CRITICO e AUTO_CORRECAO nunca
+   * entram aqui (destrutivas/auto-modificação: SIM sempre). */
+  autoConfirm?: boolean;
+}
+
+/** RODRIGO_AUTO_CONFIRM: ''/ausente/0 = confirmação em duas fases (padrão); 1 = execução direta. Outro valor aborta. */
+export function parseAutoConfirm(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.RODRIGO_AUTO_CONFIRM;
+  if (raw === undefined || raw.trim() === '') return false;
+  const v = raw.trim();
+  if (v === '1') return true;
+  if (v === '0') return false;
+  throw new Error(`Configuração inválida: RODRIGO_AUTO_CONFIRM deve ser exatamente "0" ou "1". Valor recebido: "${raw}"`);
 }
 
 /**
@@ -351,6 +366,7 @@ export class SessionManager {
   private readonly confirmedMutationTokens = new Map<string, string>();
   private readonly nowMs: () => number;
   private readonly idleTimeoutMs: number;
+  private readonly autoConfirm: boolean;
 
   private current: Session | null = null;
   /** Serializa criação de sessão — Achado v2-1: evita corrida entre duas abas abrindo sessão quase ao mesmo tempo. */
@@ -397,6 +413,7 @@ export class SessionManager {
     this.coordinator = coordinator;
     this.nowMs = tuning.nowMs ?? (() => Date.now());
     this.idleTimeoutMs = tuning.idleTimeoutMs ?? (privacy.idleTimeoutMinutes ? privacy.idleTimeoutMinutes * 60_000 : VOICE_LIMITS.IDLE_TIMEOUT_MS);
+    this.autoConfirm = tuning.autoConfirm ?? false;
     // Fatia 4 (§2.2): ferramentas locais como subagentes, todas atrás do gatekeeper de token.
     for (const t of [...this.tools, ...this.mutatingTools]) {
       this.coordinator.register(new ToolSubAgent(t, (turnId, token) => this.consumeMutationToken(turnId, token)));
@@ -1206,28 +1223,45 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             }
             return;
           } else {
-            let question: string;
+            let spoken: string;
             let previewFailed = false;
-            try {
-              question = tool.preview(action, content);
-            } catch (err) {
-              // Achado 5 da rodada 4 (Hermes) — preview() sem try/catch deixava uma falha subir
-              // até o catch externo de runTurn (state:'erro' cru).
-              question = err instanceof ToolPreviewRefusedError ? err.message : MUTATION_FAILURE_TEXT;
-              previewFailed = true;
-              console.error('[mutation] preview falhou:', err);
+            // Autonomia direta (RODRIGO_AUTO_CONFIRM=1): executa já, sem pergunta. Críticas
+            // (DESKTOP_CRITICO) e auto-modificação (AUTO_CORRECAO) nunca entram aqui.
+            const autoRun = this.autoConfirm && action !== 'DESKTOP_CRITICO' && action !== 'AUTO_CORRECAO';
+            if (autoRun) {
+              this.recordMutationConfirmation(turn.turnId);
+              const r = await this.delegateToolInTurn(turn, transcript, tool, action, content, true);
+              if (session.activeTurn !== turn) {
+                session.pendingPostSpeechAction = null;
+                return;
+              }
+              spoken = r.text ?? MUTATION_FAILURE_TEXT;
+              if (r.text === null) {
+                session.pendingPostSpeechAction = null;
+                console.error('[mutation] execução falhou:', r.error);
+              }
+            } else {
+              try {
+                spoken = tool.preview(action, content);
+              } catch (err) {
+                // Achado 5 da rodada 4 (Hermes) — preview() sem try/catch deixava uma falha subir
+                // até o catch externo de runTurn (state:'erro' cru).
+                spoken = err instanceof ToolPreviewRefusedError ? err.message : MUTATION_FAILURE_TEXT;
+                previewFailed = true;
+                console.error('[mutation] preview falhou:', err);
+              }
             }
 
             this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
             this.emit(session, { type: 'state', state: 'falando' });
 
-            const clean = cleanTextForSpeech(question);
+            const clean = cleanTextForSpeech(spoken);
             turn.expectedSentences.add(0);
             turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
             await Promise.allSettled(turn.pendingSynthesis);
 
             if (session.activeTurn === turn) {
-              if (!previewFailed) {
+              if (!previewFailed && !autoRun) {
                 // Achado 1 (ALTA, rodada 3) — grava armedMutation, NUNCA pendingMutation
                 // diretamente; a promoção só acontece em markPlayed() (v4 §6.3, inalterado).
                 session.armedMutation = {
