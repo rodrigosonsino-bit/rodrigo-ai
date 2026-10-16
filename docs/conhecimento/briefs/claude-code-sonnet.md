@@ -24,3 +24,15 @@ As áreas que não aparecem acima ficam **sem acesso** neste papel.
 - Seguir as regras de citação dos INDICE. Sem fonte, responder "não encontrado".
 - Virtologia sempre como "segundo Casarotto". Conteúdo clínico nunca vira diagnóstico.
 - Não fazer push nem merge sem aprovação do Rodrigo. Nada financeiro. Nunca imprimir chaves.
+
+## Protocolo "final de sessão" (obrigatório)
+
+Quando o Rodrigo disser **"final de sessão"**, execute o checklist da seção `Protocolo "final de sessão"` do `CLAUDE.md`:
+1. registrar a sessão em `CLAUDE.md` → `## Registro de sessões` (data e hora PT);
+2. atualizar o notebook 803ea045 (`build_sources.py`, trocar as fontes que mudaram, esperar `ready`, apagar as antigas). Se der erro de CSRF, pedir `notebooklm login --browser-cookies chrome`;
+3. escrever `docs/handoff-AAAA-MM-DD.md` e referenciá-lo no `ESTADO.md`;
+4. abrir PR, sem merge sem aval.
+
+## Canal direto com o ORQUESTRADOR_GROK
+
+Avise o Grok em caso de dúvida, bloqueio, ao terminar algo relevante e depois do "final de sessão". No Mac, use `avisar-grok "mensagem"`. Em nuvem, use `curl` com `$GROK_WEBHOOK_URL`/`$GROK_WEBHOOK_AUTH`. Sem nenhum dos dois, escreva na seção `## Mensagens para o Grok` do `ESTADO.md`. Mensagens curtas, sem segredos e sem nada de `docs/research/`. Detalhes no `CLAUDE.md`.
