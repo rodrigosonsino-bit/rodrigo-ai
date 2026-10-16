@@ -15,8 +15,10 @@ export interface PrivacyConfig {
   readonly cloudIntent: boolean;
   /** RODRIGO_SEND_HISTORY — 0 => só a fala do turno atual vai à geração. */
   readonly sendHistory: boolean;
-  /** RODRIGO_HISTORY_TURNS — janela do histórico enviado (turnos; 1..MAX_CONTEXT_TURNS). */
+  /** RODRIGO_HISTORY_TURNS — janela do histórico enviado (turnos; 1..MAX_CONTEXT_TURNS; padrão DEFAULT_CONTEXT_TURNS). */
   readonly historyTurns: number;
+  /** RODRIGO_IDLE_TIMEOUT_MINUTES — timeout de inatividade em minutos (1..1440; padrão 60). */
+  readonly idleTimeoutMinutes: number;
   /** RODRIGO_SEND_MEMORIES — bloco de memórias armazenadas no prompt. */
   readonly sendMemories: boolean;
   /** RODRIGO_SEND_KNOWLEDGE — trecho de docs/research/ no prompt (decisão D1: padrão 0). */
@@ -131,16 +133,30 @@ function parseGuardMode(env: Env, name: string, defaultValue: OutboundGuardMode)
   throw new Error(`Configuração inválida: ${name} deve ser exatamente "off", "warn", "redact" ou "block". Valor recebido: "${raw}"`);
 }
 
-function parseTurns(env: Env, name: string, max: number): number {
+export function parseTurns(env: Env, name: string, defaultValue: number, max: number): number {
   const raw = env[name];
-  if (raw === undefined || raw.trim() === '') return max;
+  if (raw === undefined || raw.trim() === '') return defaultValue;
   const v = raw.trim();
   if (!/^[1-9][0-9]{0,2}$/.test(v)) {
     throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre 1 e ${max}. Valor recebido: "${raw}"`);
   }
   const n = parseInt(v, 10);
-  if (n > max) {
+  if (n < 1 || n > max) {
     throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre 1 e ${max}. Valor recebido: "${raw}"`);
+  }
+  return n;
+}
+
+export function parseIdleMinutes(env: Env, name = 'RODRIGO_IDLE_TIMEOUT_MINUTES', defaultValue = 60, min = 1, max = 1440): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const v = raw.trim();
+  if (!/^[1-9][0-9]{0,3}$/.test(v)) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
+  }
+  const n = parseInt(v, 10);
+  if (n < min || n > max) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
   }
   return n;
 }
@@ -150,7 +166,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     cloud: parseFlag(env, 'RODRIGO_CLOUD', true),
     cloudIntent: parseFlag(env, 'RODRIGO_CLOUD_INTENT', true),
     sendHistory: parseFlag(env, 'RODRIGO_SEND_HISTORY', true),
-    historyTurns: parseTurns(env, 'RODRIGO_HISTORY_TURNS', VOICE_LIMITS.MAX_CONTEXT_TURNS),
+    historyTurns: parseTurns(env, 'RODRIGO_HISTORY_TURNS', VOICE_LIMITS.DEFAULT_CONTEXT_TURNS, VOICE_LIMITS.MAX_CONTEXT_TURNS),
+    idleTimeoutMinutes: parseIdleMinutes(env, 'RODRIGO_IDLE_TIMEOUT_MINUTES', 60, 1, 1440),
     sendMemories: parseFlag(env, 'RODRIGO_SEND_MEMORIES', true),
     sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false),
     cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),

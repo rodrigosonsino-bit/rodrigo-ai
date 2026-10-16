@@ -165,7 +165,10 @@ export const VOICE_LIMITS = {
   MAX_AUDIO_SECONDS: 20,
   MAX_TEXT_CHARS: 2000,
   MAX_TURN_TOKENS: 160,
-  MAX_CONTEXT_TURNS: 8,
+  /** Teto máximo de turnos permitidos para histórico configurável (1..100 turnos => até 200 mensagens em memória). */
+  MAX_CONTEXT_TURNS: 100,
+  /** Padrão de produção para histórico enviado ao modelo (30 turnos => até 60 mensagens). */
+  DEFAULT_CONTEXT_TURNS: 30,
   MAX_CONTEXT_TOKENS: 4096,
   TURN_TIMEOUT_MS: 60_000,
   CLASSIFY_TIMEOUT_MS: 10_000,
@@ -176,7 +179,7 @@ export const VOICE_LIMITS = {
   DETECT_CONFIRMATION_TIMEOUT_MS: 10_000,
   PENDING_MUTATION_TTL_MS: 60_000,
   WARMUP_TIMEOUT_MS: 120_000,
-  IDLE_TIMEOUT_MS: 10 * 60_000,
+  IDLE_TIMEOUT_MS: 60 * 60_000,
   WORKER_SHUTDOWN_GRACE_MS: 3_000,
   /** Fase V §4: do screen_request até o quadro chegar (ou a resposta vira "compartilhe a tela e pergunte de novo"). */
   SCREEN_CAPTURE_TIMEOUT_MS: 5_000,
