@@ -34,6 +34,7 @@ import traceback
 import urllib.parse
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from outbound_guard import guard_messages, guard_text  # T1: guarda de saída (camada em profundidade)
@@ -560,6 +561,21 @@ def log_diag(message: str) -> None:
     """Diagnóstico técnico em stderr — nunca inclui transcrição ou conteúdo de conversa.
     Fase 12: TODA mensagem passa por redact() (ponto único de saída de diagnóstico)."""
     print(f"[worker] {redact(message)}", file=sys.stderr, flush=True)
+
+
+def log_usage(source: str, turn_id: str, model: str, usage: Any, extra: str = "") -> None:
+    """Conta de créditos/cota: UMA linha `[uso]` por chamada ao Gemini (geração, intenção,
+    visão, TTS). Só números (tokens de entrada/saída, raciocínio quando houver) + modelo —
+    nunca texto da conversa. `usage` é o usage_metadata da resposta (ou None)."""
+    entrada = getattr(usage, "prompt_token_count", None) if usage is not None else None
+    saida = getattr(usage, "candidates_token_count", None) if usage is not None else None
+    raciocinio = getattr(usage, "thoughts_token_count", None) if usage is not None else None
+    line = f"[uso] fonte={source} turno={turn_id} modelo={model} entrada={entrada} saida={saida}"
+    if raciocinio is not None:
+        line += f" raciocinio={raciocinio}"
+    if extra:
+        line += f" {extra}"
+    log_diag(line)
 
 
 def emit(event: dict[str, Any]) -> None:
@@ -1286,6 +1302,8 @@ class Worker:
                     duration_ms = int((time.monotonic() - start_time) * 1000)
                     out_text = (res.text or "").strip()
                     log_diag(f"[screen] turno={turn_id} motor=gemini bytes={len(img_bytes)} ms={duration_ms}")
+                    log_usage("visao", turn_id, "gemini-flash-latest",
+                              getattr(res, "usage_metadata", None), extra="imagem=1")
 
                     emit({
                         "event": "screen_description",
@@ -1448,6 +1466,7 @@ class Worker:
             except Exception as exc:  # noqa: BLE001 — inclui TimeoutError
                 return unavailable(f"{safe_exc(exc)}")
             model_version = getattr(resp, "model_version", None) or CLOUD_INTENT_MODEL
+            log_usage("intencao", turn_id, model_version, getattr(resp, "usage_metadata", None))
             parsed = parse_intent_json(resp.text or "", text)
             log_diag(f"Intenção em nuvem: {time.monotonic() - started:.2f}s (turnId={turn_id})")
             if parsed is None:
@@ -1597,6 +1616,9 @@ class Worker:
         pcm, rate, tokens = payload
         if not pcm:
             return {"ok": False, "kind": "empty"}
+        log_usage("tts", str(msg.get("turnId")), model,
+                  SimpleNamespace(prompt_token_count=tokens[0], candidates_token_count=tokens[1]),
+                  extra=f"caracteres={len(text)}")
         normalized, stats = normalize_pcm16(pcm)
         write_wav_atomic(out_path, normalized, rate)
         return {"ok": True, "seconds": round(len(normalized) / 2 / rate, 2), "tokensIn": tokens[0], "tokensOut": tokens[1],
@@ -1751,6 +1773,7 @@ class Worker:
                         f"saida={getattr(last_usage, 'candidates_token_count', None)} "
                         f"raciocinio={getattr(last_usage, 'thoughts_token_count', None)} frases={sentence_index}"
                     )
+                    log_usage("geracao", turn_id, model, last_usage)
                     break  # terminou (ou foi cancelado/loop): não há segunda tentativa
                 except Exception as exc:  # noqa: BLE001
                     # Plano B SÓ se nada foi dito ainda (sentence_index == 0): nunca recomeça nem duplica uma resposta que o
