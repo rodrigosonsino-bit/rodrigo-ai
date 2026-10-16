@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import { execFile, execFileSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IntentName } from '../../shared/voiceProtocol.js';
@@ -16,6 +18,57 @@ import {
 } from './macosAccessibility.js';
 
 const execFileAsync = promisify(execFile);
+const CLIPBOARD_PASTE_HELPER = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../../scripts/clipboard_paste.swift'
+);
+
+const NATIVE_BRIDGE_INFO = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../../.runtime/native-bridge.json'
+);
+
+interface NativeBridgeInfo {
+  port: number;
+  token: string;
+}
+
+function readNativeBridgeInfo(env: NodeJS.ProcessEnv): NativeBridgeInfo | null {
+  const envPort = Number.parseInt(env.RODRIGO_NATIVE_BRIDGE_PORT || '', 10);
+  const envToken = env.RODRIGO_NATIVE_BRIDGE_TOKEN || '';
+  if (Number.isFinite(envPort) && envPort > 0 && envToken) {
+    return { port: envPort, token: envToken };
+  }
+  try {
+    const raw = fs.readFileSync(NATIVE_BRIDGE_INFO, 'utf8');
+    const parsed = JSON.parse(raw) as { port?: unknown; token?: unknown };
+    const port = typeof parsed.port === 'number' ? parsed.port : Number.parseInt(String(parsed.port ?? ''), 10);
+    const token = typeof parsed.token === 'string' ? parsed.token : '';
+    if (Number.isFinite(port) && port > 0 && token) return { port, token };
+  } catch {
+    // ponte nativa ausente — cai no helper swift
+  }
+  return null;
+}
+
+async function pasteViaNativeBridge(text: string, bridge: NativeBridgeInfo): Promise<void> {
+  const res = await fetch(`http://127.0.0.1:${bridge.port}/paste`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${bridge.token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ text })
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`NATIVE_BRIDGE_HTTP_${res.status}: ${body || res.statusText}`);
+  }
+  const json = (await res.json()) as { ok?: boolean };
+  if (json.ok !== true) {
+    throw new Error('NATIVE_BRIDGE_PASTE_FAILED');
+  }
+}
 
 export class ToolPreviewRefusedError extends Error {
   constructor(message: string) {
@@ -31,16 +84,25 @@ export interface AllowedAppSpec {
   readonly appPath?: string;
 }
 
+interface ResolvedAppTarget {
+  readonly displayName: string;
+  readonly openArgs: readonly string[];
+  readonly quitMode: 'bundleId' | 'appName';
+  readonly quitValue: string;
+}
+
+export type InstalledAppNameProbe = (rawName: string) => boolean;
+
 export const ALLOWLIST_APPS: readonly AllowedAppSpec[] = [
   { canonicalName: 'Safari', bundleId: 'com.apple.Safari', aliases: ['safari', 'navegador safari'] },
   { canonicalName: 'Google Chrome', bundleId: 'com.google.Chrome', aliases: ['google chrome', 'chrome'] },
   { canonicalName: 'Slack', bundleId: 'com.tinyspeck.slackmacgap', aliases: ['slack'] },
   { canonicalName: 'Spotify', bundleId: 'com.spotify.client', aliases: ['spotify'] },
-  { canonicalName: 'TextEdit', bundleId: 'com.apple.TextEdit', aliases: ['textedit', 'editor de texto', 'bloco de notas'] },
+  { canonicalName: 'TextEdit', bundleId: 'com.apple.TextEdit', aliases: ['textedit', 'editor de texto'] },
   { canonicalName: 'WhatsApp', bundleId: 'net.whatsapp.WhatsApp', aliases: ['whatsapp', 'whats', 'zap'] },
   { canonicalName: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92', aliases: ['cursor'] },
   { canonicalName: 'Music', bundleId: 'com.apple.Music', aliases: ['music', 'musica', 'música', 'apple music'] },
-  { canonicalName: 'Notes', bundleId: 'com.apple.Notes', aliases: ['notes', 'notas', 'bloco de notas da apple'] },
+  { canonicalName: 'Notes', bundleId: 'com.apple.Notes', aliases: ['notes', 'notas', 'bloco de notas', 'bloco de notas da apple'] },
   { canonicalName: 'Finder', bundleId: 'com.apple.finder', aliases: ['finder', 'arquivos'] },
   {
     canonicalName: 'DitadoLocal',
@@ -62,8 +124,6 @@ export const DENIED_TYPING_BUNDLE_IDS: readonly string[] = [
   'net.kovidgoyal.kitty',
   'com.github.wez.wezterm',
   'co.zeit.hyper',
-  'com.microsoft.VSCode',
-  'com.apple.dt.Xcode',
   'local.rodrigo-ai.desktop'
 ] as const;
 
@@ -105,6 +165,53 @@ export function resolveAllowedApp(rawName: string): AllowedAppSpec | null {
     }
   }
   return null;
+}
+
+function allowedAppToTarget(spec: AllowedAppSpec): ResolvedAppTarget {
+  return spec.appPath
+    ? {
+        displayName: spec.canonicalName,
+        openArgs: ['-a', spec.appPath],
+        quitMode: 'appName',
+        quitValue: spec.canonicalName
+      }
+    : {
+        displayName: spec.canonicalName,
+        openArgs: ['-b', spec.bundleId],
+        quitMode: 'bundleId',
+        quitValue: spec.bundleId
+      };
+}
+
+function defaultInstalledAppNameProbe(rawName: string): boolean {
+  const trimmed = rawName.trim();
+  if (!trimmed) return false;
+  try {
+    execFileSync('/usr/bin/open', ['-Ra', trimmed], {
+      timeout: 3_000,
+      stdio: ['ignore', 'ignore', 'ignore']
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveAppTarget(
+  rawName: string,
+  probeInstalledAppName: InstalledAppNameProbe = defaultInstalledAppNameProbe
+): ResolvedAppTarget | null {
+  const spec = resolveAllowedApp(rawName);
+  if (spec) return allowedAppToTarget(spec);
+
+  const trimmed = rawName.trim();
+  if (!trimmed || !probeInstalledAppName(trimmed)) return null;
+  return {
+    displayName: trimmed,
+    openArgs: ['-a', trimmed],
+    quitMode: 'appName',
+    quitValue: trimmed
+  };
 }
 
 export function sanitizeTypingText(raw: string): string {
@@ -187,6 +294,7 @@ export interface DesktopToolDeps {
   exec?: CommandExecutor;
   env?: NodeJS.ProcessEnv;
   schedulePostSpeechAction?: (action: () => Promise<void>) => void;
+  resolveAppTargetSync?: (rawName: string) => ResolvedAppTarget | null;
 }
 
 const CG_SESSION_BIN =
@@ -201,11 +309,13 @@ export class DesktopTool implements IMutatingTool {
   readonly description = 'Controle nativo de volume, mídia, aplicativos, janelas e energia do macOS.';
   private readonly exec: CommandExecutor;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly resolveAppTargetSync: (rawName: string) => ResolvedAppTarget | null;
   private schedulePostSpeechAction?: (action: () => Promise<void>) => void;
 
   constructor(deps: DesktopToolDeps = {}) {
     this.exec = deps.exec ?? defaultCommandExecutor;
     this.env = deps.env ?? process.env;
+    this.resolveAppTargetSync = deps.resolveAppTargetSync ?? ((rawName) => resolveAppTarget(rawName));
     this.schedulePostSpeechAction = deps.schedulePostSpeechAction;
   }
 
@@ -237,11 +347,11 @@ export class DesktopTool implements IMutatingTool {
     const target = rest.join(':').trim();
 
     if (action === 'fechar' || action === 'app_quit' || action === 'quit') {
-      const spec = resolveAllowedApp(target);
-      if (!spec) {
-        throw new ToolPreviewRefusedError(`Por segurança, o aplicativo ${target || 'solicitado'} não está na lista autorizada para encerramento.`);
+      const app = this.resolveAppTargetSync(target);
+      if (!app) {
+        throw new ToolPreviewRefusedError(`Não encontrei o aplicativo ${target || 'solicitado'} para encerrar.`);
       }
-      return `Vou fechar o aplicativo ${spec.canonicalName}. Pode confirmar?`;
+      return `Vou fechar o aplicativo ${app.displayName}. Pode confirmar?`;
     }
     if (action === 'lixeira' || action === 'empty_trash') {
       return 'Vou esvaziar a lixeira do Finder permanentemente. Pode confirmar?';
@@ -396,19 +506,15 @@ export class DesktopTool implements IMutatingTool {
 
     // 3. Abrir aplicativo da allowlist
     if (action === 'abrir' || action === 'app_open' || action === 'open_app') {
-      const spec = resolveAllowedApp(param);
-      if (!spec) {
-        return `Por segurança, o aplicativo ${param || 'solicitado'} não está na lista de aplicativos permitidos.`;
+      const app = this.resolveAppTargetSync(param);
+      if (!app) {
+        return `Não encontrei o aplicativo ${param || 'solicitado'} para abrir.`;
       }
       try {
-        if (spec.appPath) {
-          await this.exec('/usr/bin/open', ['-a', spec.appPath]);
-        } else {
-          await this.exec('/usr/bin/open', ['-b', spec.bundleId]);
-        }
-        return `Abrindo ${spec.canonicalName}.`;
+        await this.exec('/usr/bin/open', app.openArgs);
+        return `Abrindo ${app.displayName}.`;
       } catch (err) {
-        return formatTccError(err, spec.canonicalName);
+        return formatTccError(err, app.displayName);
       }
     }
 
@@ -460,20 +566,30 @@ export class DesktopTool implements IMutatingTool {
 
   private async executeCritical(action: string, param: string): Promise<string> {
     if (action === 'fechar' || action === 'app_quit' || action === 'quit') {
-      const spec = resolveAllowedApp(param);
-      if (!spec) {
-        return `Por segurança, o aplicativo ${param || 'solicitado'} não está na lista permitida para encerramento.`;
+      const app = this.resolveAppTargetSync(param);
+      if (!app) {
+        return `Não encontrei o aplicativo ${param || 'solicitado'} para encerrar.`;
       }
       try {
-        await this.exec('/usr/bin/osascript', [
-          '-e',
-          'on run argv\n  set bId to item 1 of argv\n  tell application id bId to quit saving ask\nend run',
-          '--',
-          spec.bundleId
-        ]);
-        return `Fechei o aplicativo ${spec.canonicalName}.`;
+        await this.exec(
+          '/usr/bin/osascript',
+          app.quitMode === 'bundleId'
+            ? [
+                '-e',
+                'on run argv\n  set bId to item 1 of argv\n  tell application id bId to quit saving ask\nend run',
+                '--',
+                app.quitValue
+              ]
+            : [
+                '-e',
+                'on run argv\n  set appName to item 1 of argv\n  tell application appName to quit saving ask\nend run',
+                '--',
+                app.quitValue
+              ]
+        );
+        return `Fechei o aplicativo ${app.displayName}.`;
       } catch (err) {
-        return formatTccError(err, spec.canonicalName);
+        return formatTccError(err, app.displayName);
       }
     }
 
@@ -573,6 +689,8 @@ export interface DigitarToolDeps {
   activateApp?: (bundleId: string) => Promise<void>;
   accessibility?: AccessibilityAdapter;
   clipboard?: ClipboardAdapter;
+  /** Override do paste HID (testes). Padrão: scripts/clipboard_paste.swift (CGEvent, DitadoLocal). */
+  pasteViaHid?: (text: string) => Promise<void>;
   pasteRestoreDelayMs?: number;
   transformText?: (mode: 'limpar' | 'traduzir_pt' | 'traduzir', text: string, targetLang?: string) => Promise<string>;
 }
@@ -746,6 +864,7 @@ export class DigitarTool implements IMutatingTool {
   private readonly activateApp: (bundleId: string) => Promise<void>;
   private readonly accessibility: AccessibilityAdapter;
   private readonly clipboard: ClipboardAdapter;
+  private readonly pasteViaHid: (text: string) => Promise<void>;
   private readonly pasteRestoreDelayMs: number;
   private readonly transformText?: (mode: 'limpar' | 'traduzir_pt' | 'traduzir', text: string, targetLang?: string) => Promise<string>;
   private armedTarget: { bundleId: string; appName: string; request: DigitarRequest } | null = null;
@@ -768,6 +887,24 @@ export class DigitarTool implements IMutatingTool {
       });
     this.accessibility = deps.accessibility ?? new DefaultMacAccessibilityAdapter(this.exec);
     this.clipboard = deps.clipboard ?? new DefaultMacClipboardAdapter(this.exec);
+    this.pasteViaHid =
+      deps.pasteViaHid ??
+      (async (text: string) => {
+        // 1) Preferir o processo nativo (RodrigoAI.app) — já tem Acessibilidade liberada.
+        const bridge = readNativeBridgeInfo(this.env);
+        if (bridge) {
+          await pasteViaNativeBridge(text, bridge);
+          return;
+        }
+        // 2) Fallback: helper Swift filho (mesmo CGEvent; pode falhar se TCC não cobrir o swift).
+        const { stdout } = await this.exec('/usr/bin/xcrun', ['swift', CLIPBOARD_PASTE_HELPER, 'paste'], {
+          timeout: 15_000,
+          input: text
+        });
+        if (!/"ok"\s*:\s*true/.test(stdout)) {
+          throw new Error(`CLIPBOARD_PASTE_FAILED: ${stdout.trim() || '(empty stdout)'}`);
+        }
+      });
     this.pasteRestoreDelayMs = deps.pasteRestoreDelayMs ?? 500;
     this.transformText = deps.transformText;
   }
@@ -838,7 +975,9 @@ export class DigitarTool implements IMutatingTool {
     if (currentFront.bundleId !== armed.bundleId) {
       try {
         await this.activateApp(armed.bundleId);
-        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        // Tempo para o app-alvo reassumir o foco antes do CGEvent (DitadoLocal cola
+        // com o caret já no lugar; aqui a confirmação por voz pode ter roubado o foco).
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
         currentFront = await this.getFrontmostApp();
       } catch {
         // Se não conseguir reativar, cai no cancelamento seguro logo abaixo.
@@ -888,63 +1027,60 @@ export class DigitarTool implements IMutatingTool {
       return 'Não havia texto válido para digitar.';
     }
 
-    let focusedTarget: FocusedTargetSnapshot;
-    try {
-      focusedTarget = await this.accessibility.inspectFocusedTarget();
-    } catch (err) {
-      return formatAccessibilityFailure(err, currentFront.name);
-    }
-
-    if (focusedTarget.app.bundleId !== armed.bundleId) {
-      return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
-    }
-    if (!focusedTarget.enabled) {
-      return `Cancelado por segurança: o campo atual em ${currentFront.name} está desativado.`;
-    }
-    if (!focusedTarget.editable) {
-      return `Cancelado por segurança: ${currentFront.name} está em foco, mas o elemento atual não é um campo editável.`;
-    }
-    if (
-      request.mode === 'replaceSelection' &&
-      !(focusedTarget.selectedText && focusedTarget.selectedText.length > 0) &&
-      !(focusedTarget.selectedRange && focusedTarget.selectedRange.length > 0)
-    ) {
-      return 'Cancelado por segurança: não encontrei texto selecionado para substituir.';
-    }
-
-    const preferredAxMode =
-      request.mode === 'append'
-        ? focusedTarget.appendSupported
-        : focusedTarget.directInsertSupported;
-    if (preferredAxMode) {
+    // append ainda depende de AXValue. insert/replace usam o caminho do DitadoLocal:
+    // clipboard + CGEvent Cmd+V (primário). AX inspect é só um guarda opcional de senha —
+    // se o AX falhar (comum em Electron), cola mesmo assim, como o ClipboardPaster.
+    if (request.mode === 'append') {
+      let focusedTarget: FocusedTargetSnapshot;
       try {
-        await this.accessibility.insertText(resolvedText.text, request.mode);
+        focusedTarget = await this.accessibility.inspectFocusedTarget();
+      } catch (err) {
+        return formatAccessibilityFailure(err, currentFront.name);
+      }
+      if (focusedTarget.app.bundleId !== armed.bundleId) {
+        return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
+      }
+      if (!focusedTarget.enabled) {
+        return `Cancelado por segurança: o campo atual em ${currentFront.name} está desativado.`;
+      }
+      if (focusedTarget.secure) {
+        return `Cancelado por segurança: o campo atual em ${currentFront.name} é um campo de senha.`;
+      }
+      if (!focusedTarget.editable || !focusedTarget.appendSupported) {
+        return `Cancelado por segurança: ${currentFront.name} está em foco, mas o elemento atual não é um campo editável.`;
+      }
+      try {
+        await this.accessibility.insertText(resolvedText.text, 'append');
         return buildDigitarSuccess(currentFront.name, request, 'ax');
       } catch (err) {
-        if (request.mode === 'append') {
-          return formatAccessibilityFailure(err, currentFront.name);
-        }
-        const formatted = formatAccessibilityFailure(err, currentFront.name);
-        if (
-          /não consegui inserir direto|não consegui ler o conteúdo/i.test(formatted) ||
-          /não consegui executar a ação/i.test(formatted)
-        ) {
-          // Cai para o fallback via paste logo abaixo.
-        } else {
-          return formatted;
-        }
+        return formatAccessibilityFailure(err, currentFront.name);
       }
-    }
-
-    if (request.mode === 'append') {
-      return `Não consegui anexar o texto diretamente em ${currentFront.name}.`;
     }
 
     try {
-      const strategy = await this.pasteText(resolvedText.text);
-      if (strategy !== 'paste') {
-        return `Não consegui digitar o texto em ${currentFront.name} agora.`;
+      const focusedTarget = await this.accessibility.inspectFocusedTarget();
+      if (focusedTarget.app.bundleId !== armed.bundleId) {
+        return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
       }
+      if (!focusedTarget.enabled) {
+        return `Cancelado por segurança: o campo atual em ${currentFront.name} está desativado.`;
+      }
+      if (focusedTarget.secure) {
+        return `Cancelado por segurança: o campo atual em ${currentFront.name} é um campo de senha.`;
+      }
+      if (
+        request.mode === 'replaceSelection' &&
+        !(focusedTarget.selectedText && focusedTarget.selectedText.length > 0) &&
+        !(focusedTarget.selectedRange && focusedTarget.selectedRange.length > 0)
+      ) {
+        return 'Cancelado por segurança: não encontrei texto selecionado para substituir.';
+      }
+    } catch {
+      // Sem snapshot AX: segue o paste HID (comportamento do DitadoLocal).
+    }
+
+    try {
+      await this.pasteText(resolvedText.text);
       return buildDigitarSuccess(currentFront.name, request, 'paste');
     } catch (err) {
       return formatTccError(err, currentFront.name);
@@ -968,22 +1104,9 @@ export class DigitarTool implements IMutatingTool {
   }
 
   private async pasteText(text: string): Promise<'paste'> {
-    // Mecanismo fiel ao ClipboardPaster.swift do DitadoLocal:
-    // 1. Snapshot do clipboard atual
-    const previous = await this.clipboard.getSnapshot();
-    // 2. Grava o texto e registra ourChangeCount
-    const { changeCount: ourChangeCount } = await this.clipboard.setText(text);
-    // 3. Dispara Cmd+V sintético com modificador explícito command down
-    await this.exec('/usr/bin/osascript', [
-      '-e',
-      'tell application id "com.apple.systemevents" to keystroke "v" using {command down}'
-    ]);
-    // 4. Aguarda 500ms e só restaura se changeCount == ourChangeCount
-    await new Promise<void>((resolve) => setTimeout(resolve, this.pasteRestoreDelayMs));
-    const latestCount = await this.clipboard.getChangeCount();
-    if (latestCount === ourChangeCount) {
-      await this.clipboard.setText(previous.text);
-    }
+    // Primário = ClipboardPaster do DitadoLocal (CGEvent HID via clipboard_paste.swift).
+    // O helper faz snapshot/restore do pasteboard com changeCount real do NSPasteboard.
+    await this.pasteViaHid(text);
     return 'paste';
   }
 }

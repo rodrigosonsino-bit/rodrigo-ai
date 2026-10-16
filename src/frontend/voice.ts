@@ -104,6 +104,16 @@ export class VoiceController {
     return this.state;
   }
 
+  /** Fase V Fatia 5: a caixa de digitação precisa dos mesmos headers que o áudio. */
+  getVoiceHeaders(): Record<string, string> {
+    return this.headers();
+  }
+
+  /** Fase V Fatia 5: expõe a sessão ativa pra caixa de digitação (só válida enquanto start() rodou). */
+  getVoiceSession(): { sessionId: string | null; token: string | null } {
+    return { sessionId: this.sessionId, token: this.token };
+  }
+
   isSpeakerphone(): boolean {
     return this.speakerphone;
   }

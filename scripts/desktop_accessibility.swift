@@ -18,6 +18,7 @@ struct TargetSnapshot: Encodable {
     let focused: Bool
     let enabled: Bool
     let editable: Bool
+    let secure: Bool
     let supportsValue: Bool
     let directInsertSupported: Bool
     let appendSupported: Bool
@@ -218,8 +219,18 @@ func snapshot() throws -> TargetSnapshot {
     let supportsValue = (value != nil) || (try isAttributeSettable(ctx.element, kAXValueAttribute as CFString))
     let directInsertSupported = supportsValue && selectedRange != nil
     let appendSupported = supportsValue && value != nil
-    let textRoles = Set(["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea"])
-    let editable = editableAttr || (supportsValue && textRoles.contains(role ?? ""))
+    let secureRoles = Set(["AXSecureTextField"])
+    // Inclui roles comuns em Electron/Chromium onde o caret existe mas AXEditable falha.
+    let textRoles = Set([
+        "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea",
+        "AXGroup", "AXScrollArea", "AXUnknown"
+    ])
+    let secure = secureRoles.contains(role ?? "") || secureRoles.contains(subrole ?? "")
+    let editable = !secure && (
+        editableAttr
+            || (supportsValue && textRoles.contains(role ?? ""))
+            || (selectedRange != nil && textRoles.contains(role ?? ""))
+    )
     let rangeSnapshot = selectedRange.map { TargetSnapshot.SelectedRangeSnapshot(location: $0.location, length: $0.length) }
 
     return TargetSnapshot(
@@ -231,6 +242,7 @@ func snapshot() throws -> TargetSnapshot {
         focused: focused,
         enabled: enabled,
         editable: editable,
+        secure: secure,
         supportsValue: supportsValue,
         directInsertSupported: directInsertSupported,
         appendSupported: appendSupported,

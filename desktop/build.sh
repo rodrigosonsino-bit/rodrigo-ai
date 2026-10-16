@@ -7,7 +7,10 @@ NODE="$(command -v node)"
 APP="build/Rodrigo AI.app"
 SIGN_ID="${RODRIGO_CODESIGN_IDENTITY:-DitadoLocal Dev}"
 rm -rf build && mkdir -p "$APP/Contents/MacOS"
-swiftc -O -swift-version 5 -o "$APP/Contents/MacOS/RodrigoAI" main.swift
+swiftc -O -swift-version 5 \
+  -framework Cocoa -framework WebKit -framework Carbon -framework AVFoundation \
+  -framework Network -framework ApplicationServices \
+  -o "$APP/Contents/MacOS/RodrigoAI" main.swift
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -399,17 +399,22 @@ function appendNoticeEntry(message: string): void {
 }
 
 const voiceController = new VoiceController(
-  (state) => {
-    voiceStateContainer.className = `voice-state voice-state-${state}`;
-    voiceStateText.textContent = VOICE_STATE_LABELS[state] || state;
-    voiceInterruptBtn.disabled = state !== 'falando';
-    // Novo turno começando (processando) ou erro: o rótulo do turno anterior não vale mais.
-    if (state === 'processando' || state === 'erro') {
-      resetAgentIndicator();
-    }
-    const effectiveState = muted ? 'mutado' : state;
-    (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
-  },
+    (state) => {
+      voiceStateContainer.className = `voice-state voice-state-${state}`;
+      voiceStateText.textContent = VOICE_STATE_LABELS[state] || state;
+      voiceInterruptBtn.disabled = state !== 'falando';
+      // Novo turno começando (processando) ou erro: o rótulo do turno anterior não vale mais.
+      if (state === 'processando' || state === 'erro') {
+        resetAgentIndicator();
+      }
+      // Fase V Fatia 5: a digitação só faz sentido com sessão ativa. Se a sessão caiu (idle/erro
+      // após encerrar), fecha a caixa — o texto digitado não iria a lugar nenhum.
+      if (state === 'idle' || state === 'erro') {
+        if (typingOpen) setTyping(false);
+      }
+      const effectiveState = muted ? 'mutado' : state;
+      (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
+    },
   (text) => appendTranscriptEntry('Você', text),
   (text) => appendTranscriptEntry('Orque', text),
   (message) => appendErrorEntry(message),
@@ -487,6 +492,91 @@ voiceScreenBtn.addEventListener('click', () => {
 
 window.addEventListener('beforeunload', () => {
   void voiceController.stop();
+});
+
+// --- Fase V Fatia 5: caixa de digitação (fallback textual) ---
+// Alternável pelo botão "Digitar": o texto é enviado pelo MESMO pipeline que a voz
+// (/api/voice/session/text → SessionManager.submitText → processTranscript), então
+// intenção, mutação, classificação e geração são idênticos. A resposta sai por voz.
+const voiceTypeBtn = document.getElementById('voice-type-btn') as HTMLButtonElement;
+const voiceTypePanel = document.getElementById('voice-type-panel') as HTMLDivElement;
+const voiceTypeInput = document.getElementById('voice-type-input') as HTMLInputElement;
+const voiceTypeSend = document.getElementById('voice-type-send') as HTMLButtonElement;
+
+let typingOpen = false;
+
+function setTyping(open: boolean): void {
+  typingOpen = open;
+  voiceTypePanel.hidden = !open;
+  voiceTypeBtn.setAttribute('aria-pressed', String(open));
+  voiceTypeBtn.textContent = open ? 'Fechar digitação' : 'Digitar';
+  if (open) {
+    voiceTypeInput.focus();
+  } else {
+    voiceTypeInput.value = '';
+  }
+}
+
+voiceTypeBtn.addEventListener('click', () => {
+  // Só abre a digitação se houver sessão ativa; caso contrário, inicia a voz primeiro.
+  const { sessionId } = voiceController.getVoiceSession();
+  if (!sessionId) {
+    voiceStartBtn.click();
+    return;
+  }
+  setTyping(!typingOpen);
+});
+
+async function submitTextTurn(text: string): Promise<void> {
+  const { sessionId, token } = voiceController.getVoiceSession();
+  if (!sessionId || !token) {
+    appendErrorEntry('Inicie a conversa por voz antes de digitar (a sessão ainda não foi aberta).');
+    return;
+  }
+  const headers = voiceController.getVoiceHeaders();
+  voiceTypeSend.disabled = true;
+  voiceTypeInput.disabled = true;
+  try {
+    const res = await fetch('/api/voice/session/text', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: 'Erro ao enviar texto.' }));
+      appendErrorEntry(body.error || 'Erro ao enviar texto.');
+      return;
+    }
+    const textTurn = (await res.json()) as { turnId: string };
+    console.log('[digitação] turnId=', textTurn.turnId);
+    appendTranscriptEntry('Você', text);
+    voiceTypeInput.value = '';
+  } catch (err) {
+    appendErrorEntry(formatPortugueseErrorMessage(err));
+  } finally {
+    voiceTypeSend.disabled = false;
+    voiceTypeInput.disabled = false;
+    if (typingOpen) voiceTypeInput.focus();
+  }
+}
+
+voiceTypeSend.addEventListener('click', () => {
+  const text = voiceTypeInput.value.trim();
+  if (text) void submitTextTurn(text);
+});
+
+voiceTypeInput.addEventListener('keydown', (ev: KeyboardEvent) => {
+  if (ev.key === 'Enter' && !ev.shiftKey) {
+    ev.preventDefault();
+    const text = voiceTypeInput.value.trim();
+    if (text) void submitTextTurn(text);
+  }
+  if (ev.key === 'Escape') {
+    setTyping(false);
+  }
 });
 
 // Exposed for native Swift desktop app via callAsyncJavaScript
