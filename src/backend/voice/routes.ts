@@ -148,6 +148,33 @@ export async function handleVoiceRoute(
   const sessionId = (req.headers['x-rodrigo-session'] as string) || '';
   const token = (req.headers['x-rodrigo-token'] as string) || '';
 
+  // Fase V Fatia 5: entrada textual (digitação) — fallback quando a voz falha. O texto vai pelo
+  // MESMO pipeline que a voz (intenção, mutação, classificação, geração); a única diferença é que
+  // pula a transcrição e o `hasRecognizableSpeech` (o texto já é confiável). O `origin` é 'normal',
+  // nunca 'screen': um texto digitado não é pergunta de tela mesmo que cite "tela"/"monitor".
+  if (pathname === '/api/voice/session/text' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readJsonBody(req, VOICE_LIMITS.MAX_TEXT_CHARS + 1024)) as Record<string, unknown>;
+    } catch {
+      sendJson(res, 400, { error: 'JSON inválido.' });
+      return true;
+    }
+    const text = String(body.text || '');
+    if (!text.trim()) {
+      sendJson(res, 400, { error: 'Texto vazio.' });
+      return true;
+    }
+    if (text.length > VOICE_LIMITS.MAX_TEXT_CHARS) {
+      sendJson(res, 400, { error: `Texto excede o limite de ${VOICE_LIMITS.MAX_TEXT_CHARS} caracteres.` });
+      return true;
+    }
+    // submitText é async: sem await a resposta virava `{}` e o status ignorava erro de sessão.
+    const result = await deps.sessionManager.submitText(sessionId, token, text);
+    sendJson(res, 'error' in result ? 401 : 200, result);
+    return true;
+  }
+
   if (pathname === '/api/voice/session/audio' && req.method === 'POST') {
     let bodyBuffer: Buffer;
     try {

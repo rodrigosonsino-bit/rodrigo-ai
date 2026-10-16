@@ -18,6 +18,7 @@ struct TargetSnapshot: Encodable {
     let focused: Bool
     let enabled: Bool
     let editable: Bool
+    let secure: Bool
     let supportsValue: Bool
     let directInsertSupported: Bool
     let appendSupported: Bool
@@ -214,13 +215,22 @@ func snapshot() throws -> TargetSnapshot {
     let value = try stringAttribute(ctx.element, kAXValueAttribute as CFString)
     let selectedText = try stringAttribute(ctx.element, kAXSelectedTextAttribute as CFString)
     let selectedRange = try rangeAttribute(ctx.element, kAXSelectedTextRangeAttribute as CFString)
-    // Não existe kAXEditableAttribute na API de Acessibilidade: editabilidade = papel de texto + valor gravável.
-    let textRoles = Set(["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea"])
     let settable = try isAttributeSettable(ctx.element, kAXValueAttribute as CFString)
     let supportsValue = (value != nil) || settable
     let directInsertSupported = supportsValue && selectedRange != nil
     let appendSupported = supportsValue && value != nil
-    let editable = supportsValue && textRoles.contains(role ?? "")
+    // Não existe kAXEditableAttribute na API de Acessibilidade: editabilidade = papel de texto + valor gravável.
+    // Inclui roles comuns em Electron/Chromium onde o caret existe; campos de senha nunca são editáveis.
+    let secureRoles = Set(["AXSecureTextField"])
+    let textRoles = Set([
+        "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea",
+        "AXGroup", "AXScrollArea", "AXUnknown"
+    ])
+    let secure = secureRoles.contains(role ?? "") || secureRoles.contains(subrole ?? "")
+    let editable = !secure && (
+        (supportsValue && textRoles.contains(role ?? ""))
+            || (selectedRange != nil && textRoles.contains(role ?? ""))
+    )
     let rangeSnapshot = selectedRange.map { TargetSnapshot.SelectedRangeSnapshot(location: $0.location, length: $0.length) }
 
     return TargetSnapshot(
@@ -232,6 +242,7 @@ func snapshot() throws -> TargetSnapshot {
         focused: focused,
         enabled: enabled,
         editable: editable,
+        secure: secure,
         supportsValue: supportsValue,
         directInsertSupported: directInsertSupported,
         appendSupported: appendSupported,

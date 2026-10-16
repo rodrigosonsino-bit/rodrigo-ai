@@ -18,6 +18,8 @@ export interface FocusedTargetSnapshot {
   focused: boolean;
   enabled: boolean;
   editable: boolean;
+  /** Campo de senha / AXSecureTextField — nunca digitar automaticamente. */
+  secure: boolean;
   supportsValue: boolean;
   directInsertSupported: boolean;
   appendSupported: boolean;
@@ -42,6 +44,7 @@ interface HelperJson {
     focused?: boolean;
     enabled?: boolean;
     editable?: boolean;
+    secure?: boolean;
     supportsValue?: boolean;
     directInsertSupported?: boolean;
     appendSupported?: boolean;
@@ -89,6 +92,10 @@ export class DefaultMacAccessibilityAdapter implements AccessibilityAdapter {
       focused: snapshot.focused ?? true,
       enabled: snapshot.enabled ?? true,
       editable: snapshot.editable ?? false,
+      secure:
+        snapshot.secure === true ||
+        snapshot.role === 'AXSecureTextField' ||
+        snapshot.subrole === 'AXSecureTextField',
       supportsValue: snapshot.supportsValue ?? false,
       directInsertSupported: snapshot.directInsertSupported ?? false,
       appendSupported: snapshot.appendSupported ?? false,

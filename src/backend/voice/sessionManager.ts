@@ -811,29 +811,21 @@ export class SessionManager {
     return { turnId };
   }
 
-  private async runTurn(session: Session, turn: ActiveTurn, audioPath: string): Promise<void> {
+  /**
+   * Fase V Fatia 5 — processa um texto já transcrito (ou digitado). Extraído de runTurn para que
+   * o caminho textual (submitText) reutilize exatamente a mesma lógica que o de voz, sem duplicação
+   * e sem derivação silenciosa entre os dois. O `transcript` já vem normalizado; o método NÃO
+   * transcreve nem verifica `hasRecognizableSpeech` (quem chama já garantiu que há texto real).
+   */
+  private async processTranscript(
+    session: Session,
+    turn: ActiveTurn,
+    transcript: string
+  ): Promise<void> {
     try {
-      if (!this.engine.isReadySync()) {
-        this.emit(session, { type: 'state', state: 'aquecendo' });
-        await this.engine.waitUntilReady(VOICE_LIMITS.WARMUP_TIMEOUT_MS);
-        if (session.activeTurn !== turn) return;
-      }
-
-      const transcript = normalizeOrqueTranscript(await this.engine.transcribe(audioPath));
       const commandTranscript = stripLeadingOrqueVocative(transcript);
       this.mark(turn, 'stt');
       if (session.activeTurn !== turn) return; // superado por cancelamento/preempção
-
-      // Transcrição sem nenhuma letra ou número = o detector de voz disparou com ruído, estalo, eco do alto-falante ou um
-      // fragmento: NÃO é erro nem pedido. Ignora em silêncio (sem bolha vermelha, sem histórico, sem classificação, sem
-      // consumir a repetição de uma confirmação pendente) e volta a ouvir.
-      if (!hasRecognizableSpeech(transcript)) {
-        console.log(`[turn] turno=${turn.turnId} sem fala reconhecível (ruído/eco/fragmento) — ignorado.`);
-        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-        this.emit(session, { type: 'state', state: 'ouvindo' });
-        session.activeTurn = null;
-        return;
-      }
 
       this.emit(session, { type: 'transcript', turnId: turn.turnId, text: transcript });
 
@@ -1511,6 +1503,103 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         session.activeTurn = null;
       }
     }
+  }
+
+  /**
+   * Fase V Fatia 5 — caminho de voz (audioPath). Prepara o turno, transcreve e repassa para
+   * processTranscript(), que é idêntico ao textual. A única diferença é o aquecimento do engine
+   * antes da transcrição (o textual já tem o texto, então pula).
+   */
+  private async runTurn(session: Session, turn: ActiveTurn, audioPath: string): Promise<void> {
+    try {
+      if (!this.engine.isReadySync()) {
+        this.emit(session, { type: 'state', state: 'aquecendo' });
+        await this.engine.waitUntilReady(VOICE_LIMITS.WARMUP_TIMEOUT_MS);
+        if (session.activeTurn !== turn) return;
+      }
+
+      const transcript = normalizeOrqueTranscript(await this.engine.transcribe(audioPath));
+      // Transcrição sem nenhuma letra ou número = o detector de voz disparou com ruído, estalo, eco do alto-falante ou um
+      // fragmento: NÃO é erro nem pedido. Ignora em silêncio (sem bolha vermelha, sem histórico, sem classificação, sem
+      // consumir a repetição de uma confirmação pendente) e volta a ouvir.
+      if (!hasRecognizableSpeech(transcript)) {
+        console.log(`[turn] turno=${turn.turnId} sem fala reconhecível (ruído/eco/fragmento) — ignorado.`);
+        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+        this.emit(session, { type: 'state', state: 'ouvindo' });
+        session.activeTurn = null;
+        return;
+      }
+
+      await this.processTranscript(session, turn, transcript);
+    } catch (err) {
+      if (session.activeTurn === turn) {
+        this.emit(session, {
+          type: 'error',
+          turnId: turn.turnId,
+          message: err instanceof Error ? err.message : 'Erro desconhecido.'
+        });
+        this.emit(session, { type: 'state', state: 'erro' });
+        session.activeTurn = null;
+      }
+    }
+  }
+
+  /**
+   * Fase V Fatia 5 — entrada textual (digitação). O texto já é confiável (vem do cliente, não de STT),
+   * então pula a transcrição e o `hasRecognizableSpeech` — mas passa por TODO o mesmo pipeline de
+   * intenção, mutação, classificação e geração que a voz. O `origin` é 'normal' (não 'screen'): um
+   * texto digitado não é pergunta de tela, mesmo que cite "tela"/"monitor".
+   */
+  async submitText(
+    sessionId: string,
+    token: string,
+    text: string
+  ): Promise<{ turnId: string } | { error: string }> {
+    const session = this.getAuthorized(sessionId, token);
+    if (!session) return { error: 'Sessão inválida ou expirada.' };
+    this.touch(session);
+
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (!normalized || normalized.length > VOICE_LIMITS.MAX_TEXT_CHARS) {
+      return { error: normalized ? `Texto excede o limite de ${VOICE_LIMITS.MAX_TEXT_CHARS} caracteres.` : 'Texto vazio.' };
+    }
+
+    if (session.activeTurn) {
+      this.engine.cancel(session.activeTurn.turnId);
+      session.activeTurn.abortController.abort();
+      session.activeTurn = null;
+    }
+
+    const turnId = crypto.randomUUID();
+    const epoch = Date.now();
+    const abortController = new AbortController();
+    const activeTurn: ActiveTurn = {
+      turnId,
+      epoch,
+      abortController,
+      expectedSentences: new Set(),
+      confirmedCount: 0,
+      pendingSynthesis: [],
+      nextSeq: 0,
+      nextToEmit: 0,
+      synthResults: new Map(),
+      generatedSeen: 0,
+      coalesce: null,
+      t0: performance.now(),
+      marks: [],
+      provenance: 'normal'
+    };
+    session.activeTurn = activeTurn;
+    session.lastTurnId = turnId;
+    session.cancelledTurnIds.clear();
+
+    this.emit(session, { type: 'state', state: 'processando' });
+
+    void this.processTranscript(session, activeTurn, normalized).finally(() =>
+      this.ttsProvider.endTurn?.(turnId)
+    );
+
+    return { turnId };
   }
 
   /**

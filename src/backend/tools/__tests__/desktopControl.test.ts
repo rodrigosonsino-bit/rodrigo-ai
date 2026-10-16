@@ -6,7 +6,8 @@ import {
   DitadoLocalTool,
   ToolPreviewRefusedError,
   DENIED_TYPING_BUNDLE_IDS,
-  parseDesktopControlFlag
+  parseDesktopControlFlag,
+  resolveAppTarget
 } from '../desktopControlTool.js';
 import { QUERY_NAMES, MUTATION_NAMES } from '../../../shared/voiceProtocol.js';
 
@@ -18,6 +19,7 @@ function editableTarget(overrides: Partial<{
   focused: boolean;
   enabled: boolean;
   editable: boolean;
+  secure: boolean;
   supportsValue: boolean;
   directInsertSupported: boolean;
   appendSupported: boolean;
@@ -33,6 +35,7 @@ function editableTarget(overrides: Partial<{
     focused: overrides.focused ?? true,
     enabled: overrides.enabled ?? true,
     editable: overrides.editable ?? true,
+    secure: overrides.secure ?? false,
     supportsValue: overrides.supportsValue ?? true,
     directInsertSupported: overrides.directInsertSupported ?? false,
     appendSupported: overrides.appendSupported ?? false,
@@ -112,8 +115,52 @@ describe('Pilar 1 — DesktopTool (DESKTOP_COMANDO & DESKTOP_CRITICO)', () => {
     assert.match(okMsg, /Safari/);
     assert.deepEqual(calls[0], { file: '/usr/bin/open', args: ['-b', 'com.apple.Safari'] });
 
-    const refused = await tool.execute('DESKTOP_COMANDO', 'open_app:Terminal');
-    assert.match(refused, /não está na lista de aplicativos permitidos/);
+    const refused = await tool.execute('DESKTOP_COMANDO', 'open_app:app inexistente xyz');
+    assert.match(refused, /não encontrei o aplicativo/i);
+  });
+
+  it('resolveAppTarget prefere Notes para o alias "bloco de notas" e preserva TextEdit em "editor de texto"', () => {
+    const notes = resolveAppTarget('bloco de notas');
+    const textEdit = resolveAppTarget('editor de texto');
+    assert.ok(notes);
+    assert.ok(textEdit);
+    assert.equal(notes.displayName, 'Notes');
+    assert.deepEqual(notes.openArgs, ['-b', 'com.apple.Notes']);
+    assert.equal(textEdit.displayName, 'TextEdit');
+    assert.deepEqual(textEdit.openArgs, ['-b', 'com.apple.TextEdit']);
+  });
+
+  it('open_app e app_quit aceitam fallback por nome de app instalado fora da allowlist fixa', async () => {
+    const calls: Array<{ file: string; args: readonly string[] }> = [];
+    const tool = new DesktopTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      resolveAppTargetSync: (rawName: string) =>
+        rawName === 'Chess'
+          ? {
+              displayName: 'Chess',
+              openArgs: ['-a', 'Chess'],
+              quitMode: 'appName',
+              quitValue: 'Chess'
+            }
+          : null,
+      exec: async (file, args) => {
+        calls.push({ file, args });
+        return { stdout: '', stderr: '' };
+      }
+    });
+
+    const openMsg = await tool.execute('DESKTOP_COMANDO', 'open_app:Chess');
+    assert.match(openMsg, /Chess/);
+    assert.deepEqual(calls[0], { file: '/usr/bin/open', args: ['-a', 'Chess'] });
+
+    const preview = tool.preview('DESKTOP_CRITICO', 'app_quit:Chess');
+    assert.match(preview, /Vou fechar o aplicativo Chess/);
+
+    const closeMsg = await tool.execute('DESKTOP_CRITICO', 'app_quit:Chess');
+    assert.match(closeMsg, /Fechei o aplicativo Chess/);
+    assert.equal(calls[1].file, '/usr/bin/osascript');
+    assert.match(calls[1].args[1], /tell application appName to quit saving ask/);
+    assert.equal(calls[1].args[3], 'Chess');
   });
 
   it('DESKTOP_CRITICO lock_screen e system_sleep agendam execução pós-fala (markPlayed) em vez de cortar o áudio', async () => {
@@ -153,7 +200,7 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
   });
 
   it('DigitarTool bloqueia DENIED_TYPING_BUNDLE_IDS no preview() com ToolPreviewRefusedError', async () => {
-    for (const deniedBundle of ['com.apple.Terminal', 'com.googlecode.iterm2', 'com.microsoft.VSCode', 'local.rodrigo-ai.desktop']) {
+    for (const deniedBundle of ['com.apple.Terminal', 'com.googlecode.iterm2', 'local.rodrigo-ai.desktop']) {
       assert.equal(DENIED_TYPING_BUNDLE_IDS.includes(deniedBundle), true);
       const tool = new DigitarTool({
         env: { RODRIGO_DESKTOP_CONTROL: '1' },
@@ -184,9 +231,8 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
         inspectFocusedTarget: async () => editableTarget(),
         insertText: async () => 'ax'
       },
-      exec: async () => {
+      pasteViaHid: async () => {
         pasted = true;
-        return { stdout: '', stderr: '' };
       }
     });
 
@@ -211,9 +257,8 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
         inspectFocusedTarget: async () => editableTarget({ app: { name: 'Safari', bundleId: 'com.apple.Safari' } }),
         insertText: async () => 'ax'
       },
-      exec: async () => {
+      pasteViaHid: async () => {
         pasted = true;
-        return { stdout: '', stderr: '' };
       }
     });
 
@@ -223,114 +268,45 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
     assert.equal(pasted, false);
   });
 
-  it('DigitarTool preserva o clipboard usando changeCount (padrão ClipboardPaster do DitadoLocal)', async () => {
-    let clipboardText = 'CONTEUDO_ANTERIOR_DO_USUARIO';
-    let changeCount = 10;
-    const osascriptCalls: string[][] = [];
-
+  it('DigitarTool cola via helper HID (CGEvent), padrão ClipboardPaster do DitadoLocal', async () => {
+    const hidCalls: string[] = [];
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      pasteRestoreDelayMs: 5,
       getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
       getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      exec: async (_file, args) => {
-        osascriptCalls.push([...args]);
-        return { stdout: '', stderr: '' };
-      },
       accessibility: {
         inspectFocusedTarget: async () => editableTarget(),
         insertText: async () => {
-          throw new Error('selection unavailable');
+          throw new Error('AX não deve ser o caminho primário');
         }
       },
-      clipboard: {
-        getSnapshot: async () => ({ text: clipboardText, changeCount }),
-        setText: async (text: string) => {
-          clipboardText = text;
-          changeCount += 1;
-          return { changeCount };
-        },
-        getChangeCount: async () => changeCount
+      pasteViaHid: async (text) => {
+        hidCalls.push(text);
       }
     });
 
     tool.preview('DIGITAR_TEXTO', 'texto:Mensagem ditada');
     const res = await tool.execute('DIGITAR_TEXTO', 'texto:Mensagem ditada');
     assert.match(res, /Pronto, digitei o texto em Notes/);
-    assert.equal(osascriptCalls.length, 1);
-    assert.match(osascriptCalls[0][1], /keystroke "v" using \{command down\}/);
-    assert.equal(clipboardText, 'CONTEUDO_ANTERIOR_DO_USUARIO', 'clipboard original deve ser restaurado');
-  });
-
-  it('DigitarTool NÃO sobrescreve o clipboard se o usuário copiou algo novo durante os 500ms (changeCount divergente)', async () => {
-    let clipboardText = 'CONTEUDO_ANTERIOR';
-    let changeCount = 1;
-
-    const tool = new DigitarTool({
-      env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      pasteRestoreDelayMs: 5,
-      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      exec: async () => {
-        // Simula o usuário copiando algo novo logo após o Cmd+V
-        clipboardText = 'COPIA_NOVA_DO_USUARIO';
-        changeCount += 1;
-        return { stdout: '', stderr: '' };
-      },
-      accessibility: {
-        inspectFocusedTarget: async () => editableTarget(),
-        insertText: async () => {
-          throw new Error('selection unavailable');
-        }
-      },
-      clipboard: {
-        getSnapshot: async () => ({ text: clipboardText, changeCount }),
-        setText: async (text: string) => {
-          clipboardText = text;
-          changeCount += 1;
-          return { changeCount };
-        },
-        getChangeCount: async () => changeCount
-      }
-    });
-
-    tool.preview('DIGITAR_TEXTO', 'texto:Mensagem ditada');
-    await tool.execute('DIGITAR_TEXTO', 'texto:Mensagem ditada');
-    assert.equal(clipboardText, 'COPIA_NOVA_DO_USUARIO', 'não deve sobrescrever cópia nova do usuário');
+    assert.deepEqual(hidCalls, ['Mensagem ditada']);
   });
 
   it('DigitarTool permite digitação no Cursor especificamente', async () => {
-    let clipboardText = 'ANTES';
-    let changeCount = 20;
-    const osascriptCalls: string[][] = [];
+    const hidCalls: string[] = [];
     const front = { name: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92' };
 
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      pasteRestoreDelayMs: 5,
       getFrontmostAppSync: () => front,
       getFrontmostApp: async () => front,
-      exec: async (_file, args) => {
-        osascriptCalls.push([...args]);
-        return { stdout: '', stderr: '' };
-      },
       accessibility: {
-        inspectFocusedTarget: async () =>
-          editableTarget({
-            app: front
-          }),
+        inspectFocusedTarget: async () => editableTarget({ app: front }),
         insertText: async () => {
-          throw new Error('selection unavailable');
+          throw new Error('AX não deve ser o caminho primário');
         }
       },
-      clipboard: {
-        getSnapshot: async () => ({ text: clipboardText, changeCount }),
-        setText: async (text: string) => {
-          clipboardText = text;
-          changeCount += 1;
-          return { changeCount };
-        },
-        getChangeCount: async () => changeCount
+      pasteViaHid: async (text) => {
+        hidCalls.push(text);
       }
     });
 
@@ -339,14 +315,22 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
 
     const result = await tool.execute('DIGITAR_TEXTO', 'texto:colar no cursor');
     assert.match(result, /Pronto, digitei o texto em Cursor/);
-    assert.equal(osascriptCalls.length, 1);
-    assert.match(osascriptCalls[0][1], /keystroke "v" using \{command down\}/);
-    assert.equal(clipboardText, 'ANTES');
+    assert.deepEqual(hidCalls, ['colar no cursor']);
   });
 
-  it('DigitarTool usa inserção AX-first quando o alvo suporta AXValue + AXSelectedTextRange', async () => {
-    const execCalls: Array<{ file: string; args: readonly string[] }> = [];
+  it('DigitarTool não bloqueia VS Code só por ser editor', () => {
+    const front = { name: 'Visual Studio Code', bundleId: 'com.microsoft.VSCode' };
+    const tool = new DigitarTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      getFrontmostAppSync: () => front
+    });
+    const preview = tool.preview('DIGITAR_TEXTO', 'texto:colar no editor');
+    assert.match(preview, /Vou digitar em Visual Studio Code/);
+  });
+
+  it('DigitarTool prioriza paste HID (CGEvent) na inserção — AX não é o caminho primário', async () => {
     const inserted: Array<{ text: string; mode: string }> = [];
+    const hidCalls: string[] = [];
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
       getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
@@ -363,66 +347,87 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
           return 'ax';
         }
       },
-      exec: async (file, args) => {
-        execCalls.push({ file, args });
-        return { stdout: '', stderr: '' };
+      pasteViaHid: async (text) => {
+        hidCalls.push(text);
       }
     });
 
     tool.preview('DIGITAR_INSERIR', 'Olá mundo');
     const result = await tool.execute('DIGITAR_INSERIR', 'Olá mundo');
-    assert.match(result, /inseri o texto em Notes/);
-    assert.deepEqual(inserted, [{ text: 'Olá mundo', mode: 'insert' }]);
-    assert.equal(execCalls.length, 0, 'não deve usar paste quando AX direto funciona');
+    assert.match(result, /digitei o texto em Notes/);
+    assert.deepEqual(hidCalls, ['Olá mundo']);
+    assert.equal(inserted.length, 0, 'inserção comum não deve usar AX');
   });
 
-  it('DigitarTool recusa quando o app está em foco mas não há campo editável', async () => {
+  it('DigitarTool recusa campo de senha mesmo com foco', async () => {
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      getFrontmostAppSync: () => ({ name: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92' }),
-      getFrontmostApp: async () => ({ name: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92' }),
+      getFrontmostAppSync: () => ({ name: 'Safari', bundleId: 'com.apple.Safari' }),
+      getFrontmostApp: async () => ({ name: 'Safari', bundleId: 'com.apple.Safari' }),
       accessibility: {
         inspectFocusedTarget: async () =>
           editableTarget({
-            app: { name: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92' },
+            app: { name: 'Safari', bundleId: 'com.apple.Safari' },
             editable: false,
-            role: 'AXButton'
+            secure: true,
+            role: 'AXSecureTextField'
           }),
         insertText: async () => 'ax'
       }
     });
 
-    tool.preview('DIGITAR_TEXTO', 'texto:colar no cursor');
-    const result = await tool.execute('DIGITAR_TEXTO', 'texto:colar no cursor');
-    assert.match(result, /não é um campo editável/i);
+    tool.preview('DIGITAR_TEXTO', 'texto:senha123');
+    const result = await tool.execute('DIGITAR_TEXTO', 'texto:senha123');
+    assert.match(result, /campo de senha/i);
   });
 
-  it('DigitarTool faz fallback para paste quando AX direto falha em inserção comum', async () => {
+  it('DigitarTool cola no foco mesmo quando AX não marca o alvo como editável', async () => {
     let pasted = false;
+    const front = { name: 'Cursor', bundleId: 'com.todesktop.230313mzl4w4u92' };
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      pasteRestoreDelayMs: 5,
-      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      getFrontmostAppSync: () => front,
+      getFrontmostApp: async () => front,
       accessibility: {
         inspectFocusedTarget: async () =>
           editableTarget({
-            directInsertSupported: true,
-            value: 'abc',
-            selectedRange: { location: 3, length: 0 }
+            app: front,
+            editable: false,
+            secure: false,
+            role: 'AXGroup',
+            directInsertSupported: false
           }),
         insertText: async () => {
-          throw new Error('AXValue unavailable');
+          throw new Error('should not use AX when not editable');
         }
       },
-      exec: async () => {
+      pasteViaHid: async () => {
         pasted = true;
-        return { stdout: '', stderr: '' };
+      }
+    });
+
+    tool.preview('DIGITAR_TEXTO', 'texto:colar no cursor');
+    const result = await tool.execute('DIGITAR_TEXTO', 'texto:colar no cursor');
+    assert.match(result, /Pronto, digitei o texto em Cursor/);
+    assert.equal(pasted, true);
+  });
+
+  it('DigitarTool cola via HID mesmo se o inspect AX falhar', async () => {
+    let pasted = false;
+    const tool = new DigitarTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      accessibility: {
+        inspectFocusedTarget: async () => {
+          throw new Error('no focused element');
+        },
+        insertText: async () => {
+          throw new Error('unreachable');
+        }
       },
-      clipboard: {
-        getSnapshot: async () => ({ text: 'ANTES', changeCount: 1 }),
-        setText: async () => ({ changeCount: 2 }),
-        getChangeCount: async () => 99
+      pasteViaHid: async () => {
+        pasted = true;
       }
     });
 
@@ -454,29 +459,26 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
   });
 
   it('DigitarTool suporta limpar o ditado antes de inserir', async () => {
-    const inserted: Array<{ text: string; mode: string }> = [];
+    const hidCalls: string[] = [];
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
       getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
       getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
       accessibility: {
-        inspectFocusedTarget: async () =>
-          editableTarget({
-            directInsertSupported: true,
-            value: '',
-            selectedRange: { location: 0, length: 0 }
-          }),
-        insertText: async (text, mode) => {
-          inserted.push({ text, mode });
-          return 'ax';
+        inspectFocusedTarget: async () => editableTarget(),
+        insertText: async () => {
+          throw new Error('AX não deve ser o caminho primário');
         }
+      },
+      pasteViaHid: async (text) => {
+        hidCalls.push(text);
       }
     });
 
     tool.preview('DIGITAR_LIMPAR_INSERIR', 'hã tipo assim vamos fechar o relatório hoje');
     const result = await tool.execute('DIGITAR_LIMPAR_INSERIR', 'hã tipo assim vamos fechar o relatório hoje');
-    assert.match(result, /limpei o ditado e inseri o texto/i);
-    assert.deepEqual(inserted, [{ text: 'Vamos fechar o relatório hoje.', mode: 'insert' }]);
+    assert.match(result, /limpei o ditado e (?:inseri|colei) o texto/i);
+    assert.deepEqual(hidCalls, ['Vamos fechar o relatório hoje.']);
   });
 
   it('DigitarTool suporta anexar texto ao final via AXValue', async () => {
@@ -504,63 +506,6 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
     assert.deepEqual(inserted, [{ text: 'e complemento', mode: 'append' }]);
   });
 
-  it('sem permissão de Acessibilidade: inserção simples cai para colagem via Cmd+V', async () => {
-    const keystrokes: string[][] = [];
-    let clipboardText = 'anterior';
-    let changeCount = 1;
-    const tool = new DigitarTool({
-      env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      accessibility: {
-        inspectFocusedTarget: async () => {
-          throw new Error('AXError -25204');
-        },
-        insertText: async () => {
-          throw new Error('não deveria ser chamado sem leitura AX');
-        }
-      },
-      clipboard: {
-        getSnapshot: async () => ({ text: clipboardText, changeCount }),
-        setText: async (text: string) => {
-          clipboardText = text;
-          changeCount += 1;
-          return { changeCount };
-        },
-        getChangeCount: async () => changeCount
-      },
-      exec: (async (cmd: string, args: string[]) => {
-        keystrokes.push([cmd, ...args]);
-        return { stdout: '', stderr: '' };
-      }) as never
-    });
-
-    tool.preview('DIGITAR_TEXTO', 'texto:Olá mundo');
-    const result = await tool.execute('DIGITAR_TEXTO', 'texto:Olá mundo');
-    assert.match(result, /Pronto, digitei o texto em Notes/);
-    assert.ok(
-      keystrokes.some((k) => k.join(' ').includes('keystroke "v"')),
-      'deveria disparar Cmd+V sintético'
-    );
-  });
-
-  it('sem permissão de Acessibilidade: anexar continua recusado (precisa ler o campo)', async () => {
-    const tool = new DigitarTool({
-      env: { RODRIGO_DESKTOP_CONTROL: '1' },
-      getFrontmostAppSync: () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
-      accessibility: {
-        inspectFocusedTarget: async () => {
-          throw new Error('AX_BAD_JSON: (empty stdout)');
-        },
-        insertText: async () => 'ax' as never
-      }
-    });
-
-    tool.preview('DIGITAR_ANEXAR', ' e complemento');
-    const result = await tool.execute('DIGITAR_ANEXAR', ' e complemento');
-    assert.match(result, /só a inserção simples por colagem/i);
-  });
 
   it('DigitarTool responde honestamente quando traduzir-e-inserir não está disponível', async () => {
     const tool = new DigitarTool({
