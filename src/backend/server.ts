@@ -2,11 +2,12 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AppConfig } from '../shared/types.js';
+import type { AppConfig, UsageStatus } from '../shared/types.js';
 import { isAllowedHost } from './hostValidator.js';
 import { handleHealthRequest } from './routes/health.js';
 import { handlePrivacyRequest } from './routes/privacy.js';
 import { handleDoctorRequest } from './routes/doctor.js';
+import { handleUsageRequest } from './routes/usage.js';
 import { handleVoiceRoute, type VoiceRouteDeps } from './voice/routes.js';
 
 const MIME_TYPES: Record<string, string> = {
@@ -75,6 +76,11 @@ export function createRequestHandler(
       if (pathname === '/api/doctor') {
         // T5a: só configuração declarada; raiz do projeto = cwd, como em index.ts (createVoiceRuntime).
         handleDoctorRequest(req, res, process.cwd());
+        return;
+      }
+
+      if (pathname === '/api/usage') {
+        handleUsageRequest(req, res, voiceDeps?.usageSummary as (() => UsageStatus) | undefined);
         return;
       }
 

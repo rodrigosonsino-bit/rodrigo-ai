@@ -89,3 +89,26 @@ export interface TtsStatus {
   budget: { used: number; limit: number; minuteUsed: number; rpm: number; exhausted: boolean; blockedForMs: number } | null;
   counters: { gemini: number; fallback: number; failures: number } | null;
 }
+
+/**
+ * GET /api/usage: gasto PRÓPRIO com o Gemini no dia (livro-caixa local, UsageLedger).
+ * Só números agregados por (fonte, modelo); nenhum texto de conversa, transcrição ou frase.
+ * É "o que o app consumiu", não a conta da chave (outras ferramentas com a mesma chave não entram).
+ */
+export type UsageSourceName = 'geracao' | 'intencao' | 'visao' | 'tts';
+
+export interface UsageModelRow {
+  source: UsageSourceName;
+  model: string;
+  req: number;
+  inTokens: number;
+  outTokens: number;
+  cap: number;
+  pct: number;
+}
+
+export interface UsageStatus {
+  day: string;
+  resetInMs: number;
+  models: UsageModelRow[];
+}

@@ -90,6 +90,8 @@ export interface VoiceRouteDeps {
   audioStore: AudioStore;
   /** Fase 13a: estado da voz (GET /api/voice/tts-status). */
   ttsStatus?: () => unknown;
+  /** Uso próprio do Gemini (GET /api/usage). Só números; nenhum texto de conversa. */
+  usageSummary?: () => unknown;
 }
 
 /**
