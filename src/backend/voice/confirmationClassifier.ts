@@ -25,9 +25,19 @@ export type PendingActionGroup = 'CREATE' | 'DELETE' | 'EDIT';
 
 export function actionGroupOf(kind: string): PendingActionGroup | null {
   const k = kind.toUpperCase();
-  if (k.endsWith('_CRIAR') || k === 'MEMORIA_GUARDAR' || k === 'DIGITAR_TEXTO') return 'CREATE';
+  if (
+    k.endsWith('_CRIAR') ||
+    k === 'MEMORIA_GUARDAR' ||
+    k === 'DIGITAR_TEXTO' ||
+    k === 'DIGITAR_INSERIR' ||
+    k === 'DIGITAR_ANEXAR' ||
+    k === 'DIGITAR_LIMPAR_INSERIR' ||
+    k === 'DIGITAR_TRADUZIR_INSERIR'
+  ) {
+    return 'CREATE';
+  }
   if (k.endsWith('_APAGAR') || k === 'MEMORIA_ESQUECER' || k === 'DESKTOP_CRITICO') return 'DELETE';
-  if (k.endsWith('_EDITAR') || k === 'AUTO_CORRECAO') return 'EDIT';
+  if (k.endsWith('_EDITAR') || k === 'AUTO_CORRECAO' || k === 'DIGITAR_SUBSTITUIR_SELECAO') return 'EDIT';
   return null;
 }
 

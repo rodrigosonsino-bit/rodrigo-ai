@@ -26,4 +26,6 @@ HANDOFF-*.md
 # configuracao local de preview
 .claude/
 desktop/build/
+# wrapper local do agente OpenClaw (nao versionar)
+.openclaw-orca.sh
 

@@ -1,6 +1,6 @@
 # Plano T7: Spike e Integracao Experimental do NVIDIA PersonaPlex
 
-- **Status:** Proposto. Nada implementado. Nao auditado.
+- **Status:** Proposto. Nada implementado. Revisado apos auditoria do OpenCode em 2026-10-16; pendente de reauditoria.
 - **Data:** 2026-10-16
 - **Origem:** Pedido do usuario para montar um plano de integracao do `NVIDIA PersonaPlex`.
 - **Arbitragem previa:** `jev choice` preferiu `remote_optional` sobre `defer_no_integration`, com confianca baixa.
@@ -128,7 +128,26 @@ Entregar um modo "papo livre" em que o usuario:
 4. **Protocolo de frontend**
    `voiceProtocol.ts` ganha sinalizacao de modo e eventos especificos do modo experimental, sem contaminar os contratos atuais desnecessariamente.
 
-### 4.4 Por que o backend deve ficar no meio
+### 4.4 Protocolo de transporte proposto
+
+Para remover a ambiguidade do MVP, o transporte fica explicitamente definido assim:
+
+1. **Controle de sessao**
+   O cliente continua abrindo a sessao no backend local. O modo da sessao passa a ser declarado no handshake inicial: `classic` ou `personaplex`.
+
+2. **Canal local de streaming**
+   O frontend abre um **WebSocket local** dedicado, autenticado com `sessionId` e `token`, em rota nova do backend local. Esse socket carrega frames binarios de audio do navegador para o Node e frames binarios de audio de resposta do Node para o navegador. O frontend nunca fala com o host remoto diretamente.
+
+3. **Canal remoto de streaming**
+   O Node abre **um WebSocket persistente upstream por sessao** para o servidor oficial do PersonaPlex, preferencialmente em `wss://`. Nao havera multiplexacao de sessoes nem compartilhamento de socket entre usuarios ou modos.
+
+4. **Buffers e backpressure**
+   Os dois lados usam filas limitadas por tempo de audio e por bytes. Overflow ou downstream parado fecham a sessao experimental de forma explicita; nunca degradam silenciosamente para o modo classico.
+
+5. **Heartbeat e deteccao de orfao**
+   Sem trafego util ou heartbeat do host remoto por 3 s, o Node encerra a sessao com evento explicito (`personaplex_error`) e fecha os dois sockets. O cliente limpa buffers locais ao receber esse evento ou ao detectar fechamento do socket.
+
+### 4.5 Por que o backend deve ficar no meio
 
 Mesmo num modo experimental, o backend local deve continuar como mediador porque ele:
 
@@ -151,6 +170,16 @@ Hoje o projeto declara que o audio do usuario nao sai da maquina. Se `PersonaPle
 3. atualizar `privacy.ts`, `privacyText.ts`, `README`, `index.html` e `CLAUDE.md`;
 4. manter o modo desligado por padrao;
 5. tornar explicito na UI e em `GET /api/privacy` que, nesse modo, o audio sai do Mac para um host configurado pelo usuario.
+
+### 5.1 Gate de destino e integracao com o outboundGuard
+
+O envio ao host PersonaPlex entra na mesma familia de protecoes de saida da trilha OpenJarvis:
+
+1. `RODRIGO_PERSONAPLEX_URL` e validada estritamente no startup, com esquema e host aceitos pelo projeto.
+2. O destino remoto precisa casar com uma **allowlist explicita de host:porta** controlada pela configuracao; valor generico, redirecionamento ou host nao listado falham fechado.
+3. O Node nao envia metadados textuais desnecessarios da sessao classica ao host remoto; tudo o que nao for audio ou controle estritamente necessario continua sujeito ao `outboundGuard`.
+4. A implementacao deve ligar essa allowlist ao subsistema de saida ja existente (`outboundGuard` / politica de egress), em vez de criar uma excecao paralela sem auditoria.
+5. Testes de egress devem provar que, com a flag desligada, zero conexoes saem para `RODRIGO_PERSONAPLEX_URL`.
 
 Regra de honestidade:
 
@@ -201,6 +230,7 @@ Passos:
 2. criar `src/backend/voice/personaplexSession.ts`;
 3. adaptar `voiceRuntime.ts` e `routes.ts` para negociacao de modo;
 4. manter `SessionManager` classico intacto, exceto no minimo necessario para coexistencia.
+5. garantir que, com `RODRIGO_PERSONAPLEX=0`, nenhum modulo do caminho PersonaPlex seja carregado em memoria.
 
 Saida:
 
@@ -218,6 +248,7 @@ Passos:
 4. reproduzir o audio de resposta;
 5. suportar cancelamento/interrupcao e encerramento;
 6. exibir aviso visual de que ferramentas e memoria estao desativadas nesse modo.
+7. aplicar diferenciacao visual forte do modo experimental (tema, moldura ou estado persistente) para nao confundi-lo com o assistente principal.
 
 Saida:
 
@@ -233,6 +264,7 @@ Passos:
 2. nao migrar silenciosamente para o pipeline classico;
 3. limpar buffers e estado ao cancelar;
 4. impedir vazamento de sessao entre os dois modos.
+5. encerrar a sessao ao perder heartbeat do host remoto por 3 s.
 
 Saida:
 
@@ -262,6 +294,9 @@ decisao de continuar, congelar ou descartar.
 - cancelamento/encerramento nao deixam processos ou sessao zumbi;
 - indisponibilidade do backend remoto gera falha honesta, sem fallback silencioso;
 - a sessao experimental consegue falar, ouvir resposta e ser interrompida manualmente.
+- com `RODRIGO_PERSONAPLEX=0`, nenhum modulo do caminho PersonaPlex e carregado no processo Node;
+- com o modo desligado, zero conexoes saem para `RODRIGO_PERSONAPLEX_URL`;
+- perda do host remoto no meio da sessao gera encerramento deterministico e limpeza dos buffers locais.
 
 ## 8. Riscos principais
 
@@ -269,9 +304,11 @@ decisao de continuar, congelar ou descartar.
 |---|---|---|
 | Sem host NVIDIA disponivel | bloqueio total | Gate duro na Fase 0 |
 | Privacidade: audio sai da maquina | alto | flag explicita, default-off, UI honesta |
+| Egress para destino errado ou amplo demais | alto | allowlist estrita integrada ao outboundGuard e falha fechada |
 | Pressao para encaixar tools no MVP | alto | fora de escopo por definicao |
 | Regressao no pipeline classico | alto | trilha paralela, nao substituir `VoiceEngine` atual |
 | Latencia ruim no host remoto | medio/alto | medir antes de integrar |
+| Proxy full-duplex no Node vazar socket ou travar buffers | alto | protocolo WebSocket explicito, heartbeat, filas limitadas e teardown deterministico |
 | Ambiguidade de UX entre os dois modos | medio | rotular modo experimental de forma inequivoca |
 
 ## 9. Arquivos provaveis de impacto

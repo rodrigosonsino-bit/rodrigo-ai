@@ -141,7 +141,9 @@ MUTATION_NAMES = {
     "LEMBRETE_CRIAR", "LEMBRETE_EDITAR", "LEMBRETE_APAGAR", "LEMBRETE_REAGENDAR", "LEMBRETE_CONSULTAR",
     "NOTA_CRIAR", "NOTA_EDITAR", "NOTA_APAGAR", "NOTA_CONSULTAR",
     "MEMORIA_GUARDAR", "MEMORIA_EDITAR", "MEMORIA_ESQUECER", "MEMORIA_CONSULTAR",
-    "DESKTOP_COMANDO", "DESKTOP_CRITICO", "DIGITAR_TEXTO", "DITADO_LOCAL", "CONFIGURAR_VOZ", "AUTO_CORRECAO",
+    "DESKTOP_COMANDO", "DESKTOP_CRITICO", "DIGITAR_TEXTO", "DIGITAR_INSERIR", "DIGITAR_SUBSTITUIR_SELECAO",
+    "DIGITAR_ANEXAR", "DIGITAR_LIMPAR_INSERIR", "DIGITAR_TRADUZIR_INSERIR",
+    "DITADO_LOCAL", "CONFIGURAR_VOZ", "AUTO_CORRECAO",
     "NENHUMA"
 }
 # Fase 14 + Controle de Desktop/Voz: ações em QUERY_NAMES têm isMutation=False no Node
@@ -198,6 +200,12 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "DIGITAR_TEXTO: digitar/colar texto no aplicativo em foco ('texto:<conteúdo>') ou acionar atalho do "
     "Ditado Local no app focado ('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', "
     "'atalho:ditar_traduzir').\n"
+    "DIGITAR_INSERIR: inserir texto no campo atual sem depender do prefixo 'texto:'. content = o texto.\n"
+    "DIGITAR_SUBSTITUIR_SELECAO: substituir o texto selecionado atual. content = o texto novo.\n"
+    "DIGITAR_ANEXAR: anexar texto ao final do campo atual. content = o texto a anexar.\n"
+    "DIGITAR_LIMPAR_INSERIR: limpar muletas do ditado e inserir o resultado no campo atual. content = o ditado bruto.\n"
+    "DIGITAR_TRADUZIR_INSERIR: traduzir um texto e inserir o resultado no campo atual. content = '<idioma>:<texto>' "
+    "ou só '<texto>' (nesse caso assume português).\n"
     "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir um ditado localmente sem "
     "injetar teclas ('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
     "CONFIGURAR_VOZ: trocar a voz do próprio assistente ('voz:<nome de voz local instalada|Kokoro|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>').\n"
@@ -233,6 +241,11 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "Bloqueia a tela do Mac -> DESKTOP_CRITICO|lock_screen\n"
     "Suspende o computador -> DESKTOP_CRITICO|system_sleep\n"
     "Digita aí: Olá, tudo bem com você? -> DIGITAR_TEXTO|texto:Olá, tudo bem com você?\n"
+    "Escreve no campo atual: reunião confirmada -> DIGITAR_INSERIR|reunião confirmada\n"
+    "Substitui a seleção por Rodrigo Sonsino -> DIGITAR_SUBSTITUIR_SELECAO|Rodrigo Sonsino\n"
+    "Anexa no final: obrigado! -> DIGITAR_ANEXAR|obrigado!\n"
+    "Limpa esse ditado e cola: hã tipo assim vamos fechar hoje -> DIGITAR_LIMPAR_INSERIR|hã tipo assim vamos fechar hoje\n"
+    "Traduz pra inglês e cola bom dia -> DIGITAR_TRADUZIR_INSERIR|inglês:bom dia\n"
     "Aciona o ditado local para traduzir a seleção -> DIGITAR_TEXTO|atalho:traduzir_selecao\n"
     "Limpa esse ditado: hã tipo assim vamos fechar o contrato hoje -> DITADO_LOCAL|limpar:hã tipo assim vamos fechar o contrato hoje\n"
     "Muda sua voz para Luciana -> CONFIGURAR_VOZ|voz:Luciana\n"
@@ -327,6 +340,11 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "'app_quit:<Nome>', 'empty_trash', 'lock_screen', 'system_sleep'.\n"
     "DIGITAR_TEXTO: digitar/colar texto no aplicativo focado ('texto:<conteúdo>') ou disparar atalho do "
     "Ditado Local ('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir').\n"
+    "DIGITAR_INSERIR: inserir texto no campo atual. content = o texto.\n"
+    "DIGITAR_SUBSTITUIR_SELECAO: substituir o texto selecionado atual. content = o texto novo.\n"
+    "DIGITAR_ANEXAR: anexar texto ao final do campo atual. content = o texto a anexar.\n"
+    "DIGITAR_LIMPAR_INSERIR: limpar muletas de um ditado e inserir o resultado. content = o ditado bruto.\n"
+    "DIGITAR_TRADUZIR_INSERIR: traduzir e inserir no campo atual. content = '<idioma>:<texto>' ou só '<texto>' para português.\n"
     "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir ditado localmente sem colar "
     "('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
     "CONFIGURAR_VOZ: trocar a voz do próprio assistente. content = 'voz:<nome de voz local instalada|Kokoro|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>'.\n"
@@ -393,6 +411,8 @@ def parse_intent_json(raw: str, text: str = ""):
     if intent == "DIGITAR_TEXTO" and content.lower().startswith("atalho:"):
         return (intent, content)
     grounding_target = PREFIXED_CONTENT_RE.sub("", content) if intent in ("DIGITAR_TEXTO", "DITADO_LOCAL") else content
+    if intent == "DIGITAR_TRADUZIR_INSERIR" and ":" in grounding_target:
+        grounding_target = grounding_target.split(":", 1)[1].strip()
     if text and not content_grounded(grounding_target, text):
         return ("NENHUMA", None)  # conteúdo não ancorado na fala: não propõe mutação
     return (intent, content)
@@ -419,7 +439,9 @@ def parse_mutation_output(raw: str, truncated: bool) -> tuple[str, str | None]:
                   "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR",
                   "LEMBRETE_REAGENDAR",
                   "DESKTOP_COMANDO", "DESKTOP_CRITICO",
-                  "DIGITAR_TEXTO", "DITADO_LOCAL",
+                  "DIGITAR_TEXTO", "DIGITAR_INSERIR", "DIGITAR_SUBSTITUIR_SELECAO",
+                  "DIGITAR_ANEXAR", "DIGITAR_LIMPAR_INSERIR", "DIGITAR_TRADUZIR_INSERIR",
+                  "DITADO_LOCAL",
                   "CONFIGURAR_VOZ", "AUTO_CORRECAO"):
         if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
             return ("NENHUMA", None)

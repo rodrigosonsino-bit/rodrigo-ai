@@ -8,6 +8,12 @@ import type { IntentName } from '../../shared/voiceProtocol.js';
 import { DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 import { guardText } from '../privacy/outboundGuard.js';
 import type { DynamicVoiceProvider } from '../voice/ttsProviders.js';
+import {
+  DefaultMacAccessibilityAdapter,
+  type AccessibilityAdapter,
+  type AccessibilityInsertMode,
+  type FocusedTargetSnapshot
+} from './macosAccessibility.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -56,7 +62,6 @@ export const DENIED_TYPING_BUNDLE_IDS: readonly string[] = [
   'net.kovidgoyal.kitty',
   'com.github.wez.wezterm',
   'co.zeit.hyper',
-  'com.todesktop.230313mzl4w4u92',
   'com.microsoft.VSCode',
   'com.apple.dt.Xcode',
   'local.rodrigo-ai.desktop'
@@ -565,8 +570,11 @@ export interface DigitarToolDeps {
   env?: NodeJS.ProcessEnv;
   getFrontmostAppSync?: () => FrontmostAppInfo;
   getFrontmostApp?: () => Promise<FrontmostAppInfo>;
+  activateApp?: (bundleId: string) => Promise<void>;
+  accessibility?: AccessibilityAdapter;
   clipboard?: ClipboardAdapter;
   pasteRestoreDelayMs?: number;
+  transformText?: (mode: 'limpar' | 'traduzir_pt' | 'traduzir', text: string, targetLang?: string) => Promise<string>;
 }
 
 function defaultGetFrontmostAppSync(): FrontmostAppInfo {
@@ -582,6 +590,147 @@ function defaultGetFrontmostAppSync(): FrontmostAppInfo {
   return { bundleId: bundleId.trim(), name: rest.join('|').trim() || bundleId.trim() };
 }
 
+type DigitarIntentKind =
+  | 'DIGITAR_TEXTO'
+  | 'DIGITAR_INSERIR'
+  | 'DIGITAR_SUBSTITUIR_SELECAO'
+  | 'DIGITAR_ANEXAR'
+  | 'DIGITAR_LIMPAR_INSERIR'
+  | 'DIGITAR_TRADUZIR_INSERIR';
+
+interface ShortcutRequest {
+  type: 'shortcut';
+  shortcut: string;
+}
+
+interface TextRequest {
+  type: 'text';
+  mode: AccessibilityInsertMode;
+  text: string;
+  transform?: 'clean' | 'translate';
+  targetLang?: string;
+}
+
+type DigitarRequest = ShortcutRequest | TextRequest;
+
+function isDigitarIntentKind(kind: IntentName): kind is DigitarIntentKind {
+  return (
+    kind === 'DIGITAR_TEXTO' ||
+    kind === 'DIGITAR_INSERIR' ||
+    kind === 'DIGITAR_SUBSTITUIR_SELECAO' ||
+    kind === 'DIGITAR_ANEXAR' ||
+    kind === 'DIGITAR_LIMPAR_INSERIR' ||
+    kind === 'DIGITAR_TRADUZIR_INSERIR'
+  );
+}
+
+function parseTranslateInsertContent(raw: string): { text: string; targetLang: string } {
+  const trimmed = raw.trim();
+  const sep = trimmed.indexOf(':');
+  if (sep > 0 && sep <= 24) {
+    const maybeLang = trimmed.slice(0, sep).trim();
+    const maybeText = sanitizeTypingText(trimmed.slice(sep + 1));
+    if (maybeLang && maybeText) {
+      return { text: maybeText, targetLang: maybeLang };
+    }
+  }
+  return { text: sanitizeTypingText(trimmed), targetLang: 'português' };
+}
+
+function parseDigitarRequest(kind: DigitarIntentKind, raw: string): DigitarRequest {
+  if (kind === 'DIGITAR_TEXTO' && raw.toLowerCase().startsWith('atalho:')) {
+    return { type: 'shortcut', shortcut: raw.slice('atalho:'.length).trim().toLowerCase() };
+  }
+
+  if (kind === 'DIGITAR_TRADUZIR_INSERIR') {
+    const translated = parseTranslateInsertContent(raw);
+    return {
+      type: 'text',
+      mode: 'insert',
+      text: translated.text,
+      transform: 'translate',
+      targetLang: translated.targetLang
+    };
+  }
+
+  const baseText =
+    kind === 'DIGITAR_TEXTO' ? raw.replace(/^texto\s*:/i, '') : raw;
+  const clean = sanitizeTypingText(baseText);
+  if (kind === 'DIGITAR_LIMPAR_INSERIR') {
+    return { type: 'text', mode: 'insert', text: clean, transform: 'clean' };
+  }
+  if (kind === 'DIGITAR_SUBSTITUIR_SELECAO') {
+    return { type: 'text', mode: 'replaceSelection', text: clean };
+  }
+  if (kind === 'DIGITAR_ANEXAR') {
+    return { type: 'text', mode: 'append', text: clean };
+  }
+  return { type: 'text', mode: 'insert', text: clean };
+}
+
+function buildDigitarPreview(appName: string, request: DigitarRequest): string {
+  if (request.type === 'shortcut') {
+    return `Vou acionar o atalho ${request.shortcut} do Ditado Local em ${appName}. Pode confirmar?`;
+  }
+  if (request.transform === 'clean') {
+    return `Vou limpar o ditado e inserir em ${appName}: ${request.text}. Pode confirmar?`;
+  }
+  if (request.transform === 'translate') {
+    return `Vou traduzir para ${request.targetLang ?? 'português'} e inserir em ${appName}: ${request.text}. Pode confirmar?`;
+  }
+  if (request.mode === 'replaceSelection') {
+    return `Vou substituir a seleção em ${appName} por: ${request.text}. Pode confirmar?`;
+  }
+  if (request.mode === 'append') {
+    return `Vou anexar ao campo atual em ${appName}: ${request.text}. Pode confirmar?`;
+  }
+  return `Vou digitar em ${appName}: ${request.text}. Pode confirmar?`;
+}
+
+function buildDigitarSuccess(appName: string, request: TextRequest, strategy: 'ax' | 'paste'): string {
+  if (request.transform === 'clean') {
+    return strategy === 'ax'
+      ? `Pronto, limpei o ditado e inseri o texto em ${appName}.`
+      : `Pronto, limpei o ditado e colei o texto em ${appName}.`;
+  }
+  if (request.transform === 'translate') {
+    return strategy === 'ax'
+      ? `Pronto, traduzi e inseri o texto em ${appName}.`
+      : `Pronto, traduzi e colei o texto em ${appName}.`;
+  }
+  if (request.mode === 'replaceSelection') {
+    return strategy === 'ax'
+      ? `Pronto, substituí a seleção em ${appName}.`
+      : `Pronto, substituí a seleção em ${appName} colando o texto.`;
+  }
+  if (request.mode === 'append') {
+    return `Pronto, anexei o texto em ${appName}.`;
+  }
+  return strategy === 'ax'
+    ? `Pronto, inseri o texto em ${appName}.`
+    : `Pronto, digitei o texto em ${appName}.`;
+}
+
+function formatAccessibilityFailure(err: unknown, targetLabel: string): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/not editable/i.test(msg)) {
+    return `Cancelado por segurança: ${targetLabel} está em foco, mas o elemento atual não é um campo editável.`;
+  }
+  if (/disabled/i.test(msg)) {
+    return `Cancelado por segurança: o campo atual em ${targetLabel} está desativado.`;
+  }
+  if (/selection required|no selected text/i.test(msg)) {
+    return 'Cancelado por segurança: não encontrei texto selecionado para substituir.';
+  }
+  if (/selection unavailable|AXSelectedTextRange/i.test(msg)) {
+    return `Não consegui inserir direto no campo atual de ${targetLabel}.`;
+  }
+  if (/AXValue|value unavailable/i.test(msg)) {
+    return `Não consegui ler o conteúdo do campo atual em ${targetLabel}.`;
+  }
+  return formatTccError(err, targetLabel);
+}
+
 /**
  * Pilar 2 — Digitação segura no aplicativo em primeiro plano (`DIGITAR_TEXTO`) +
  * acionamento confirmado de atalhos do DitadoLocal.
@@ -594,9 +743,12 @@ export class DigitarTool implements IMutatingTool {
   private readonly env: NodeJS.ProcessEnv;
   private readonly getFrontmostAppSync: () => FrontmostAppInfo;
   private readonly getFrontmostApp: () => Promise<FrontmostAppInfo>;
+  private readonly activateApp: (bundleId: string) => Promise<void>;
+  private readonly accessibility: AccessibilityAdapter;
   private readonly clipboard: ClipboardAdapter;
   private readonly pasteRestoreDelayMs: number;
-  private armedTarget: { bundleId: string; appName: string; rawContent: string } | null = null;
+  private readonly transformText?: (mode: 'limpar' | 'traduzir_pt' | 'traduzir', text: string, targetLang?: string) => Promise<string>;
+  private armedTarget: { bundleId: string; appName: string; request: DigitarRequest } | null = null;
 
   constructor(deps: DigitarToolDeps = {}) {
     this.exec = deps.exec ?? defaultCommandExecutor;
@@ -604,8 +756,20 @@ export class DigitarTool implements IMutatingTool {
     this.getFrontmostAppSync = deps.getFrontmostAppSync ?? defaultGetFrontmostAppSync;
     this.getFrontmostApp =
       deps.getFrontmostApp ?? (async () => this.getFrontmostAppSync());
+    this.activateApp =
+      deps.activateApp ??
+      (async (bundleId: string) => {
+        await this.exec('/usr/bin/osascript', [
+          '-e',
+          'on run argv\n  set bId to item 1 of argv\n  tell application id bId to activate\nend run',
+          '--',
+          bundleId
+        ]);
+      });
+    this.accessibility = deps.accessibility ?? new DefaultMacAccessibilityAdapter(this.exec);
     this.clipboard = deps.clipboard ?? new DefaultMacClipboardAdapter(this.exec);
     this.pasteRestoreDelayMs = deps.pasteRestoreDelayMs ?? 500;
+    this.transformText = deps.transformText;
   }
 
   isAvailable(): boolean {
@@ -617,7 +781,7 @@ export class DigitarTool implements IMutatingTool {
   }
 
   preview(kind: IntentName, content: string | null): string {
-    if (kind !== 'DIGITAR_TEXTO') {
+    if (!isDigitarIntentKind(kind)) {
       throw new Error(`Preview não suportado para ${kind}`);
     }
     const raw = (content ?? '').trim();
@@ -639,23 +803,16 @@ export class DigitarTool implements IMutatingTool {
       );
     }
 
-    if (raw.toLowerCase().startsWith('atalho:')) {
-      const shortcut = raw.slice('atalho:'.length).trim().toLowerCase();
-      this.armedTarget = { bundleId: front.bundleId, appName: front.name, rawContent: `atalho:${shortcut}` };
-      return `Vou acionar o atalho ${shortcut} do Ditado Local em ${front.name}. Pode confirmar?`;
-    }
-
-    const clean = sanitizeTypingText(raw.replace(/^texto\s*:/i, ''));
-    if (!clean) {
+    const request = parseDigitarRequest(kind, raw);
+    if (request.type === 'text' && !request.text) {
       throw new ToolPreviewRefusedError('O texto para digitar ficou vazio após remover caracteres de controle.');
     }
-
-    this.armedTarget = { bundleId: front.bundleId, appName: front.name, rawContent: clean };
-    return `Vou digitar em ${front.name}: ${clean}. Pode confirmar?`;
+    this.armedTarget = { bundleId: front.bundleId, appName: front.name, request };
+    return buildDigitarPreview(front.name, request);
   }
 
   async execute(kind: IntentName, content: string | null): Promise<string> {
-    if (kind !== 'DIGITAR_TEXTO') {
+    if (!isDigitarIntentKind(kind)) {
       throw new Error(`Ação inválida para DigitarTool: ${kind}`);
     }
     if (!this.isAvailable()) {
@@ -675,13 +832,28 @@ export class DigitarTool implements IMutatingTool {
     if (DENIED_TYPING_BUNDLE_IDS.includes(currentFront.bundleId)) {
       return `Cancelado por segurança: o aplicativo atual (${currentFront.name}) não permite digitação automática.`;
     }
-    if (!armed || currentFront.bundleId !== armed.bundleId) {
+    if (!armed) {
+      return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
+    }
+    if (currentFront.bundleId !== armed.bundleId) {
+      try {
+        await this.activateApp(armed.bundleId);
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        currentFront = await this.getFrontmostApp();
+      } catch {
+        // Se não conseguir reativar, cai no cancelamento seguro logo abaixo.
+      }
+    }
+    if (DENIED_TYPING_BUNDLE_IDS.includes(currentFront.bundleId)) {
+      return `Cancelado por segurança: o aplicativo atual (${currentFront.name}) não permite digitação automática.`;
+    }
+    if (currentFront.bundleId !== armed.bundleId) {
       return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
     }
 
-    const raw = (content ?? armed.rawContent).trim();
-    if (raw.toLowerCase().startsWith('atalho:')) {
-      const shortcut = raw.slice('atalho:'.length).trim().toLowerCase();
+    const request = armed.request;
+    if (request.type === 'shortcut') {
+      const shortcut = request.shortcut;
       const keyChar =
         shortcut === 'ditar'
           ? 'f'
@@ -708,32 +880,111 @@ export class DigitarTool implements IMutatingTool {
       }
     }
 
-    const clean = sanitizeTypingText(raw.replace(/^texto\s*:/i, ''));
-    if (!clean) {
+    const resolvedText = await this.resolveTextRequest(request);
+    if (resolvedText.error) {
+      return resolvedText.error;
+    }
+    if (!resolvedText.text) {
       return 'Não havia texto válido para digitar.';
     }
 
+    let focusedTarget: FocusedTargetSnapshot;
     try {
-      // Mecanismo fiel ao ClipboardPaster.swift do DitadoLocal:
-      // 1. Snapshot do clipboard atual
-      const previous = await this.clipboard.getSnapshot();
-      // 2. Grava o texto e registra ourChangeCount
-      const { changeCount: ourChangeCount } = await this.clipboard.setText(clean);
-      // 3. Dispara Cmd+V sintético com modificador explícito command down
-      await this.exec('/usr/bin/osascript', [
-        '-e',
-        'tell application id "com.apple.systemevents" to keystroke "v" using {command down}'
-      ]);
-      // 4. Aguarda 500ms e só restaura se changeCount == ourChangeCount
-      await new Promise<void>((resolve) => setTimeout(resolve, this.pasteRestoreDelayMs));
-      const latestCount = await this.clipboard.getChangeCount();
-      if (latestCount === ourChangeCount) {
-        await this.clipboard.setText(previous.text);
+      focusedTarget = await this.accessibility.inspectFocusedTarget();
+    } catch (err) {
+      return formatAccessibilityFailure(err, currentFront.name);
+    }
+
+    if (focusedTarget.app.bundleId !== armed.bundleId) {
+      return 'Cancelado por segurança: o aplicativo em primeiro plano mudou desde o pedido de confirmação.';
+    }
+    if (!focusedTarget.enabled) {
+      return `Cancelado por segurança: o campo atual em ${currentFront.name} está desativado.`;
+    }
+    if (!focusedTarget.editable) {
+      return `Cancelado por segurança: ${currentFront.name} está em foco, mas o elemento atual não é um campo editável.`;
+    }
+    if (
+      request.mode === 'replaceSelection' &&
+      !(focusedTarget.selectedText && focusedTarget.selectedText.length > 0) &&
+      !(focusedTarget.selectedRange && focusedTarget.selectedRange.length > 0)
+    ) {
+      return 'Cancelado por segurança: não encontrei texto selecionado para substituir.';
+    }
+
+    const preferredAxMode =
+      request.mode === 'append'
+        ? focusedTarget.appendSupported
+        : focusedTarget.directInsertSupported;
+    if (preferredAxMode) {
+      try {
+        await this.accessibility.insertText(resolvedText.text, request.mode);
+        return buildDigitarSuccess(currentFront.name, request, 'ax');
+      } catch (err) {
+        if (request.mode === 'append') {
+          return formatAccessibilityFailure(err, currentFront.name);
+        }
+        const formatted = formatAccessibilityFailure(err, currentFront.name);
+        if (
+          /não consegui inserir direto|não consegui ler o conteúdo/i.test(formatted) ||
+          /não consegui executar a ação/i.test(formatted)
+        ) {
+          // Cai para o fallback via paste logo abaixo.
+        } else {
+          return formatted;
+        }
       }
-      return `Pronto, digitei o texto em ${currentFront.name}.`;
+    }
+
+    if (request.mode === 'append') {
+      return `Não consegui anexar o texto diretamente em ${currentFront.name}.`;
+    }
+
+    try {
+      const strategy = await this.pasteText(resolvedText.text);
+      if (strategy !== 'paste') {
+        return `Não consegui digitar o texto em ${currentFront.name} agora.`;
+      }
+      return buildDigitarSuccess(currentFront.name, request, 'paste');
     } catch (err) {
       return formatTccError(err, currentFront.name);
     }
+  }
+
+  private async resolveTextRequest(request: TextRequest): Promise<{ text: string | null; error?: string }> {
+    if (request.transform === 'clean') {
+      const cleaned = cleanDictatedTextLocally(request.text);
+      return { text: cleaned || null };
+    }
+    if (request.transform === 'translate') {
+      if (!this.transformText) {
+        return { text: null, error: 'A tradução local para inserir não está disponível agora.' };
+      }
+      const mode = request.targetLang?.trim().toLowerCase() === 'português' ? 'traduzir_pt' : 'traduzir';
+      const translated = await this.transformText(mode, request.text, request.targetLang);
+      return { text: sanitizeTypingText(translated) || null };
+    }
+    return { text: request.text };
+  }
+
+  private async pasteText(text: string): Promise<'paste'> {
+    // Mecanismo fiel ao ClipboardPaster.swift do DitadoLocal:
+    // 1. Snapshot do clipboard atual
+    const previous = await this.clipboard.getSnapshot();
+    // 2. Grava o texto e registra ourChangeCount
+    const { changeCount: ourChangeCount } = await this.clipboard.setText(text);
+    // 3. Dispara Cmd+V sintético com modificador explícito command down
+    await this.exec('/usr/bin/osascript', [
+      '-e',
+      'tell application id "com.apple.systemevents" to keystroke "v" using {command down}'
+    ]);
+    // 4. Aguarda 500ms e só restaura se changeCount == ourChangeCount
+    await new Promise<void>((resolve) => setTimeout(resolve, this.pasteRestoreDelayMs));
+    const latestCount = await this.clipboard.getChangeCount();
+    if (latestCount === ourChangeCount) {
+      await this.clipboard.setText(previous.text);
+    }
+    return 'paste';
   }
 }
 

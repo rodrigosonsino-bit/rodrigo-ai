@@ -308,6 +308,31 @@ def main() -> None:
         ("DIGITAR_TEXTO", "texto:Olá mundo"),
     )
     check(
+        "DIGITAR_INSERIR canônico",
+        parse_mutation_output("DIGITAR_INSERIR|Olá mundo", truncated=False),
+        ("DIGITAR_INSERIR", "Olá mundo"),
+    )
+    check(
+        "DIGITAR_SUBSTITUIR_SELECAO canônico",
+        parse_mutation_output("DIGITAR_SUBSTITUIR_SELECAO|Rodrigo Sonsino", truncated=False),
+        ("DIGITAR_SUBSTITUIR_SELECAO", "Rodrigo Sonsino"),
+    )
+    check(
+        "DIGITAR_ANEXAR canônico",
+        parse_mutation_output("DIGITAR_ANEXAR|obrigado", truncated=False),
+        ("DIGITAR_ANEXAR", "obrigado"),
+    )
+    check(
+        "DIGITAR_LIMPAR_INSERIR canônico",
+        parse_mutation_output("DIGITAR_LIMPAR_INSERIR|hã tipo assim vamos fechar", truncated=False),
+        ("DIGITAR_LIMPAR_INSERIR", "hã tipo assim vamos fechar"),
+    )
+    check(
+        "DIGITAR_TRADUZIR_INSERIR canônico",
+        parse_mutation_output("DIGITAR_TRADUZIR_INSERIR|inglês:bom dia", truncated=False),
+        ("DIGITAR_TRADUZIR_INSERIR", "inglês:bom dia"),
+    )
+    check(
         "DITADO_LOCAL canônico",
         parse_mutation_output("DITADO_LOCAL|limpar:hã vamos fechar", truncated=False),
         ("DITADO_LOCAL", "limpar:hã vamos fechar"),
