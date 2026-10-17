@@ -29,6 +29,7 @@ export const FILE_ACCESS_REGISTRY: readonly FileAccessEntry[] = [
   { file: 'src/backend/voice/audioStore.ts', cls: 'exception', reason: 'cria diretórios por sessão; todo nome de arquivo é gerado com crypto.randomUUID(), nunca derivado de entrada' },
   { file: 'src/backend/voice/fakeEngine.ts', cls: 'non-production', reason: 'motor de voz FALSO usado só nos testes; não é carregado em produção (voiceRuntime só constrói o MlxWorkerEngine real)' },
   { file: 'src/backend/voice/mlxWorkerEngine.ts', cls: 'exception', reason: 'cria o diretório do cache do Hugging Face (hfCacheDir fixo); leituras/gravações de conteúdo passam por fileRead/fileWrite' },
+  { file: 'src/backend/voice/ograCue.ts', cls: 'exception', reason: 'lê só o arquivo de som do sinal da Ogra (RODRIGO_OGRA_CUE_SOUND ou /System/Library/Sounds/Tink.aiff), com teto de tamanho; o WAV vai ao AudioStore da sessão e sai pelo mesmo SSE do TTS. Não lê notas, memórias nem docs/research' },
   { file: 'src/backend/voice/routes.ts', cls: 'exception', reason: 'grava o corpo (áudio, captura de tela) em caminhos gerados pelo AudioStore e serve áudio pelo id registrado; o teste confere que nenhum caminho vem da requisição' },
   { file: 'src/backend/voice/sessionManager.ts', cls: 'exception', reason: 'apaga (rm) arquivos de áudio temporários cujos caminhos vieram do AudioStore' },
   { file: 'src/backend/voice/tmpSweeper.ts', cls: 'exception', reason: 'varre e apaga SOMENTE dentro de .runtime/tmp (lstat; nunca segue symlink para fora)' },

@@ -638,7 +638,12 @@ export class VoiceController {
     // playbackGeneration acima) — as duas checagens são necessárias, nenhuma sozinha basta.
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // cancelado enquanto decodificava
 
-    console.log(`[playback:start] reproduzindo turnId=${chunk.turnId} frase=${chunk.sentenceIndex}: "${chunk.text}"`);
+    const wordless = chunk.text.trim() === '';
+    if (wordless) {
+      console.log(`[playback:start] sinal sem fala turnId=${chunk.turnId}`);
+    } else {
+      console.log(`[playback:start] reproduzindo turnId=${chunk.turnId} frase=${chunk.sentenceIndex}: "${chunk.text}"`);
+    }
 
     await new Promise<void>((resolve) => {
       const source = this.audioContext!.createBufferSource();
@@ -659,6 +664,10 @@ export class VoiceController {
     });
 
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // barge-in ocorreu durante a reprodução
+
+    // Toque da Ogra: texto vazio. Toca e não vira linha de conversa nem /played
+    // (não há frase para o histórico confirmar).
+    if (wordless) return;
 
     console.log(`[playback:done] turnId=${chunk.turnId} frase=${chunk.sentenceIndex}`);
     this.onAssistantText(chunk.text);

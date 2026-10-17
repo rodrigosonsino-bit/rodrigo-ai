@@ -12,7 +12,6 @@ import { guardMessages, guardText, OutboundBlockedError } from '../privacy/outbo
 import { neutralizeUntrusted } from '../memory/untrustedData.js';
 import { classifyOgraTool, OGRA_PHASE1_REFUSAL } from '../agents/ograPolicy.js';
 import {
-  OGRA_ACK_TEXT,
   OGRA_AGENT_ID,
   OGRA_FALLBACK_NOTICE,
   OGRA_REPLY_BLOCKED_TEXT,
@@ -21,6 +20,13 @@ import {
   OGRA_WEBHOOK_FAILED_TEXT,
   ograFailureFallsBack
 } from '../agents/ograSubAgent.js';
+import {
+  OGRA_CUE_MAX_BYTES,
+  OGRA_CUE_SENTENCE_INDEX,
+  createDefaultPlayOgraCue,
+  isCueWav,
+  type PlayOgraCue
+} from './ograCue.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
@@ -279,6 +285,11 @@ export interface SessionTuning {
    * (RODRIGO_OGRA_REPLY_TIMEOUT_MS, 120000). Os testes encurtam.
    */
   ograReplyTimeoutMs?: number;
+  /**
+   * Sinal sem palavras quando o turno vai à Ogra, antes do POST do webhook.
+   * Os testes injetam um falso. Em produção, o WAV segue o mesmo SSE do TTS.
+   */
+  playOgraCue?: PlayOgraCue;
 }
 
 /** RODRIGO_AUTO_CONFIRM: ''/ausente/0 = confirmação em duas fases (padrão); 1 = execução direta. Outro valor aborta. */
@@ -382,7 +393,7 @@ interface Session {
   outOfTurnQueue: Array<{ text: string; afterSpoken?: (turnId: string, spoken: string) => void }>;
   drainingOutOfTurn: boolean;
   /**
-   * 2xx já falado e o turno ainda aberto à espera de POST /api/ogra/reply.
+   * 2xx já recebido e o turno ainda aberto à espera de POST /api/ogra/reply.
    * Nesse intervalo a fala de ferramenta sai na hora; antes disso (webhook em curso)
    * continua entrando na fila.
    */
@@ -456,6 +467,7 @@ export class SessionManager {
    */
   private readonly ograClosed = new Map<string, OgraClosedTask>();
   private readonly ograReplyTimeoutMs: number;
+  private readonly playOgraCue: PlayOgraCue;
   /**
    * Fase 15 §2.1: tokens de mutação minerados só após SIM por voz, indexados por turnId.
    * `runSubAgentDelegation` só anexa o token se ele existir para o turnId da delegação.
@@ -512,6 +524,7 @@ export class SessionManager {
     this.idleTimeoutMs = tuning.idleTimeoutMs ?? (privacy.idleTimeoutMinutes ? privacy.idleTimeoutMinutes * 60_000 : VOICE_LIMITS.IDLE_TIMEOUT_MS);
     this.autoConfirm = tuning.autoConfirm ?? false;
     this.ograReplyTimeoutMs = tuning.ograReplyTimeoutMs ?? privacy.ograReplyTimeoutMs;
+    this.playOgraCue = tuning.playOgraCue ?? createDefaultPlayOgraCue();
     // Fatia 4 (§2.2): ferramentas locais como subagentes, todas atrás do gatekeeper de token.
     for (const t of [...this.tools, ...this.mutatingTools]) {
       this.coordinator.register(new ToolSubAgent(t, (turnId, token) => this.consumeMutationToken(turnId, token)));
@@ -2077,8 +2090,9 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
   }
 
   /**
-   * RODRIGO_OGRA=1: uma ida à Ogra. O 2xx só acusa o recebimento: o Ork fala a espera
-   * (OGRA_ACK_TEXT) e segura o turno até POST /api/ogra/reply ou o prazo
+   * RODRIGO_OGRA=1: uma ida à Ogra. Assim que o turno é encaminhado, e antes do POST,
+   * toca um sinal sem palavras (playOgraCue). O 2xx só acusa o recebimento: não há
+   * frase de espera. O turno fica aberto até POST /api/ogra/reply ou o prazo
    * RODRIGO_OGRA_REPLY_TIMEOUT_MS. A resposta entra pelo TTS do turno. No prazo, com
    * RODRIGO_OGRA_FALLBACK=1, devolve false para o mesmo turno seguir o caminho normal.
    * Falha de transporte do webhook faz o mesmo, sem segunda tentativa. A Ogra não entra
@@ -2087,6 +2101,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
    */
   private async delegateTranscriptToOgra(session: Session, turn: ActiveTurn, transcript: string): Promise<boolean> {
     this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+    await this.signalOgraCue(session, turn);
     const taskId = crypto.randomUUID();
     this.ograTasks.set(taskId, {
       sessionId: session.id,
@@ -2138,15 +2153,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       this.settleOgraTask(taskId, 'cancelled')?.('cancelled');
       return true;
     }
-    // Antes da frase de espera: um POST de ferramenta que chegue junto com o ack
-    // fala na hora, em vez de ficar na fila até o prazo.
+    // Webhook aceito. Ferramenta que chegou durante o POST fala agora, em vez de
+    // ficar na fila até o prazo. Não há frase de TTS antes da resposta da Ogra.
     session.ograAwaitingReply = true;
     try {
-      const stayed = await this.speakOgraLine(session, turn, OGRA_ACK_TEXT, 0);
-      if (!stayed) {
-        this.settleOgraTask(taskId, 'cancelled')?.('cancelled');
-        return true;
-      }
       if (!this.ograTasks.has(taskId)) {
         if (session.activeTurn === turn) this.finishTurn(session, turn);
         return true;
@@ -2183,6 +2193,46 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     } finally {
       session.ograAwaitingReply = false;
     }
+  }
+
+  /**
+   * Toque de encaminhamento. Erro aqui não segura o turno nem impede o webhook.
+   * Não espera o cliente terminar de tocar.
+   */
+  private async signalOgraCue(session: Session, turn: ActiveTurn): Promise<void> {
+    try {
+      await this.playOgraCue({
+        deliverWav: (wav) => this.publishOgraCueWav(session, turn, wav)
+      });
+    } catch (err) {
+      console.warn(`[ogra] sinal sonoro falhou: ${err instanceof Error ? err.message : 'erro'}`);
+    }
+  }
+
+  /**
+   * Entrega o toque pelo mesmo evento do TTS (`sentence_audio_ready`), com texto vazio.
+   * Não entra em emittedSentences: /played não grava isso no histórico nem arma mutação.
+   */
+  private publishOgraCueWav(session: Session, turn: ActiveTurn, wav: Buffer): void {
+    if (this.current !== session || session.activeTurn !== turn) return;
+    if (!isCueWav(wav) || wav.length > OGRA_CUE_MAX_BYTES) {
+      console.warn('[ogra] sinal sonoro ignorado: WAV inválido ou grande demais.');
+      return;
+    }
+    const { audioId, filePath } = this.audioStore.newOutputPath(session.id);
+    try {
+      fs.writeFileSync(filePath, wav);
+    } catch (err) {
+      console.warn(`[ogra] sinal sonoro não gravou: ${err instanceof Error ? err.message : 'erro'}`);
+      return;
+    }
+    this.emit(session, {
+      type: 'sentence_audio_ready',
+      turnId: turn.turnId,
+      sentenceIndex: OGRA_CUE_SENTENCE_INDEX,
+      audioId,
+      text: ''
+    });
   }
 
   /** Frase do turno da Ogra. Devolve false se o turno já não é o ativo. */
