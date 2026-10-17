@@ -10,7 +10,7 @@ export const OGRA_AGENT_ID = 'ogra';
  * Fala curta do Ork depois do 2xx do webhook, enquanto POST /api/ogra/reply não chega.
  * O webhook só acusa o recebimento; a resposta é o callback.
  */
-export const OGRA_HOLDING_TEXT = 'Um momento, a Ogra está pensando.';
+export const OGRA_HOLDING_TEXT = 'Pensando...';
 /** Mesma frase de OGRA_HOLDING_TEXT: o 2xx não é a resposta, é a espera. */
 export const OGRA_ACK_TEXT = OGRA_HOLDING_TEXT;
 

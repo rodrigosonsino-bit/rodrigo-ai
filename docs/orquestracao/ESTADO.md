@@ -58,7 +58,7 @@ Na `main`. `parseFlag(env, 'RODRIGO_OGRA', false)` em `src/backend/privacy.ts` e
 
 Com `0`, ausente ou vazio, o turno não entra em `delegateTranscriptToOgra` (`sessionManager.ts`) e `POST /api/ogra/*` responde 404 (`handleOgraRoute` em `src/backend/voice/routes.ts`, o mesmo texto de uma rota que não existe). `registerOgraAgent` devolve null e o subagente não entra no coordenador (`voiceRuntime.ts`).
 
-Com `1`, depois das confirmações pendentes, o texto da fala (nunca o áudio) vai ao webhook. O 2xx só confirma o envio: o Ork fala "Um momento, a Ogra está pensando." e espera `POST /api/ogra/reply` com o mesmo `taskId` e `sessionId` até `RODRIGO_OGRA_REPLY_TIMEOUT_MS` (padrão 120000). A resposta é falada no TTS do turno. Sem resposta no prazo, `RODRIGO_OGRA_FALLBACK=1` segue o caminho normal; `0` encerra. A Ogra não entra na reserva do Gemini. Mutação continua exigindo o SIM falado; o corpo `confirmationToken` / `isMutation` / `skip*` é ignorado, e a camada não honra `RODRIGO_AUTO_CONFIRM`. O contrato do callback e o desenho da fase 1 estão em `docs/orquestracao/OGRA.md`.
+Com `1`, depois das confirmações pendentes, o texto da fala (nunca o áudio) vai ao webhook. O 2xx só confirma o envio: o Ork fala "Pensando..." e espera `POST /api/ogra/reply` com o mesmo `taskId` e `sessionId` até `RODRIGO_OGRA_REPLY_TIMEOUT_MS` (padrão 120000). A resposta é falada no TTS do turno. Sem resposta no prazo, `RODRIGO_OGRA_FALLBACK=1` segue o caminho normal; `0` encerra. A Ogra não entra na reserva do Gemini. Mutação continua exigindo o SIM falado; o corpo `confirmationToken` / `isMutation` / `skip*` é ignorado, e a camada não honra `RODRIGO_AUTO_CONFIRM`. O contrato do callback e o desenho da fase 1 estão em `docs/orquestracao/OGRA.md`.
 
 A espera do callback, o prazo e a resposta ignorada (token, taskId desconhecido, duplicata, atraso) estão em `src/backend/__tests__/ograLayer.test.ts`.
 
@@ -88,7 +88,7 @@ Com `RODRIGO_OGRA_FALLBACK=1`, caem no caminho normal:
 - HTTP fora de 2xx, inclusive 429 e 5xx (`OGRA_WEBHOOK_FAILED_TEXT` com o status).
 - Prazo de 20 s do POST ou erro de rede: a mesma frase, sem o código HTTP.
 - Webhook ausente (`OGRA_WEBHOOK_MISSING_TEXT`): URL, chave ou esquema inválido.
-- 2xx sem `POST /api/ogra/reply` dentro de `RODRIGO_OGRA_REPLY_TIMEOUT_MS`. Antes do prazo o Ork já falou "Um momento, a Ogra está pensando."
+- 2xx sem `POST /api/ogra/reply` dentro de `RODRIGO_OGRA_REPLY_TIMEOUT_MS`. Antes do prazo o Ork já falou "Pensando..."
 
 Com `RODRIGO_OGRA_FALLBACK=0`, a falha de transporte fala a frase de falha e encerra o turno, sem classificar e sem gerar. O prazo da resposta, depois da frase de espera, encerra com "A Ogra não respondeu a tempo."
 
