@@ -21,8 +21,12 @@ import { SubAgentCoordinator } from '../agents/subAgent.js';
 import {
   OGRA_ACK_TEXT,
   OGRA_BLOCKED_TEXT,
+  OGRA_FALLBACK_NOTICE,
   OGRA_REPLY_BLOCKED_TEXT,
+  OGRA_WEBHOOK_FAILED_TEXT,
+  OGRA_WEBHOOK_MISSING_TEXT,
   OgraSubAgent,
+  ograFailureFallsBack,
   readOgraWebhookEnv,
   registerOgraAgent,
   type OgraWebhookPayload
@@ -81,9 +85,19 @@ async function waitFor(pred: () => boolean, label: string, timeoutMs = 4000): Pr
 
 async function setup(opts: {
   ogra: boolean;
+  /** undefined = padrão (1). false força o comportamento antigo de encerrar o turno. */
+  ograFallback?: boolean;
+  /** undefined = desligada, como os testes já existentes desta suíte. */
+  cloud?: boolean;
   outboundGuard?: 'off' | 'warn' | 'redact' | 'block';
   autoConfirm?: boolean;
   hangFetch?: boolean;
+  /** O fetch só rejeita quando o sinal (prazo da Ogra ou cancelamento) aborta. */
+  hangUntilAbort?: boolean;
+  httpStatus?: number;
+  timeoutMs?: number;
+  /** webhook null: runTask devolve a frase de webhook ausente, sem POST. */
+  missingWebhook?: boolean;
   registerEvenIfOff?: boolean;
 }): Promise<Harness> {
   const port = nextPort();
@@ -92,22 +106,38 @@ async function setup(opts: {
   const engine = new FakeVoiceEngine();
   const tts = new FakeVoiceProvider();
   const audioStore = new AudioStore(dir);
-  const privacy: PrivacyConfig = parsePrivacyConfig({
+  const privacyEnv: Record<string, string> = {
     RODRIGO_OGRA: opts.ogra ? '1' : '0',
-    RODRIGO_CLOUD: '0',
+    RODRIGO_CLOUD: opts.cloud ? '1' : '0',
     RODRIGO_OUTBOUND_GUARD: opts.outboundGuard ?? 'redact'
-  });
+  };
+  if (opts.ograFallback === false) privacyEnv.RODRIGO_OGRA_FALLBACK = '0';
+  if (opts.ograFallback === true) privacyEnv.RODRIGO_OGRA_FALLBACK = '1';
+  const privacy: PrivacyConfig = parsePrivacyConfig(privacyEnv);
   const mutating = createMutatingTools(dir);
   const fetches: FetchCall[] = [];
   const pending: { releaseFetch: ((response: Response) => void) | null } = { releaseFetch: null };
   const fetchImpl: typeof fetch = async (url, init) => {
     fetches.push({ url: String(url), init: init ?? {} });
+    if (opts.hangUntilAbort) {
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        const fail = (): void => {
+          reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+        };
+        if (signal?.aborted) {
+          fail();
+          return;
+        }
+        signal?.addEventListener('abort', fail, { once: true });
+      });
+    }
     if (opts.hangFetch) {
       return new Promise<Response>((resolve) => {
         pending.releaseFetch = resolve;
       });
     }
-    return new Response('', { status: 200 });
+    return new Response('', { status: opts.httpStatus ?? 200 });
   };
   const sm = new SessionManager(
     engine,
@@ -124,8 +154,9 @@ async function setup(opts: {
   );
   const agentOpts = {
     privacy,
-    webhook: { url: 'https://ogra.example/hook', key: 'webhook-key-nao-logar' },
+    webhook: opts.missingWebhook ? null : { url: 'https://ogra.example/hook', key: 'webhook-key-nao-logar' },
     fetchImpl,
+    timeoutMs: opts.timeoutMs,
     catalog: () => [{ id: 'hora', name: 'HORA', kind: 'tool' as const }]
   };
   if (opts.ogra) {
@@ -243,6 +274,41 @@ describe('camada Ogra — flag, subagente e política', () => {
     assert.equal(parsePrivacyConfig({ RODRIGO_OGRA: '0' }).ogra, false);
     assert.equal(ograEffective(parsePrivacyConfig({ RODRIGO_OGRA: '1' })), true);
     assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA: 'sim' }), /RODRIGO_OGRA/);
+  });
+
+  it('RODRIGO_OGRA_FALLBACK: padrão 1, 0 desliga, vazio continua 1, valor inválido aborta o parse de startup', () => {
+    assert.equal(parsePrivacyConfig({}).ograFallback, true);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: '' }).ograFallback, true);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: '1' }).ograFallback, true);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: '0' }).ograFallback, false);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: 'sim' }), /RODRIGO_OGRA_FALLBACK/);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: '2' }), /RODRIGO_OGRA_FALLBACK/);
+  });
+
+  it('doctor: RODRIGO_OGRA_FALLBACK inválido cita só o nome da variável', () => {
+    const bad = runDoctor({
+      env: { RODRIGO_OGRA_FALLBACK: 'sim-nao-pode-vazar' },
+      rootDir: '/tmp/ogra-doctor',
+      exists: () => true,
+      now: () => new Date('2026-10-17T00:00:00.000Z')
+    });
+    const privacy = bad.checks.find((c) => c.id === 'privacy-config');
+    assert.equal(privacy?.severity, 'error');
+    assert.match(privacy!.detail, /RODRIGO_OGRA_FALLBACK/);
+    assert.doesNotMatch(privacy!.detail, /sim-nao-pode-vazar/);
+  });
+
+  it('ograFailureFallsBack: 429, 5xx, prazo/rede e webhook ausente; cancelamento e bloqueio não', () => {
+    assert.equal(ograFailureFallsBack(`${OGRA_WEBHOOK_FAILED_TEXT} (HTTP 429).`), true);
+    assert.equal(ograFailureFallsBack(`${OGRA_WEBHOOK_FAILED_TEXT} (HTTP 503).`), true);
+    assert.equal(ograFailureFallsBack(`${OGRA_WEBHOOK_FAILED_TEXT} (HTTP 500).`), true);
+    assert.equal(ograFailureFallsBack(`${OGRA_WEBHOOK_FAILED_TEXT} (HTTP 404).`), true);
+    assert.equal(ograFailureFallsBack(OGRA_WEBHOOK_FAILED_TEXT), true);
+    assert.equal(ograFailureFallsBack(OGRA_WEBHOOK_MISSING_TEXT), true);
+    assert.equal(ograFailureFallsBack('Tarefa cancelada pelo usuário.'), false);
+    assert.equal(ograFailureFallsBack(OGRA_BLOCKED_TEXT), false);
+    assert.equal(ograFailureFallsBack(undefined), false);
+    assert.equal(ograFailureFallsBack(`${OGRA_WEBHOOK_FAILED_TEXT} (HTTP 200).`), false);
   });
 
   it('doctor: valor inválido cita só o nome; risk-ogra só com a flag; canal entra na lista com a nuvem ligada', () => {
@@ -719,5 +785,138 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(stored.items[0].text, 'comprar pao');
     assert.equal(h.fetches.length, 1, 'o sim local não vai à Ogra');
     assert.equal(h.sm.peekMutationConfirmationToken(turnId), undefined);
+  });
+
+  it('429: uma ida à Ogra e o mesmo turno segue o caminho normal, com o aviso', async () => {
+    h = await setup({ ogra: true, cloud: true, httpStatus: 429 });
+    h.engine.sentencesToEmit = ['Segui pelo caminho normal.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.engine.generateCalls.length === 1, 'geração');
+    assert.equal(h.fetches.length, 1, 'não tenta a Ogra de novo');
+    assert.equal(payloadOf(h.fetches[0]).message, 'olá');
+    assert.equal(h.engine.classifyCalls.length, 1);
+    assert.equal(h.engine.classifyCalls[0].text, 'olá');
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
+    assert.ok(h.tts.synthesizeCalls.includes('Segui pelo caminho normal.'));
+    const noticeAt = h.tts.synthesizeCalls.indexOf(OGRA_FALLBACK_NOTICE);
+    const answerAt = h.tts.synthesizeCalls.indexOf('Segui pelo caminho normal.');
+    assert.ok(noticeAt >= 0 && answerAt > noticeAt);
+    assert.equal(h.engine.generateCalls.length, 1);
+  });
+
+  it('prazo esgotado: cai no caminho normal e não chama o webhook uma segunda vez', async () => {
+    h = await setup({ ogra: true, cloud: true, hangUntilAbort: true, timeoutMs: 40 });
+    h.engine.sentencesToEmit = ['Resposta depois do prazo.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.engine.generateCalls.length === 1, 'geração após prazo', 4000);
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.classifyCalls.length, 1);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s.startsWith(OGRA_WEBHOOK_FAILED_TEXT)).length, 0);
+    assert.ok(h.tts.synthesizeCalls.includes('Resposta depois do prazo.'));
+  });
+
+  it('RODRIGO_OGRA_FALLBACK=0: 429 fala a falha e não classifica nem gera', async () => {
+    h = await setup({ ogra: true, cloud: true, ograFallback: false, httpStatus: 429 });
+    h.engine.sentencesToEmit = ['Não devia chegar aqui.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(
+      () => live(h!.sm)?.activeTurn === null && h!.tts.synthesizeCalls.some((s) => s.includes('HTTP 429')),
+      'fala de falha e turno encerrado'
+    );
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
+    assert.equal(h.tts.synthesizeCalls.includes('Não devia chegar aqui.'), false);
+    assert.equal(live(h.sm)?.activeTurn, null);
+  });
+
+  it('sucesso da Ogra não cai no caminho normal, mesmo com a reserva ligada e a nuvem disponível', async () => {
+    h = await setup({ ogra: true, cloud: true, ograFallback: true, httpStatus: 200 });
+    h.engine.sentencesToEmit = ['Não devia gerar.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'ack');
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
+    assert.equal(h.tts.synthesizeCalls.includes('Não devia gerar.'), false);
+  });
+
+  it('webhook ausente cai no caminho normal; erro de rede também, uma vez só', async () => {
+    h = await setup({ ogra: true, cloud: true, missingWebhook: true });
+    h.engine.sentencesToEmit = ['Sem webhook, sigo aqui.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.tts.synthesizeCalls.includes('Sem webhook, sigo aqui.'), 'geração sem webhook');
+    assert.equal(h.fetches.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 1);
+    assert.equal(h.engine.generateCalls.length, 1);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_WEBHOOK_MISSING_TEXT), false);
+
+    await teardown(h);
+    let networkErrors = 0;
+    h = await setup({ ogra: true, cloud: true, httpStatus: 200 });
+    const sm = h.sm;
+    const agent = sm.coordinator.get('ogra');
+    assert.ok(agent);
+    const original = agent.runTask.bind(agent);
+    agent.runTask = async (req, signal) => {
+      networkErrors += 1;
+      if (networkErrors === 1) {
+        return { success: false, output: '', error: OGRA_WEBHOOK_FAILED_TEXT, kind: 'final' as const };
+      }
+      return original(req, signal);
+    };
+    h.engine.sentencesToEmit = ['Depois do erro de rede.'];
+    const session2 = await openSession(h);
+    await say(h, session2, 'olá de novo');
+    await waitFor(() => h!.tts.synthesizeCalls.includes('Depois do erro de rede.'), 'geração após rede');
+    assert.equal(networkErrors, 1, 'a reserva não chama a Ogra outra vez');
+    assert.equal(h.engine.generateCalls.length, 1);
+  });
+
+  it('429 com AUTO_CONFIRM não grava lembrete sem o SIM falado', async () => {
+    h = await setup({ ogra: true, autoConfirm: true, httpStatus: 429 });
+    h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar pao'];
+    const session = await openSession(h);
+    const turnId = await say(h, session, 'me lembra de comprar pao');
+    const question = 'Posso criar o lembrete: comprar pao?';
+    await waitFor(() => live(h!.sm)?.armedMutation?.question === question, 'pergunta de confirmação');
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.sm.peekMutationConfirmationToken(turnId), undefined);
+    const storePath = path.join(h.dir, 'lembretes.json');
+    if (fs.existsSync(storePath)) {
+      const early = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { items: unknown[] };
+      assert.equal(early.items.length, 0);
+    }
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
+
+    const played = await fetch(`${h.baseUrl}/api/voice/session/played`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rodrigo-Session': session.sessionId,
+        'X-Rodrigo-Token': session.token
+      },
+      body: JSON.stringify({ turnId, text: question })
+    });
+    assert.equal(played.status, 200);
+    assert.equal(live(h.sm)?.pendingMutation?.kind, 'LEMBRETE_CRIAR');
+
+    await say(h, session, 'sim');
+    await waitFor(() => h!.tts.synthesizeCalls.includes('Lembrete criado.'), 'criado só depois do sim');
+    const stored = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { items: Array<{ text: string }> };
+    assert.equal(stored.items.length, 1);
+    assert.equal(stored.items[0].text, 'comprar pao');
+    assert.equal(h.fetches.length, 1, 'o sim não vai à Ogra');
   });
 });

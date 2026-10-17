@@ -9,6 +9,7 @@ A resposta da Ogra leva 10–60 s e chega inteira, não em stream. Por isso a in
 | Variável | Papel | Padrão |
 |---|---|---|
 | `RODRIGO_OGRA` | Liga a camada. Exatamente `0` ou `1`. Outro valor impede a inicialização. | `0` |
+| `RODRIGO_OGRA_FALLBACK` | Com `1`, falha de transporte do webhook (HTTP fora de 2xx, prazo, rede, webhook ausente) segue o mesmo turno pelo caminho de `RODRIGO_OGRA=0`. Uma tentativa. Com `0`, a falha encerra o turno. A Ogra não entra na reserva do Gemini. Exatamente `0` ou `1`. | `1` |
 | `GROK_WEBHOOK_URL` | URL do webhook de saída. Só é usada com a flag em `1`. | vazia |
 | `GROK_WEBHOOK_KEY` | Bearer desse webhook. Não é impressa nem vai no corpo. | vazia |
 | `RODRIGO_OGRA_CALLBACK_TOKEN` | Token local de `POST /api/ogra/reply` e `POST /api/ogra/tool` (`Authorization: Bearer`, comparação em tempo constante). Sem ele os dois recusam. | vazio |
@@ -20,7 +21,7 @@ Com a flag em `0` o caminho de voz permanece o de hoje. A flag não depende de `
 - `src/backend/agents/ograSubAgent.ts` — `ISubAgent`. Passa o texto por `guardText`, posta o payload (mesmo formato de `scripts/avisar-grok.sh`: `source`, `project`, `message`, `session`; mais `taskId`, `sessionId` e o catálogo do `ExtensionRegistry`) e devolve `kind: 'async_deferred'`. Não segue redirecionamento. Mutação neste agente exige `confirmationToken` do mesmo jeito que o OpenClaw (presente, prefixo do turno, emitido pelo gatekeeper).
 - `voiceRuntime.ts` registra o subagente só com `RODRIGO_OGRA=1`.
 - `DELEGAR_OGRA` em `src/shared/voiceProtocol.ts`. O worker de intenção não emite esse nome: o roteamento é do app.
-- `sessionManager.processTranscript` — depois de tratar confirmação pendente (mutação ou delegação), a fala vai à Ogra e o Ork diz um aceite curto. O turno não espera a resposta.
+- `sessionManager.processTranscript` — depois de tratar confirmação pendente (mutação ou delegação), a fala vai à Ogra e o Ork diz um aceite curto. O turno não espera a resposta. Se o POST falha e `RODRIGO_OGRA_FALLBACK=1`, o mesmo turno segue o caminho normal (classificação, ferramentas, geração) sem segunda ida à Ogra. Mutação nesse caminho pede SIM falado, mesmo com `RODRIGO_AUTO_CONFIRM=1`.
 - `POST /api/ogra/reply` `{ taskId, text, final }` — Host do `hostValidator` mais o token. O texto é dado não confiável (`memory/untrustedData.ts`: `neutralizeUntrusted`, depois o guarda de saída). `consumeOgraReply` espelha a entrega fora de turno do OpenClaw.
 - `POST /api/ogra/tool` `{ taskId, tool, args }` — passa por `runSubAgentDelegation` nas leituras (política de capacidade, orçamento, auditoria do caminho que já existe). Mutação não executa neste POST.
 

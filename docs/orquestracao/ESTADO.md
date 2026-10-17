@@ -58,7 +58,7 @@ Na `main`. `parseFlag(env, 'RODRIGO_OGRA', false)` em `src/backend/privacy.ts` e
 
 Com `0`, ausente ou vazio, o turno não entra em `delegateTranscriptToOgra` (`sessionManager.ts`) e `POST /api/ogra/*` responde 404 (`handleOgraRoute` em `src/backend/voice/routes.ts`, o mesmo texto de uma rota que não existe). `registerOgraAgent` devolve null e o subagente não entra no coordenador (`voiceRuntime.ts`).
 
-Com `1`, depois das confirmações pendentes, o texto da fala (nunca o áudio) vai ao webhook. O Ork fala "Mandei para a Ogra." e o turno não classifica nem gera. A volta é `POST /api/ogra/reply`. Mutação continua exigindo o SIM falado; o corpo `confirmationToken` / `isMutation` / `skip*` é ignorado, e a camada não honra `RODRIGO_AUTO_CONFIRM`. O desenho da fase 1 está em `docs/orquestracao/OGRA.md`.
+Com `1`, depois das confirmações pendentes, o texto da fala (nunca o áudio) vai ao webhook. Se o POST tem sucesso, o Ork fala "Mandei para a Ogra." e o turno não classifica nem gera. A volta é `POST /api/ogra/reply`. Mutação continua exigindo o SIM falado; o corpo `confirmationToken` / `isMutation` / `skip*` é ignorado, e a camada não honra `RODRIGO_AUTO_CONFIRM`. O desenho da fase 1 está em `docs/orquestracao/OGRA.md`.
 
 A suíte não foi reexecutada nesta atualização de documento. O arquivo `src/backend/__tests__/ograLayer.test.ts` está na `main`.
 
@@ -72,19 +72,32 @@ A flag é lida na subida (`parsePrivacyConfig(process.env)` em `src/backend/inde
 | `GROK_WEBHOOK_URL` | URL `http` ou `https`, não vazia (`readOgraWebhookEnv` em `ograSubAgent.ts`). Sem URL, sem chave, ou outro esquema, o turno fala "A Ogra está ligada, mas o webhook não está configurado." e não envia. |
 | `GROK_WEBHOOK_KEY` | Bearer desse webhook. Não é impressa nem entra no corpo. |
 | `RODRIGO_OGRA_CALLBACK_TOKEN` | Bearer de `POST /api/ogra/reply` e `POST /api/ogra/tool` (`ograCallbackAuth.ts`, comparação em tempo constante). Sem ele os dois respondem 401. A ida ao webhook ainda acontece; a volta é recusada. |
+| `RODRIGO_OGRA_FALLBACK` | Exatamente `0` ou `1`. Padrão `1` (`parseFlag` em `privacy.ts`). Outro valor impede a inicialização, como `RODRIGO_OGRA`. Com `1`, a falha de transporte abaixo não encerra o turno. Com `0`, o comportamento antigo permanece. |
 
 ### Se a Ogra ou o webhook falha, ou devolve limite
 
-Não há fallback para o caminho normal. Com a flag em `1`, `delegateTranscriptToOgra` encerra o turno. Não há classificação, nem geração no Gemini, nem os detectores locais no lugar da Ogra. O teste "flag ligada" em `ograLayer.test.ts` exige `classifyCalls` e `generateCalls` em zero.
+`RODRIGO_OGRA_FALLBACK=1` (padrão) faz o mesmo turno seguir o caminho de `RODRIGO_OGRA=0`: classificação, detectores locais, pergunta falada de mutação e geração no Gemini (ou o aviso de geração desligada, se `RODRIGO_CLOUD=0`). Antes disso o Ork fala "A Ogra não respondeu, vou seguir por aqui." (`OGRA_FALLBACK_NOTICE`). A Ogra é chamada uma vez. Não há segunda tentativa, não há leitura de `Retry-After`, e não há laço de volta para a Ogra. `GENERATION_MODELS` em `scripts/worker/worker.py` continua `gemini-flash-latest` e depois `gemini-3.5-flash-lite`: a Ogra não entra nessa cadeia, e uma falha do Gemini não chama a Ogra.
 
-`OgraSubAgent.runTask` faz um POST, com prazo de 20 s (`WEBHOOK_TIMEOUT_MS`) e `redirect: 'manual'` (não segue redirecionamento). Não há segundo provedor, não há nova tentativa, e não há leitura de `Retry-After`. Um 429 é só mais um HTTP que não é 2xx.
+O teste "flag ligada" em `ograLayer.test.ts` continua exigindo `classifyCalls` e `generateCalls` em zero quando o POST tem sucesso. Os testes de reserva cobrem 429, prazo, flag `0` e sucesso.
 
-- HTTP fora de 2xx, inclusive 429: fala `Não consegui falar com a Ogra agora. (HTTP <status>).` (`OGRA_WEBHOOK_FAILED_TEXT`) e encerra o turno.
-- Prazo de 20 s, erro de rede ou outra exceção: a mesma frase, sem o código HTTP.
+`OgraSubAgent.runTask` faz um POST, com prazo de 20 s (`WEBHOOK_TIMEOUT_MS`) e `redirect: 'manual'` (não segue redirecionamento).
+
+Com `RODRIGO_OGRA_FALLBACK=1`, caem no caminho normal:
+
+- HTTP fora de 2xx, inclusive 429 e 5xx (`OGRA_WEBHOOK_FAILED_TEXT` com o status).
+- Prazo de 20 s ou erro de rede: a mesma frase, sem o código HTTP.
+- Webhook ausente (`OGRA_WEBHOOK_MISSING_TEXT`): URL, chave ou esquema inválido.
+
+Com `RODRIGO_OGRA_FALLBACK=0`, esses mesmos casos falam a frase de falha e encerram o turno, sem classificar e sem gerar.
+
+Não caem no caminho normal, com a flag em qualquer valor:
+
+- Sucesso (2xx): "Mandei para a Ogra." O turno não classifica nem gera.
 - Cancelamento do turno: "Tarefa cancelada pelo usuário."
-- Guarda de saída em `block`, com dado sensível: "Não enviei isso à Ogra: o texto contém um dado sensível e, pela configuração, não sai." O webhook não é chamado.
+- Guarda de saída em `block`, com dado sensível: "Não enviei isso à Ogra: o texto contém um dado sensível e, pela configuração, não sai." O webhook não é chamado, e o texto não segue para o Gemini por esta reserva.
+- Teto local de subagentes (`SUBAGENT_BUDGET` em `src/backend/agents/subAgent.ts`: 6 chamadas por turno, 60 s, 2 tarefas assíncronas ao mesmo tempo). Estourar fala "Não consegui terminar isso dentro do tempo/dos passos previstos..." e não cai na geração.
 
-O teto local de subagentes (`SUBAGENT_BUDGET` em `src/backend/agents/subAgent.ts`: 6 chamadas por turno, 60 s, 2 tarefas assíncronas ao mesmo tempo) é do Ork, não do provedor da Ogra. Estourar fala "Não consegui terminar isso dentro do tempo/dos passos previstos..." e também não cai na geração.
+Mutação na reserva pede o SIM falado, mesmo com `RODRIGO_AUTO_CONFIRM=1` (`turn.fromOgraFallback` desliga a autonomia direta só nesse turno). O caminho com `RODRIGO_OGRA=0` não muda.
 
 A frase curta (o aceite ou a falha) sai pelo TTS já configurado (`synthesizeSentence` com `kind: 'local'`). Se o TTS do Gemini estiver no limite, vale o fallback que já existe nessa voz (a voz do sistema). Isso só troca a voz da frase. Não responde a pergunta no lugar da Ogra.
 
@@ -111,7 +124,7 @@ Também na `main`, para não reler o handoff como se ainda faltasse: #9 visão d
 - Trilha OpenJarvis na `main`: T1 (guarda, padrão `redact`), T2 (política de arquivos; a lista sensível continua rascunho), T3, T4, T5a/T5b, T6 (app nativo, opção D, desvio do plano que previa a opção C), T9a. T7 (PersonaPlex) em espera. T8 tem roteiro e falta a medição.
 - Fase 17, frentes 1 e 2 (`cf16496`): Claude Code como subagente, `RODRIGO_CLAUDE_CODE=0` por padrão.
 - De 15 e 16/10, na `main`: ícone flutuante; viva-voz opt-in; visão local; uso por chamada; 30 turnos / 60 min; ⌘⌥R; controle do Mac por voz; `RODRIGO_AUTO_CONFIRM` (padrão 0); automação desktop (padrão 0); TTS-OSS opcional; captura de tela nativa.
-- Camada Ogra, fase 1, na `main` (`0b13fcb`), atrás de `RODRIGO_OGRA=0`. Desligada, a voz não muda e `/api/ogra/*` é 404. Como ligar, e o que acontece se o webhook falha, está na seção acima.
+- Camada Ogra, fase 1, na `main` (`0b13fcb`), atrás de `RODRIGO_OGRA=0`. Desligada, a voz não muda e `/api/ogra/*` é 404. Como ligar, e o que acontece se o webhook falha, está na seção acima. `RODRIGO_OGRA_FALLBACK` (padrão `1`) manda esse turno falho pelo caminho normal; `0` encerra. A Ogra não é reserva do Gemini.
 - `RODRIGO_CLOUD_VISION` padrão **0** (`parseFlag(..., false)` e `.env.example`). O aviso deste arquivo, em 12/10, de que a visão "vem ligada por padrão" está superado.
 - Fim de fala: `SILENCE_THRESHOLD_MS = 1000` em `src/frontend/voice.ts`. A junção de fragmentos no servidor foi descartada (auditoria do Codex, REFAZER) e não está no código.
 

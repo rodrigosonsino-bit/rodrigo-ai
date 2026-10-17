@@ -16,6 +16,29 @@ export const OGRA_WEBHOOK_MISSING_TEXT = 'A Ogra está ligada, mas o webhook nã
 
 export const OGRA_WEBHOOK_FAILED_TEXT = 'Não consegui falar com a Ogra agora.';
 
+/** Aviso curto antes de o mesmo turno seguir o caminho normal. Não é uma nova tentativa à Ogra. */
+export const OGRA_FALLBACK_NOTICE = 'A Ogra não respondeu, vou seguir por aqui.';
+
+const OGRA_HTTP_FAILURE = new RegExp(
+  `^${OGRA_WEBHOOK_FAILED_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(HTTP (\\d+)\\)\\.$`
+);
+
+/**
+ * Falha de transporte em que o turno pode seguir o caminho normal (RODRIGO_OGRA_FALLBACK=1).
+ * HTTP fora de 2xx (429, 5xx e os demais), prazo, erro de rede, ou webhook ausente.
+ * Cancelamento, guarda em block e estouro de orçamento não entram: não são falha do webhook.
+ * A Ogra não é destino de reserva do Gemini — esta função só classifica a ida que já falhou.
+ */
+export function ograFailureFallsBack(error: string | undefined): boolean {
+  if (!error) return false;
+  if (error === OGRA_WEBHOOK_MISSING_TEXT) return true;
+  if (error === OGRA_WEBHOOK_FAILED_TEXT) return true;
+  const http = OGRA_HTTP_FAILURE.exec(error);
+  if (!http) return false;
+  const status = Number(http[1]);
+  return status < 200 || status >= 300;
+}
+
 export const OGRA_REPLY_EMPTY_TEXT = 'A Ogra encerrou sem texto.';
 
 export const OGRA_REPLY_BLOCKED_TEXT =
