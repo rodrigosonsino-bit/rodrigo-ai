@@ -21,6 +21,11 @@ export const TOOL_NAMES = [
   'DITADO_LOCAL',
   'CONFIGURAR_VOZ',
   'DELEGAR_CODIGO',
+  /**
+   * Camada Ogra: a fala segue para o webhook quando RODRIGO_OGRA=1.
+   * Não é ferramenta local e o worker de intenção não a emite (o roteamento é do app).
+   */
+  'DELEGAR_OGRA',
   /** Automação desktop multi-passo (computer-use); só executa com RODRIGO_AUTO_DESKTOP=1. */
   'AUTOMACAO_DESKTOP',
   'NENHUMA'

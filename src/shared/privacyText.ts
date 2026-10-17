@@ -36,13 +36,22 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
   const warnings: string[] = [];
 
   if (status.mode === 'local-only') {
+    const staysLocal = [
+      ...stays,
+      'Hora, data, lembretes e notas funcionam; perguntas que precisam de uma resposta gerada recebem o aviso de que a geração está desligada.'
+    ];
+    const goesLocal: string[] = [];
+    if (status.ogra.enabled) {
+      goesLocal.push(
+        'O texto da sua fala vai ao webhook da Ogra (RODRIGO_OGRA=1), mesmo com o Gemini desligado. O áudio continua neste computador.'
+      );
+    } else {
+      staysLocal.push('A Ogra está desligada (RODRIGO_OGRA=0, padrão): a fala não vai ao webhook.');
+    }
     return {
       headline: 'Modo sem nuvem: nada é enviado ao Gemini.',
-      stays: [
-        ...stays,
-        'Hora, data, lembretes e notas funcionam; perguntas que precisam de uma resposta gerada recebem o aviso de que a geração está desligada.'
-      ],
-      goes: [],
+      stays: staysLocal,
+      goes: goesLocal,
       warnings: [],
       footnote: PRIVACY_FOOTNOTE
     };
@@ -88,6 +97,14 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
     stays.push('O Claude Code está desligado (RODRIGO_CLAUDE_CODE=0, padrão).');
   } else if (status.claudeCode.reason === 'master-off') {
     stays.push('O Claude Code está desligado porque a nuvem está desligada.');
+  }
+
+  if (status.ogra.enabled) {
+    goes.push(
+      'O texto da sua fala vai ao webhook da Ogra (RODRIGO_OGRA=1). A resposta volta depois, inteira. Lembrete, nota e memória que ela propuser só são gravados depois de um sim falado. O áudio não vai nesse canal.'
+    );
+  } else {
+    stays.push('A Ogra está desligada (RODRIGO_OGRA=0, padrão): a fala não vai ao webhook.');
   }
 
   if (status.autoDesktop.enabled) {

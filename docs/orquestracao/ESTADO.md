@@ -60,6 +60,8 @@ O corpo do #31 registra a suíte daquela branch: **`npm test` 887 passaram, 0 fa
 
 Antes de qualquer merge: testar numa worktree com `RODRIGO_OGRA=1`, e conferir se `privacy.test.ts` e `capabilityPolicy.test.ts` não enfraqueceram asserção. O merge só sai com o "mergeia" do Rodrigo. O #31 também edita este arquivo (acrescenta um parágrafo em cima do texto de 12/10); na hora do merge, prevalece o estado da `main`, não aquele parágrafo.
 
+Nota desta branch (PR #31): a fase 1 da camada Ogra está no código, com `RODRIGO_OGRA=0` por padrão. Detalhe em `docs/orquestracao/OGRA.md`.
+
 ## O que o handoff de 13/10 (fonte 35) chamava de "só neste Mac"
 
 `docs/handoff-2026-10-13-openjarvis.md` §1 descrevia branches locais sem push. A atualização no topo do próprio arquivo já registrava #18–#20; o retrato antigo (e a fonte 35 do NotebookLM) ficou para trás. Todos os merges abaixo são ancestrais de `7d69389`:

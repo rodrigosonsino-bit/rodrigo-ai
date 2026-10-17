@@ -25,6 +25,7 @@ import { registerWiredOpenClawAgents } from '../agents/openClawSubAgent.js';
 import { makeOpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import { PendingAsyncTaskStore, parseAsyncTaskTtlHours } from '../agents/pendingAsyncStore.js';
 import { registerClaudeCodeAgent } from '../agents/claudeCodeSubAgent.js';
+import { capabilitiesFromRegistry, registerOgraAgent } from '../agents/ograSubAgent.js';
 
 export type TtsStatusResponse = TtsStatus;
 
@@ -191,6 +192,14 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
     sessionManager.consumeMutationToken(turnId, token)
   );
+  // Camada Ogra: só entra no coordenador com RODRIGO_OGRA=1. Com 0, este bloco não roda.
+  // TODO (fases seguintes): não registrar daqui coordenação de cursor, WhatsApp ou outros apps.
+  if (privacy.ogra) {
+    registerOgraAgent(coordinator, privacy, {
+      verifyMutationToken: (turnId, token) => sessionManager.consumeMutationToken(turnId, token),
+      catalog: () => capabilitiesFromRegistry(ExtensionRegistry.getInstance())
+    });
+  }
 
   // T4: registro de decisões das mutações (duas fases, cadeia de hashes). Se não puder abrir, fica INDISPONÍVEL e as
   // mutações são recusadas (falha fechada); nunca segue sem registro em silêncio.

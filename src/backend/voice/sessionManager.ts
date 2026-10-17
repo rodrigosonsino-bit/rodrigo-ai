@@ -9,6 +9,15 @@ import {
   type PrivacyConfig
 } from '../privacy.js';
 import { guardMessages, guardText, OutboundBlockedError } from '../privacy/outboundGuard.js';
+import { neutralizeUntrusted } from '../memory/untrustedData.js';
+import { classifyOgraTool, OGRA_PHASE1_REFUSAL } from '../agents/ograPolicy.js';
+import {
+  OGRA_ACK_TEXT,
+  OGRA_AGENT_ID,
+  OGRA_REPLY_BLOCKED_TEXT,
+  OGRA_REPLY_EMPTY_TEXT,
+  OGRA_WEBHOOK_FAILED_TEXT
+} from '../agents/ograSubAgent.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
@@ -210,6 +219,17 @@ export function claimsUnexecutedAction(text: string): boolean {
   return ACTION_CLAIM_VERBS.test(text) && ACTION_CLAIM_OBJECTS.test(text);
 }
 
+/** Conteúdo ditado pela Ogra. Ignora confirmationToken, isMutation e qualquer atalho de SIM. */
+function ograToolContent(args: unknown): string | null {
+  if (typeof args === 'string') return args;
+  if (args && typeof args === 'object' && 'content' in args) {
+    const content = (args as { content?: unknown }).content;
+    if (typeof content === 'string') return content;
+    if (content === null) return null;
+  }
+  return null;
+}
+
 function cleanTextForSpeech(text: string): string {
   let cleaned = text
     .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -340,6 +360,12 @@ interface Session {
   openClawAsyncPollers: Map<string, NodeJS.Timeout>;
   /** Automação desktop em curso: abortar cancela o loop (<1s) e desarma a sessão. */
   automationAbort: AbortController | null;
+  /**
+   * Falas fora de turno que chegaram com um turno ativo. Só enche com RODRIGO_OGRA=1;
+   * com a flag em 0, speakOutOfTurn continua descartando.
+   */
+  outOfTurnQueue: Array<{ text: string; afterSpoken?: (turnId: string, spoken: string) => void }>;
+  drainingOutOfTurn: boolean;
 }
 
 interface CaptureRequest {
@@ -386,6 +412,8 @@ export class SessionManager {
   readonly coordinator: SubAgentCoordinator;
   /** Falas de recuperação pós-restart, entregues na primeira sessão com SSE. */
   private recoverySpeeches: AsyncRecoverySpeech[] = [];
+  /** Tarefas entregues à Ogra e ainda sem resposta final. A chave é o taskId do webhook. */
+  private readonly ograTasks = new Map<string, { sessionId: string; turnId: string; prompt: string }>();
   /**
    * Fase 15 §2.1: tokens de mutação minerados só após SIM por voz, indexados por turnId.
    * `runSubAgentDelegation` só anexa o token se ele existir para o turnId da delegação.
@@ -679,6 +707,12 @@ export class SessionManager {
       session.captureRequest = null;
     }
     this.clearOpenClawPollers(session);
+    session.outOfTurnQueue.length = 0;
+    for (const [taskId, task] of this.ograTasks) {
+      if (task.sessionId !== session.id) continue;
+      this.ograTasks.delete(taskId);
+      this.coordinator.releaseAsyncSlot(taskId);
+    }
     this.confirmedMutationTokens.clear();
     session.pendingPostSpeechAction = null;
 
@@ -734,7 +768,9 @@ export class SessionManager {
         pendingDelegation: null,
         pendingPostSpeechAction: null,
         openClawAsyncPollers: new Map(),
-        automationAbort: null
+        automationAbort: null,
+        outOfTurnQueue: [],
+        drainingOutOfTurn: false
       };
       clearTimeout(session.idleTimer);
       this.touch(session);
@@ -865,6 +901,7 @@ export class SessionManager {
       // armada a fala nunca é "de tela" (a confirmação tem precedência; conservador: vale mesmo para pendência expirada), e
       // pedido de mutação que cita a tela ("cria um lembrete para comprar a tela nova") continua sendo mutação.
       if (
+        !this.privacy.ogra &&
         !session.pendingMutation &&
         !session.armedMutation &&
         !session.pendingDelegation &&
@@ -939,9 +976,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, text, 0, 'local'));
         await Promise.allSettled(turn.pendingSynthesis);
         if (session.activeTurn === turn) {
-          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-          this.emit(session, { type: 'state', state: 'ouvindo' });
-          session.activeTurn = null;
+          this.finishTurn(session, turn);
         }
         return;
       }
@@ -981,9 +1016,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
                 question: cleanQ,
                 requestedAt: pend.requestedAt
               };
-              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-              this.emit(session, { type: 'state', state: 'ouvindo' });
-              session.activeTurn = null;
+              this.finishTurn(session, turn);
             }
             return;
           }
@@ -1035,9 +1068,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           await Promise.allSettled(turn.pendingSynthesis);
 
           if (session.activeTurn === turn) {
-            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-            this.emit(session, { type: 'state', state: 'ouvindo' });
-            session.activeTurn = null;
+            this.finishTurn(session, turn);
           }
           return;
         }
@@ -1073,9 +1104,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
                 reprompts: pend2.reprompts + 1,
                 requestedAt: pend2.requestedAt
               };
-              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-              this.emit(session, { type: 'state', state: 'ouvindo' });
-              session.activeTurn = null;
+              this.finishTurn(session, turn);
             }
             return;
           }
@@ -1137,12 +1166,17 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
           await Promise.allSettled(turn.pendingSynthesis);
           if (session.activeTurn === turn) {
-            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-            this.emit(session, { type: 'state', state: 'ouvindo' });
-            session.activeTurn = null;
+            this.finishTurn(session, turn);
           }
           return;
         }
+      }
+
+      // Camada Ogra: depois das confirmações pendentes (o SIM continua local).
+      // Com a flag em 0 este ramo não existe na prática — o turno segue o caminho de sempre.
+      if (this.privacy.ogra) {
+        await this.delegateTranscriptToOgra(session, turn, transcript);
+        return;
       }
 
       // Fatia 4 (A2): "o que você fez?" responde pelo ExecutionTrace — só se já houver trace com tarefas (R1);
@@ -1156,9 +1190,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
         await Promise.allSettled(turn.pendingSynthesis);
         if (session.activeTurn === turn) {
-          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-          this.emit(session, { type: 'state', state: 'ouvindo' });
-          session.activeTurn = null;
+          this.finishTurn(session, turn);
         }
         return;
       }
@@ -1172,9 +1204,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
         await Promise.allSettled(turn.pendingSynthesis);
         if (session.activeTurn === turn) {
-          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-          this.emit(session, { type: 'state', state: 'ouvindo' });
-          session.activeTurn = null;
+          this.finishTurn(session, turn);
         }
         return;
       }
@@ -1251,9 +1281,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             await Promise.allSettled(turn.pendingSynthesis);
 
             if (session.activeTurn === turn) {
-              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-              this.emit(session, { type: 'state', state: 'ouvindo' });
-              session.activeTurn = null;
+              this.finishTurn(session, turn);
             }
             return;
           } else {
@@ -1306,9 +1334,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
                   requestedAt: performance.now()
                 };
               }
-              this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-              this.emit(session, { type: 'state', state: 'ouvindo' });
-              session.activeTurn = null;
+              this.finishTurn(session, turn);
             }
             return;
           }
@@ -1353,9 +1379,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           // O histórico NÃO é tocado aqui: entra por markPlayed(), quando o cliente
           // confirma a reprodução — mesma invariante que protege o barge-in na Fase 2.
           if (session.activeTurn === turn) {
-            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-            this.emit(session, { type: 'state', state: 'ouvindo' });
-            session.activeTurn = null;
+            this.finishTurn(session, turn);
           }
           return;
         }
@@ -1372,9 +1396,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, stopText, 0, 'local'));
         await Promise.allSettled(turn.pendingSynthesis);
         if (session.activeTurn === turn) {
-          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-          this.emit(session, { type: 'state', state: 'ouvindo' });
-          session.activeTurn = null;
+          this.finishTurn(session, turn);
         }
         return;
       }
@@ -1398,9 +1420,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, cleanD, 0, 'local'));
           await Promise.allSettled(turn.pendingSynthesis);
           if (session.activeTurn === turn) {
-            this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-            this.emit(session, { type: 'state', state: 'ouvindo' });
-            session.activeTurn = null;
+            this.finishTurn(session, turn);
           }
           return;
         }
@@ -1420,9 +1440,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             requestedAt: performance.now(),
             reprompts: 0
           };
-          this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-          this.emit(session, { type: 'state', state: 'ouvindo' });
-          session.activeTurn = null;
+          this.finishTurn(session, turn);
         }
         return;
       }
@@ -1554,9 +1572,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       await Promise.allSettled(turn.pendingSynthesis);
 
       if (session.activeTurn === turn) {
-        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-        this.emit(session, { type: 'state', state: 'ouvindo' });
-        session.activeTurn = null;
+        this.finishTurn(session, turn);
       }
     } catch (err) {
       if (session.activeTurn === turn) {
@@ -1567,6 +1583,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         });
         this.emit(session, { type: 'state', state: 'erro' });
         session.activeTurn = null;
+        if (this.privacy.ogra && session.outOfTurnQueue.length > 0) void this.drainOutOfTurnQueue(session);
       }
     }
   }
@@ -1590,9 +1607,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       // consumir a repetição de uma confirmação pendente) e volta a ouvir.
       if (!hasRecognizableSpeech(transcript)) {
         console.log(`[turn] turno=${turn.turnId} sem fala reconhecível (ruído/eco/fragmento) — ignorado.`);
-        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-        this.emit(session, { type: 'state', state: 'ouvindo' });
-        session.activeTurn = null;
+        this.finishTurn(session, turn);
         return;
       }
 
@@ -1606,6 +1621,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         });
         this.emit(session, { type: 'state', state: 'erro' });
         session.activeTurn = null;
+        if (this.privacy.ogra && session.outOfTurnQueue.length > 0) void this.drainOutOfTurnQueue(session);
       }
     }
   }
@@ -1836,9 +1852,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'local'));
       await Promise.allSettled(turn.pendingSynthesis);
       if (session.activeTurn === turn) {
-        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-        this.emit(session, { type: 'state', state: 'ouvindo' });
-        session.activeTurn = null;
+        this.finishTurn(session, turn);
       }
       return;
     }
@@ -1851,9 +1865,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, msg, 0, 'local'));
       await Promise.allSettled(turn.pendingSynthesis);
       if (session.activeTurn === turn) {
-        this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-        this.emit(session, { type: 'state', state: 'ouvindo' });
-        session.activeTurn = null;
+        this.finishTurn(session, turn);
       }
       return;
     }
@@ -1969,9 +1981,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'local'));
     await Promise.allSettled(turn.pendingSynthesis);
     if (session.activeTurn === turn) {
-      this.emit(session, { type: 'turn_done', turnId: turn.turnId });
-      this.emit(session, { type: 'state', state: 'ouvindo' });
-      session.activeTurn = null;
+      this.finishTurn(session, turn);
     }
   }
 
@@ -1985,10 +1995,194 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     return `Não consegui falar com o OpenClaw agora (${err instanceof Error ? err.message : 'erro desconhecido'}).`;
   }
 
-  private async speakOutOfTurn(session: Session, text: string): Promise<void> {
+  /** Encerra o turno ativo. Com RODRIGO_OGRA=0 não drena fila (ela permanece vazia). */
+  private finishTurn(session: Session, turn: ActiveTurn): void {
+    if (session.activeTurn !== turn) return;
+    this.emit(session, { type: 'turn_done', turnId: turn.turnId });
+    this.emit(session, { type: 'state', state: 'ouvindo' });
+    session.activeTurn = null;
+    if (this.privacy.ogra && session.outOfTurnQueue.length > 0) {
+      void this.drainOutOfTurnQueue(session);
+    }
+  }
+
+  private async drainOutOfTurnQueue(session: Session): Promise<void> {
+    if (!this.privacy.ogra || session.drainingOutOfTurn) return;
+    session.drainingOutOfTurn = true;
+    try {
+      while (session.outOfTurnQueue.length > 0 && !session.activeTurn && this.current === session) {
+        const item = session.outOfTurnQueue.shift();
+        if (!item) break;
+        await this.speakOutOfTurn(session, item.text, item.afterSpoken);
+      }
+    } finally {
+      session.drainingOutOfTurn = false;
+    }
+  }
+
+  /**
+   * RODRIGO_OGRA=1: a fala vai à Ogra e o turno só confirma o envio.
+   * A resposta chega depois, por consumeOgraReply.
+   */
+  private async delegateTranscriptToOgra(session: Session, turn: ActiveTurn, transcript: string): Promise<void> {
+    this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+    const taskId = crypto.randomUUID();
+    this.ograTasks.set(taskId, { sessionId: session.id, turnId: turn.turnId, prompt: transcript });
+    const r = await this.runSubAgentDelegation({
+      turnId: turn.turnId,
+      query: transcript,
+      subAgentId: OGRA_AGENT_ID,
+      prompt: transcript,
+      isMutation: false,
+      signal: turn.abortController.signal,
+      context: { sessionId: session.id, action: 'DELEGAR_OGRA' },
+      taskId,
+      sessionId: session.id,
+      sessionToken: session.token
+    });
+    const deferred = Boolean(r.ok && r.result?.kind === 'async_deferred' && r.result.success);
+    if (!deferred) this.ograTasks.delete(taskId);
+    if (r.budgetExceeded) {
+      if (session.activeTurn === turn) this.finishTurn(session, turn);
+      return;
+    }
+    const speech = deferred ? OGRA_ACK_TEXT : (r.result?.error ?? OGRA_WEBHOOK_FAILED_TEXT);
+    if (session.activeTurn !== turn) {
+      await this.speakOutOfTurn(session, speech);
+      return;
+    }
+    this.emit(session, { type: 'state', state: 'falando' });
+    const clean = cleanTextForSpeech(speech);
+    turn.expectedSentences.add(0);
+    turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'local'));
+    await Promise.allSettled(turn.pendingSynthesis);
+    this.finishTurn(session, turn);
+  }
+
+  get ograEnabled(): boolean {
+    return this.privacy.ogra;
+  }
+
+  /**
+   * Resposta assíncrona da Ogra. O texto é dado não confiável: delimitadores são
+   * neutralizados e o guarda de saída decide o que pode ser falado.
+   */
+  async consumeOgraReply(input: {
+    taskId: string;
+    text: string;
+    final: boolean;
+  }): Promise<{ ok: true; status: 200 } | { ok: false; status: 404 | 409; error: string }> {
+    if (!this.privacy.ogra) return { ok: false, status: 404, error: 'Rota de API não encontrada.' };
+    const task = this.ograTasks.get(input.taskId);
+    if (!task) return { ok: false, status: 404, error: 'Tarefa desconhecida.' };
+    const session = this.current;
+    if (!session || session.id !== task.sessionId) {
+      return { ok: false, status: 409, error: 'Sessão da tarefa não está ativa.' };
+    }
+    this.touch(session);
+    const neutralized = neutralizeUntrusted(input.text).slice(0, VOICE_LIMITS.MAX_TEXT_CHARS);
+    const guarded = guardText(neutralized, this.privacy.outboundGuard);
+    let spoken = '';
+    if (guarded.blocked) spoken = OGRA_REPLY_BLOCKED_TEXT;
+    else if (!guarded.text.trim()) spoken = input.final ? OGRA_REPLY_EMPTY_TEXT : '';
+    else spoken = guarded.text;
+    if (input.final) {
+      this.ograTasks.delete(input.taskId);
+      this.coordinator.releaseAsyncSlot(input.taskId);
+    }
+    if (spoken) await this.speakOutOfTurn(session, spoken);
+    return { ok: true, status: 200 };
+  }
+
+  /**
+   * A Ogra propõe uma ferramenta. Leituras passam por runSubAgentDelegation.
+   * Mutação NÃO: não há recordMutationConfirmation aqui, autoConfirm é ignorado,
+   * e nenhum argumento do corpo (confirmationToken, isMutation, skip) executa a ação.
+   * O SIM falado, no turno seguinte, é o único caminho que consome o token.
+   *
+   * TODO: desktop, cursor, WhatsApp e envio de mensagens ficam recusados (ograPolicy).
+   */
+  async proposeOgraTool(input: {
+    taskId: string;
+    tool: string;
+    args: unknown;
+  }): Promise<
+    | { ok: true; status: 200; kind: 'read'; output: string }
+    | { ok: true; status: 202; kind: 'confirmation_required'; question: string }
+    | { ok: false; status: 400 | 403 | 404 | 409; error: string }
+  > {
+    if (!this.privacy.ogra) return { ok: false, status: 404, error: 'Rota de API não encontrada.' };
+    const task = this.ograTasks.get(input.taskId);
+    if (!task) return { ok: false, status: 404, error: 'Tarefa desconhecida.' };
+    const session = this.current;
+    if (!session || session.id !== task.sessionId) {
+      return { ok: false, status: 409, error: 'Sessão da tarefa não está ativa.' };
+    }
+    const toolName = input.tool.trim().toUpperCase();
+    const kind = classifyOgraTool(toolName);
+    if (kind === 'deferred') return { ok: false, status: 403, error: OGRA_PHASE1_REFUSAL };
+    if (kind === 'unknown') return { ok: false, status: 400, error: 'Ferramenta desconhecida.' };
+    const content = ograToolContent(input.args);
+    this.touch(session);
+
+    if (kind === 'mutation') {
+      const tool = selectMutatingToolByAction(toolName, this.mutatingTools);
+      if (!tool) return { ok: false, status: 404, error: 'Ferramenta indisponível.' };
+      let question: string;
+      try {
+        question = cleanTextForSpeech(tool.preview(toolName as IntentName, content));
+      } catch (err) {
+        console.error('[ogra] preview de mutação falhou:', err instanceof Error ? err.name : 'erro');
+        return { ok: false, status: 400, error: 'Não deu para preparar a confirmação.' };
+      }
+      if (!session.lastTurnId) return { ok: false, status: 409, error: 'Sem turno para falar a pergunta.' };
+      await this.speakOutOfTurn(session, question, (turnId, spoken) => {
+        session.armedMutation = {
+          kind: toolName as MutationName,
+          content,
+          turnId,
+          question: spoken,
+          requestedAt: performance.now(),
+          reprompts: 0
+        };
+      });
+      return { ok: true, status: 202, kind: 'confirmation_required', question };
+    }
+
+    const readTool =
+      selectToolByName(toolName, this.tools) ?? selectMutatingToolByAction(toolName, this.mutatingTools);
+    if (!readTool) return { ok: false, status: 404, error: 'Ferramenta indisponível.' };
+    const r = await this.runSubAgentDelegation({
+      turnId: task.turnId,
+      query: task.prompt,
+      subAgentId: `tool_${readTool.name.toLowerCase()}`,
+      prompt: content ?? '',
+      isMutation: false,
+      signal: new AbortController().signal,
+      context: { action: toolName },
+      sessionId: session.id,
+      sessionToken: session.token
+    });
+    if (r.budgetExceeded && r.speech) return { ok: true, status: 200, kind: 'read', output: r.speech };
+    if (!r.result?.success) {
+      return { ok: false, status: 400, error: r.result?.error ?? 'Não consegui consultar isso agora.' };
+    }
+    await this.speakOutOfTurn(session, r.result.output);
+    return { ok: true, status: 200, kind: 'read', output: r.result.output };
+  }
+
+  private async speakOutOfTurn(
+    session: Session,
+    text: string,
+    afterSpoken?: (turnId: string, spoken: string) => void
+  ): Promise<void> {
     const clean = cleanTextForSpeech(text);
     const turnId = session.lastTurnId;
-    if (!clean || !turnId || this.current !== session || session.activeTurn) return;
+    if (!clean || !turnId || this.current !== session) return;
+    if (session.activeTurn) {
+      if (this.privacy.ogra) session.outOfTurnQueue.push({ text: clean, afterSpoken });
+      return;
+    }
 
     this.emit(session, { type: 'state', state: 'falando' });
     const sentenceIndex = session.emittedSentences?.turnId === turnId
@@ -2013,6 +2207,9 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
     if (this.current !== session || session.activeTurn || session.lastTurnId !== turnId) {
       fs.rm(filePath, { force: true }, () => {});
+      if (this.privacy.ogra && this.current === session && session.activeTurn) {
+        session.outOfTurnQueue.unshift({ text: clean, afterSpoken });
+      }
       return;
     }
 
@@ -2028,6 +2225,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       text: clean
     });
     this.emit(session, { type: 'state', state: 'ouvindo' });
+    afterSpoken?.(turnId, clean);
   }
 
   /**

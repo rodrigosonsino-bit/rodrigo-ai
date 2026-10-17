@@ -34,14 +34,17 @@ export const EFFECTIVE_GRANTS: GrantTable = {
   tool_configurar: ['write_file'],
   tool_auto: ['write_file'],
   // Fase 17: claude -p como proxy para acesso à máquina (D1: escrita desde o início).
-  claude_code: ['shell', 'read_file', 'write_file', 'network', 'browser']
+  claude_code: ['shell', 'read_file', 'write_file', 'network', 'browser'],
+  // Ogra: só a rede do webhook. Sem write_file — mutação não passa por este agente.
+  ogra: ['network']
 };
 
 /** Capacidades que a simples existência da operação já exige (ex.: o agente web sempre usa a rede). */
 export const IMPLIED_NEEDS: GrantTable = {
   openclaw_web: ['network'],
   openclaw_drive: ['network', 'read_file'],
-  openclaw_social: ['network']
+  openclaw_social: ['network'],
+  ogra: ['network']
 };
 
 export interface PolicySubject {

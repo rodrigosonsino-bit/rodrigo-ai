@@ -6,6 +6,7 @@ import type { AudioStore } from './audioStore.js';
 import type { SessionManager } from './sessionManager.js';
 import { parseWavHeader } from './wav.js';
 import { parseJpegHeader } from './image.js';
+import { ograCallbackAuthorized } from '../agents/ograCallbackAuth.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -334,5 +335,90 @@ export async function handleVoiceRoute(
   }
 
   sendJson(res, 404, { error: 'Rota de voz não encontrada.' });
+  return true;
+}
+
+const OGRA_BODY_MAX = 16 * 1024;
+
+/**
+ * POST /api/ogra/reply e /api/ogra/tool.
+ * Host já foi validado em server.ts. Com RODRIGO_OGRA=0 a rota responde 404,
+ * o mesmo de uma rota que não existe. O token é RODRIGO_OGRA_CALLBACK_TOKEN.
+ */
+export async function handleOgraRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathname: string,
+  deps: VoiceRouteDeps
+): Promise<boolean> {
+  if (!pathname.startsWith('/api/ogra/')) return false;
+
+  if (!deps.sessionManager.ograEnabled) {
+    sendJson(res, 404, { error: 'Rota de API não encontrada.' });
+    return true;
+  }
+
+  if (!isAllowedOrigin(req, deps.config)) {
+    sendJson(res, 403, { error: 'Origin não autorizada.' });
+    return true;
+  }
+
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Método não permitido.' });
+    return true;
+  }
+
+  if (!ograCallbackAuthorized(req.headers.authorization)) {
+    sendJson(res, 401, { error: 'Token do callback recusado.' });
+    return true;
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await readJsonBody(req, OGRA_BODY_MAX)) as Record<string, unknown>;
+  } catch {
+    sendJson(res, 400, { error: 'JSON inválido.' });
+    return true;
+  }
+
+  const taskId = typeof body.taskId === 'string' ? body.taskId.trim() : '';
+  if (!taskId || taskId.length > 80 || !/^[A-Za-z0-9_.:-]+$/.test(taskId)) {
+    sendJson(res, 400, { error: 'taskId inválido.' });
+    return true;
+  }
+
+  if (pathname === '/api/ogra/reply') {
+    if (typeof body.text !== 'string' || body.text.length > 8000) {
+      sendJson(res, 400, { error: 'Texto da resposta inválido.' });
+      return true;
+    }
+    if (typeof body.final !== 'boolean') {
+      sendJson(res, 400, { error: 'Campo final deve ser booleano.' });
+      return true;
+    }
+    const result = await deps.sessionManager.consumeOgraReply({ taskId, text: body.text, final: body.final });
+    sendJson(res, result.status, result.ok ? { ok: true } : { error: result.error });
+    return true;
+  }
+
+  if (pathname === '/api/ogra/tool') {
+    if (typeof body.tool !== 'string' || !body.tool.trim() || body.tool.length > 80) {
+      sendJson(res, 400, { error: 'Ferramenta inválida.' });
+      return true;
+    }
+    const result = await deps.sessionManager.proposeOgraTool({ taskId, tool: body.tool, args: body.args });
+    if (!result.ok) {
+      sendJson(res, result.status, { error: result.error });
+      return true;
+    }
+    if (result.kind === 'confirmation_required') {
+      sendJson(res, result.status, { ok: true, kind: result.kind, question: result.question });
+      return true;
+    }
+    sendJson(res, result.status, { ok: true, kind: result.kind, output: result.output });
+    return true;
+  }
+
+  sendJson(res, 404, { error: 'Rota de API não encontrada.' });
   return true;
 }
