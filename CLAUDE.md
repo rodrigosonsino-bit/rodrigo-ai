@@ -79,6 +79,8 @@ Ogra (orquestradora externa, Grok) é o ouvido e a boca: com a flag ligada, o qu
 
 ## Canal Claude → Ogra (Grok) por webhook
 
+Estado vigente da orquestração (papéis, `main`, PRs, fila e decisões pendentes): `docs/orquestracao/ESTADO.md`.
+
 Mensagens do Claude (canal de desenvolvimento) para a Ogra saem por `scripts/avisar-grok.sh` (usa `GROK_WEBHOOK_URL` e `GROK_WEBHOOK_KEY` do ambiente; a chave nunca é impressa nem vai no argv). Com `RODRIGO_OGRA=1` a camada de voz também posta nesse webhook; com a flag em 0 esse caminho não existe. Protocolo combinado em 2026-10-13:
 
 - O JSON leva sempre `source:"claude"` e `project:"rodrigo-ai"`. O campo `session` leva o ID da sessão atual, para a resposta voltar à sessão certa; `reply_to` leva o assunto quando a mensagem responde a algo da Ogra. No script: `--session ID` e `--reply-to ASSUNTO`, ou `CLAUDE_SESSION_ID` no ambiente. O ID vem de `mcp__ccd_session_mgmt__get_session` com `session_id:"self"`. Em sessão local o formato é `local_<uuid>`; o exemplo `session_01...` da Ogra não foi verificado como válido para sessões locais.
