@@ -240,7 +240,8 @@ export const GENERATION_FAILURE_TEXT = 'Não consegui pensar numa resposta agora
 /** Fase V, fatia 2: o caminho de tela existe, mas a visão chega na fatia 4. Dito quando a CAPTURA deu certo. */
 export const SCREEN_NOT_READY_TEXT = 'Ainda estou aprendendo a enxergar a tela. Em breve consigo te ajudar com isso.';
 /** Fase V, fatia 3: sem compartilhamento ativo, captureId vencido/rejeitado, ou upload inválido. */
-export const SCREEN_SHARE_NEEDED_TEXT = 'Compartilhe a tela no botão da página e pergunte de novo.';
+export const SCREEN_SHARE_NEEDED_TEXT =
+  'Não consegui ver a tela. No app, conceda Gravação de Tela ao Rodrigo AI em Ajustes do Sistema, ou use o botão Compartilhar tela e pergunte de novo.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */
 export const KNOWLEDGE_LIMITS = {

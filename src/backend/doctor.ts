@@ -177,6 +177,16 @@ export function runDoctor(input: DoctorInput): DoctorReport {
     } else {
       checks.push(check('auto-desktop', 'Automação desktop', 'ok', 'RODRIGO_AUTO_DESKTOP=0 (padrão): sem computer-use autônomo.'));
     }
+    if (desktopOn) {
+      checks.push(
+        check(
+          'screen-recording-tcc',
+          'Gravação de Tela (TCC)',
+          'info',
+          'Para o Orque descrever a tela sem o botão Compartilhar tela, conceda Gravação de Tela ao Rodrigo AI em Ajustes → Privacidade e Segurança → Gravação de Tela.'
+        )
+      );
+    }
   }
 
   if (cfg !== null) {

@@ -9,7 +9,7 @@ SIGN_ID="${RODRIGO_CODESIGN_IDENTITY:-DitadoLocal Dev}"
 rm -rf build && mkdir -p "$APP/Contents/MacOS"
 swiftc -O -swift-version 5 \
   -framework Cocoa -framework WebKit -framework Carbon -framework AVFoundation \
-  -framework Network -framework ApplicationServices \
+  -framework Network -framework ApplicationServices -framework CoreGraphics \
   -o "$APP/Contents/MacOS/RodrigoAI" main.swift
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>

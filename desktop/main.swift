@@ -22,24 +22,43 @@ func dlog(_ s: String) { if debugLog { FileHandle.standardError.write(Data(("[de
 /// Captura a tela principal via `/usr/sbin/screencapture` no processo assinado do app
 /// (permissão de Gravação de Tela em Ajustes → Privacidade → Gravação de Tela).
 enum NativeScreenCapture {
+    static func ensureScreenCaptureAccess() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        // Dispara o diálogo TCC (screencapture sozinho costuma falhar sem prompt).
+        let granted = CGRequestScreenCaptureAccess()
+        dlog("screenCaptureAccess requested granted=\(granted)")
+        return granted
+    }
+
     static func captureJpeg() -> Data? {
+        guard ensureScreenCaptureAccess() else { return nil }
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("rodrigo-screen-\(UUID().uuidString).jpg")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         // -x: sem som; -t jpg: JPEG; captura o display principal.
         p.arguments = ["-x", "-t", "jpg", tmp.path]
+        let errPipe = Pipe()
+        p.standardError = errPipe
         do {
             try p.run()
             p.waitUntilExit()
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            let errText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard p.terminationStatus == 0 else {
+                dlog("screencapture exit=\(p.terminationStatus) stderr=\(errText)")
                 try? FileManager.default.removeItem(at: tmp)
                 return nil
             }
             let data = try Data(contentsOf: tmp)
             try? FileManager.default.removeItem(at: tmp)
-            return data.isEmpty ? nil : data
+            if data.isEmpty {
+                dlog("screencapture escreveu JPEG vazio")
+                return nil
+            }
+            return data
         } catch {
+            dlog("screencapture falhou: \(error)")
             try? FileManager.default.removeItem(at: tmp)
             return nil
         }
@@ -163,19 +182,29 @@ final class NativePasteBridge {
         }
         listener?.cancel()
         listener = nil
-        try? FileManager.default.removeItem(at: bridgeInfoURL)
+        // Só apaga se o arquivo ainda for nosso — senão um restart sobrescreve e o
+        // processo antigo, ao sair, apaga o JSON do novo.
+        if let data = try? Data(contentsOf: bridgeInfoURL),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let pid = obj["pid"] as? Int,
+           pid == ProcessInfo.processInfo.processIdentifier {
+            try? FileManager.default.removeItem(at: bridgeInfoURL)
+        }
     }
 
     private func writeBridgeInfo() {
         let dir = bridgeInfoURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let payload: [String: Any] = [
-            "port": Int(port),
-            "token": token,
-            "pid": ProcessInfo.processInfo.processIdentifier
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
-            try? data.write(to: bridgeInfoURL, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let payload: [String: Any] = [
+                "port": Int(port),
+                "token": token,
+                "pid": ProcessInfo.processInfo.processIdentifier
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+            try data.write(to: bridgeInfoURL, options: .atomic)
+        } catch {
+            dlog("writeBridgeInfo falhou (\(bridgeInfoURL.path)): \(error)")
         }
     }
 
@@ -680,6 +709,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         requestAccessibilityIfNeeded()
         requestAutomationIfNeeded()
         requestMicrophoneIfNeeded()
+        requestScreenCaptureIfNeeded()
         // O servidor sobe em segundo plano (pode levar segundos): a interface nunca fica bloqueada esperando por ele.
         DispatchQueue.global(qos: .userInitiated).async {
             self.startServerIfNeeded()
@@ -754,6 +784,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             }
         default:
             break
+        }
+    }
+
+    private func requestScreenCaptureIfNeeded() {
+        let ok = CGPreflightScreenCaptureAccess()
+        dlog("launch screenCaptureAccess=\(ok)")
+        guard !ok else { return }
+        // CGRequestScreenCaptureAccess abre o diálogo do sistema (ou redireciona a Ajustes).
+        let granted = CGRequestScreenCaptureAccess()
+        dlog("launch screenCaptureAccess requested granted=\(granted)")
+        if !granted {
+            DispatchQueue.main.async {
+                self.openPrivacyPane("Privacy_ScreenCapture")
+            }
         }
     }
 
