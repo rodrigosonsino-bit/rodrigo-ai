@@ -54,6 +54,13 @@ export interface PrivacyConfig {
    * Valor inválido aborta o boot. Com 0, o caminho de voz não muda.
    */
   readonly ogra: boolean;
+  /**
+   * RODRIGO_OGRA_FALLBACK. Padrão LIGADO. Com 1, falha de transporte da Ogra (HTTP fora de 2xx,
+   * prazo, rede, webhook ausente) segue o mesmo turno pelo caminho de RODRIGO_OGRA=0.
+   * Com 0, a falha encerra o turno. A Ogra não entra na cadeia de reserva do Gemini.
+   * Valor inválido aborta o boot.
+   */
+  readonly ograFallback: boolean;
 }
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
@@ -216,7 +223,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact'),
     claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
     autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false),
-    ogra: parseFlag(env, 'RODRIGO_OGRA', false)
+    ogra: parseFlag(env, 'RODRIGO_OGRA', false),
+    ograFallback: parseFlag(env, 'RODRIGO_OGRA_FALLBACK', true)
   };
 }
 

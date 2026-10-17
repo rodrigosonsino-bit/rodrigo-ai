@@ -14,9 +14,11 @@ import { classifyOgraTool, OGRA_PHASE1_REFUSAL } from '../agents/ograPolicy.js';
 import {
   OGRA_ACK_TEXT,
   OGRA_AGENT_ID,
+  OGRA_FALLBACK_NOTICE,
   OGRA_REPLY_BLOCKED_TEXT,
   OGRA_REPLY_EMPTY_TEXT,
-  OGRA_WEBHOOK_FAILED_TEXT
+  OGRA_WEBHOOK_FAILED_TEXT,
+  ograFailureFallsBack
 } from '../agents/ograSubAgent.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
@@ -313,6 +315,13 @@ interface ActiveTurn {
   marks: [string, number][];
   /** Fase V: decidida logo após a transcrição, ANTES de a fala entrar no histórico (§3). */
   provenance: 'normal' | 'screen';
+  /** Uma ida à Ogra por turno. O caminho normal que segue uma falha não chama a Ogra de novo. */
+  ograDelegated?: boolean;
+  /**
+   * O turno chegou ao caminho normal porque a Ogra falhou. Mutação neste turno pede SIM falado,
+   * mesmo com RODRIGO_AUTO_CONFIRM=1.
+   */
+  fromOgraFallback?: boolean;
 }
 
 interface Session {
@@ -1174,9 +1183,12 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
       // Camada Ogra: depois das confirmações pendentes (o SIM continua local).
       // Com a flag em 0 este ramo não existe na prática — o turno segue o caminho de sempre.
-      if (this.privacy.ogra) {
-        await this.delegateTranscriptToOgra(session, turn, transcript);
-        return;
+      // Uma falha de transporte, com RODRIGO_OGRA_FALLBACK=1, não retorna: o mesmo turno
+      // continua abaixo, uma vez. A Ogra não é chamada de novo e não entra na reserva do Gemini.
+      if (this.privacy.ogra && turn.ograDelegated !== true) {
+        turn.ograDelegated = true;
+        const finished = await this.delegateTranscriptToOgra(session, turn, transcript);
+        if (finished || session.activeTurn !== turn) return;
       }
 
       // Fatia 4 (A2): "o que você fez?" responde pelo ExecutionTrace — só se já houver trace com tarefas (R1);
@@ -1289,7 +1301,12 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
             let previewFailed = false;
             // Autonomia direta (RODRIGO_AUTO_CONFIRM=1): executa já, sem pergunta. Críticas
             // (DESKTOP_CRITICO) e auto-modificação (AUTO_CORRECAO) nunca entram aqui.
-            const autoRun = this.autoConfirm && action !== 'DESKTOP_CRITICO' && action !== 'AUTO_CORRECAO';
+            // Reserva da Ogra não herda a autonomia direta: o SIM falado continua obrigatório neste turno.
+            const autoRun =
+              this.autoConfirm &&
+              !turn.fromOgraFallback &&
+              action !== 'DESKTOP_CRITICO' &&
+              action !== 'AUTO_CORRECAO';
             if (autoRun) {
               this.recordMutationConfirmation(turn.turnId);
               const r = await this.delegateToolInTurn(turn, transcript, tool, action, content, true);
@@ -2021,10 +2038,13 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
   }
 
   /**
-   * RODRIGO_OGRA=1: a fala vai à Ogra e o turno só confirma o envio.
-   * A resposta chega depois, por consumeOgraReply.
+   * RODRIGO_OGRA=1: uma ida à Ogra. Sucesso confirma o envio e encerra; a resposta chega
+   * depois, por consumeOgraReply. Falha de transporte com RODRIGO_OGRA_FALLBACK=1 devolve
+   * false para o mesmo turno seguir o caminho normal (o de RODRIGO_OGRA=0). Não há segunda
+   * tentativa. Com a flag em 0, a falha encerra o turno como antes.
+   * @returns true se o turno foi encerrado aqui.
    */
-  private async delegateTranscriptToOgra(session: Session, turn: ActiveTurn, transcript: string): Promise<void> {
+  private async delegateTranscriptToOgra(session: Session, turn: ActiveTurn, transcript: string): Promise<boolean> {
     this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
     const taskId = crypto.randomUUID();
     this.ograTasks.set(taskId, { sessionId: session.id, turnId: turn.turnId, prompt: transcript });
@@ -2044,12 +2064,24 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     if (!deferred) this.ograTasks.delete(taskId);
     if (r.budgetExceeded) {
       if (session.activeTurn === turn) this.finishTurn(session, turn);
-      return;
+      return true;
     }
-    const speech = deferred ? OGRA_ACK_TEXT : (r.result?.error ?? OGRA_WEBHOOK_FAILED_TEXT);
+    const error = r.result?.error ?? OGRA_WEBHOOK_FAILED_TEXT;
+    if (
+      !deferred &&
+      this.privacy.ograFallback &&
+      session.activeTurn === turn &&
+      !turn.abortController.signal.aborted &&
+      ograFailureFallsBack(error)
+    ) {
+      turn.fromOgraFallback = true;
+      const stillHere = await this.speakOgraFallbackNotice(session, turn);
+      return !stillHere;
+    }
+    const speech = deferred ? OGRA_ACK_TEXT : error;
     if (session.activeTurn !== turn) {
       await this.speakOutOfTurn(session, speech);
-      return;
+      return true;
     }
     this.emit(session, { type: 'state', state: 'falando' });
     const clean = cleanTextForSpeech(speech);
@@ -2057,6 +2089,25 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'local'));
     await Promise.allSettled(turn.pendingSynthesis);
     this.finishTurn(session, turn);
+    return true;
+  }
+
+  /**
+   * Aviso curto, falado antes do caminho normal. Índice negativo para tocar antes das frases
+   * geradas e para não contar como frase da geração: se o Gemini falhar em seguida, o aviso
+   * de falha da geração ainda sai. Não chama a Ogra.
+   * @returns true se o turno segue ativo.
+   */
+  private async speakOgraFallbackNotice(session: Session, turn: ActiveTurn): Promise<boolean> {
+    if (session.activeTurn !== turn) return false;
+    this.emit(session, { type: 'state', state: 'falando' });
+    const clean = cleanTextForSpeech(OGRA_FALLBACK_NOTICE);
+    const spoken = this.synthesizeSentence(session, turn, clean, -1, 'local');
+    turn.pendingSynthesis.push(spoken);
+    await spoken;
+    if (session.activeTurn !== turn) return false;
+    this.emit(session, { type: 'state', state: 'processando' });
+    return true;
   }
 
   get ograEnabled(): boolean {

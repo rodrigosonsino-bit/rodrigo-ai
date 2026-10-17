@@ -212,7 +212,7 @@ export function runDoctor(input: DoctorInput): DoctorReport {
           'risk-ogra',
           'Canal Ogra ligado',
           'warn',
-          'RODRIGO_OGRA=1: o texto da fala vai ao webhook da Ogra. Mutação local ainda exige SIM falado. Desktop, cursor e WhatsApp não estão nesta fase.'
+          'RODRIGO_OGRA=1: o texto da fala vai ao webhook da Ogra. Mutação local ainda exige SIM falado. Se o webhook falhar, RODRIGO_OGRA_FALLBACK=1 (padrão) continua o turno no caminho normal, sem chamar a Ogra de novo. Desktop, cursor e WhatsApp não estão nesta fase.'
         )
       );
     }

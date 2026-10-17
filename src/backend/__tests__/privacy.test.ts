@@ -28,7 +28,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       outboundGuard: 'redact',
       claudeCode: false,
       autoDesktop: false,
-      ogra: false
+      ogra: false,
+      ograFallback: true
     });
   });
 
