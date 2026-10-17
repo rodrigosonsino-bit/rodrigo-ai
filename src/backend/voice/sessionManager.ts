@@ -398,6 +398,11 @@ interface Session {
    * continua entrando na fila.
    */
   ograAwaitingReply: boolean;
+  /**
+   * turnId que ligou ograAwaitingReply. O finally da espera só apaga a flag se
+   * ainda for este turno — uma fala nova pode já ter armado a espera dela.
+   */
+  ograAwaitingTurnId: string | null;
 }
 
 type OgraWaitResult = 'reply' | 'timeout' | 'cancelled';
@@ -765,6 +770,7 @@ export class SessionManager {
     this.clearOpenClawPollers(session);
     session.outOfTurnQueue.length = 0;
     session.ograAwaitingReply = false;
+    session.ograAwaitingTurnId = null;
     for (const [taskId, task] of this.ograTasks) {
       if (task.sessionId !== session.id) continue;
       const wake = this.settleOgraTask(taskId, 'cancelled');
@@ -831,7 +837,8 @@ export class SessionManager {
         automationAbort: null,
         outOfTurnQueue: [],
         drainingOutOfTurn: false,
-        ograAwaitingReply: false
+        ograAwaitingReply: false,
+        ograAwaitingTurnId: null
       };
       clearTimeout(session.idleTimer);
       this.touch(session);
@@ -2092,9 +2099,12 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
   /**
    * RODRIGO_OGRA=1: uma ida à Ogra. Assim que o turno é encaminhado, e antes do POST,
    * toca um sinal sem palavras (playOgraCue). O 2xx só acusa o recebimento: não há
-   * frase de espera. O turno fica aberto até POST /api/ogra/reply ou o prazo
-   * RODRIGO_OGRA_REPLY_TIMEOUT_MS. A resposta entra pelo TTS do turno. No prazo, com
-   * RODRIGO_OGRA_FALLBACK=1, devolve false para o mesmo turno seguir o caminho normal.
+   * frase de espera. A tarefa fica pendente até POST /api/ogra/reply ou o prazo
+   * RODRIGO_OGRA_REPLY_TIMEOUT_MS, mesmo se uma fala nova substituir o turno. Só o
+   * cancelamento explícito desse turno, o fim da sessão ou o prazo descartam a
+   * resposta. A resposta entra pelo TTS do turno, ou fora de turno se ele já passou.
+   * No prazo, com o turno ainda ativo e RODRIGO_OGRA_FALLBACK=1, devolve false para
+   * o mesmo turno seguir o caminho normal.
    * Falha de transporte do webhook faz o mesmo, sem segunda tentativa. A Ogra não entra
    * na reserva do Gemini. Com a flag de reserva em 0, o prazo encerra o turno.
    * @returns true se o turno foi encerrado aqui.
@@ -2149,13 +2159,24 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       return true;
     }
 
+    if (!this.ograTasks.has(taskId)) {
+      if (session.activeTurn === turn) this.finishTurn(session, turn);
+      return true;
+    }
+    // O prazo conta a partir do 2xx e não morre com o turno. Uma fala nova (VAD,
+    // submitAudio/submitText) aborta o turno sem ser cancelamento explícito.
+    this.armOgraReplyTimer(taskId);
+
     if (session.activeTurn !== turn || turn.abortController.signal.aborted) {
-      this.settleOgraTask(taskId, 'cancelled')?.('cancelled');
+      if (session.cancelledTurnIds.has(turn.turnId)) {
+        this.settleOgraTask(taskId, 'cancelled')?.('cancelled');
+      }
       return true;
     }
     // Webhook aceito. Ferramenta que chegou durante o POST fala agora, em vez de
     // ficar na fila até o prazo. Não há frase de TTS antes da resposta da Ogra.
     session.ograAwaitingReply = true;
+    session.ograAwaitingTurnId = turn.turnId;
     try {
       if (!this.ograTasks.has(taskId)) {
         if (session.activeTurn === turn) this.finishTurn(session, turn);
@@ -2191,7 +2212,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       if (stillFail) this.finishTurn(session, turn);
       return true;
     } finally {
-      session.ograAwaitingReply = false;
+      if (session.ograAwaitingTurnId === turn.turnId) {
+        session.ograAwaitingReply = false;
+        session.ograAwaitingTurnId = null;
+      }
     }
   }
 
@@ -2248,12 +2272,28 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
   }
 
   /**
-   * Espera o callback ou o prazo. O timer não segura o processo sozinho (unref): o servidor HTTP
-   * é quem mantém o loop. Cancelar o turno encerra a espera sem cair no caminho normal.
+   * Prazo da resposta, independente do turno. Não reinicia se já houver timer.
+   * unref: o servidor HTTP é quem mantém o loop.
+   */
+  private armOgraReplyTimer(taskId: string): void {
+    const task = this.ograTasks.get(taskId);
+    if (!task || task.timer) return;
+    task.timer = setTimeout(() => {
+      const wake = this.settleOgraTask(taskId, 'timeout');
+      wake?.('timeout');
+    }, this.ograReplyTimeoutMs);
+    task.timer.unref?.();
+  }
+
+  /**
+   * Espera o callback ou o prazo neste turno. Abortar o turno (fala nova, VAD) encerra
+   * só esta espera — não cai no caminho normal e não apaga a tarefa. O prazo segue.
+   * O cancelamento explícito (cancelTurn) é quem marca a tarefa como cancelada.
    */
   private armOgraReplyWait(turn: ActiveTurn, taskId: string): Promise<OgraWaitResult> {
     const task = this.ograTasks.get(taskId);
     if (!task) return Promise.resolve('reply');
+    this.armOgraReplyTimer(taskId);
     return new Promise((resolve) => {
       let settled = false;
       const finish = (result: OgraWaitResult): void => {
@@ -2263,18 +2303,23 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         resolve(result);
       };
       const onAbort = (): void => {
-        const wake = this.settleOgraTask(taskId, 'cancelled');
-        (wake ?? finish)('cancelled');
+        finish('cancelled');
       };
       task.resolveWait = finish;
-      task.timer = setTimeout(() => {
-        const wake = this.settleOgraTask(taskId, 'timeout');
-        (wake ?? finish)('timeout');
-      }, this.ograReplyTimeoutMs);
-      task.timer.unref?.();
       if (turn.abortController.signal.aborted) onAbort();
       else turn.abortController.signal.addEventListener('abort', onAbort, { once: true });
     });
+  }
+
+  /** Cancelamento explícito do turno: a resposta dessa tarefa não será falada. */
+  private cancelOgraTasksForTurn(turnId: string): void {
+    const ids: string[] = [];
+    for (const [taskId, task] of this.ograTasks) {
+      if (task.turnId === turnId) ids.push(taskId);
+    }
+    for (const taskId of ids) {
+      this.settleOgraTask(taskId, 'cancelled')?.('cancelled');
+    }
   }
 
   /**
@@ -2359,7 +2404,8 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     if (!this.privacy.ogra) return { ok: false, status: 404, error: 'Rota de API não encontrada.' };
     const closed = this.ograClosed.get(input.taskId);
     if (closed) {
-      const why = closed.reason === 'replied' ? 'duplicada' : 'atrasada';
+      const why =
+        closed.reason === 'replied' ? 'duplicada' : closed.reason === 'cancelled' ? 'cancelada' : 'atrasada';
       console.warn(`[ogra] resposta ignorada (${why}) taskId=${input.taskId}`);
       return { ok: true, status: 200, ignored: true };
     }
@@ -2874,6 +2920,9 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     if (session.pendingPostSpeechAction?.turnId === turnId) {
       session.pendingPostSpeechAction = null;
     }
+    // Antes do abort: uma fala nova também aborta o turno, e isso não pode
+    // descartar a tarefa. Só este caminho (cancelamento explícito) descarta.
+    this.cancelOgraTasksForTurn(turnId);
 
     if (session.activeTurn && session.activeTurn.turnId === turnId) {
       this.engine.cancel(turnId);

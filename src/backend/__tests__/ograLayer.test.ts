@@ -1288,4 +1288,80 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.generateCalls.length, 0);
   });
+
+  it('fala nova não descarta a tarefa anterior; cancelamento explícito sim', async () => {
+    h = await setup({ ogra: true, cloud: true, ograReplyTimeoutMs: 5000 });
+    const session = await openSession(h);
+    const turn1 = await say(h, session, 'primeira');
+    await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    const turn2 = await say(h, session, 'segunda');
+    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda');
+    const task2 = payloadOf(h.fetches[1]).taskId;
+    assert.notEqual(task1, task2);
+    assert.notEqual(turn1, turn2);
+    assert.equal(h.cueOrder.filter((e) => e === 'cue').length, 2);
+    assertNoAck(h);
+
+    const older = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'resposta da primeira' })
+    );
+    assert.equal(older.status, 200);
+    assert.equal(older.json.ok, true);
+    assert.equal(older.json.ignored, undefined);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('resposta da primeira'), 'resposta anterior falada');
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'resposta da primeira').length, 1);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+
+    const cancel = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rodrigo-Session': session.sessionId,
+        'X-Rodrigo-Token': session.token
+      },
+      body: JSON.stringify({ turnId: turn2 })
+    });
+    assert.equal(cancel.status, 200);
+    const dropped = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task2, sessionId: session.sessionId, text: 'resposta da segunda' })
+    );
+    assert.equal(dropped.status, 200);
+    assert.equal(dropped.json.ok, true);
+    assert.equal(dropped.json.ignored, true);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(h.tts.synthesizeCalls.includes('resposta da segunda'), false);
+  });
+
+  it('o prazo da tarefa anterior segue depois que uma fala nova a substitui', async () => {
+    h = await setup({ ogra: true, cloud: true, ograFallback: false, ograReplyTimeoutMs: 500 });
+    const session = await openSession(h);
+    await say(h, session, 'primeira');
+    await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    await say(h, session, 'segunda');
+    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda');
+    await waitFor(
+      () => h!.tts.synthesizeCalls.includes('A Ogra não respondeu a tempo.'),
+      'prazo da tarefa ainda ativa',
+      4000
+    );
+    const late = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'resposta da primeira' })
+    );
+    assert.equal(late.status, 200);
+    assert.equal(late.json.ignored, true);
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(h.tts.synthesizeCalls.includes('resposta da primeira'), false);
+  });
 });
