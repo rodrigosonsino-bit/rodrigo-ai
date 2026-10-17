@@ -56,6 +56,8 @@ export class VoiceController {
   private ringBuffer: Float32Array[] = [];
   private ringBufferMs = 0;
   private recording = false;
+  /** Silenciar o microfone. A track.enabled sozinha não zera o worklet no WKWebView. */
+  private micMuted = false;
   private recordedChunks: Float32Array[] = [];
   private recordedMs = 0;
   private continuousVoiceMs = 0;
@@ -381,6 +383,7 @@ export class VoiceController {
   }
 
   private processAudioBlock(rms: number, samples: Float32Array): void {
+    if (this.micMuted) return;
     const durationMs = this.blockDurationMs(samples);
     const profile = vadThresholds(this.speakerphone);
     const speaking = speakingForVad(this.speakerphone, this.playbackActive, this.state === 'falando');
@@ -465,8 +468,9 @@ export class VoiceController {
     this.continuousSilenceMs = 0;
     this.onsetGraceMs = 0;
 
+    if (this.micMuted) return;
     const wavBuffer = encodeWavPcm16(chunks, this.sampleRate);
-    if (wavBuffer.byteLength === 0) return;
+    if (wavBuffer.byteLength === 0 || this.micMuted) return;
 
     this.setState('processando');
 
@@ -696,9 +700,31 @@ export class VoiceController {
   }
 
   muteMicrophone(muted: boolean): void {
+    this.micMuted = muted;
     this.mediaStream?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
     });
+    if (muted) {
+      this.recording = false;
+      this.recordedChunks = [];
+      this.recordedMs = 0;
+      this.continuousVoiceMs = 0;
+      this.continuousSilenceMs = 0;
+      this.onsetGraceMs = 0;
+      this.bargeInCandidateMs = 0;
+      this.ringBuffer = [];
+      this.ringBufferMs = 0;
+    }
+    this.publishMicMuted(muted);
+  }
+
+  private publishMicMuted(muted: boolean): void {
+    if (!this.sessionId || !this.token) return;
+    void fetch('/api/voice/session/mute', {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ muted })
+    }).catch(() => {});
   }
 
   private teardown(): void {
@@ -718,6 +744,7 @@ export class VoiceController {
     this.token = null;
     this.currentTurnId = null;
     this.recording = false;
+    this.micMuted = false;
     this.setState('idle');
   }
 
