@@ -58,9 +58,9 @@ Na `main`. `parseFlag(env, 'RODRIGO_OGRA', false)` em `src/backend/privacy.ts` e
 
 Com `0`, ausente ou vazio, o turno não entra em `delegateTranscriptToOgra` (`sessionManager.ts`) e `POST /api/ogra/*` responde 404 (`handleOgraRoute` em `src/backend/voice/routes.ts`, o mesmo texto de uma rota que não existe). `registerOgraAgent` devolve null e o subagente não entra no coordenador (`voiceRuntime.ts`).
 
-Com `1`, depois das confirmações pendentes, o texto da fala (nunca o áudio) vai ao webhook. Se o POST tem sucesso, o Ork fala "Mandei para a Ogra." e o turno não classifica nem gera. A volta é `POST /api/ogra/reply`. Mutação continua exigindo o SIM falado; o corpo `confirmationToken` / `isMutation` / `skip*` é ignorado, e a camada não honra `RODRIGO_AUTO_CONFIRM`. O desenho da fase 1 está em `docs/orquestracao/OGRA.md`.
+Com `1`, depois das confirmações pendentes, o texto da fala (nunca o áudio) vai ao webhook. O 2xx só confirma o envio: o Ork fala "Um momento, a Ogra está pensando." e espera `POST /api/ogra/reply` com o mesmo `taskId` e `sessionId` até `RODRIGO_OGRA_REPLY_TIMEOUT_MS` (padrão 120000). A resposta é falada no TTS do turno. Sem resposta no prazo, `RODRIGO_OGRA_FALLBACK=1` segue o caminho normal; `0` encerra. A Ogra não entra na reserva do Gemini. Mutação continua exigindo o SIM falado; o corpo `confirmationToken` / `isMutation` / `skip*` é ignorado, e a camada não honra `RODRIGO_AUTO_CONFIRM`. O contrato do callback e o desenho da fase 1 estão em `docs/orquestracao/OGRA.md`.
 
-A suíte não foi reexecutada nesta atualização de documento. O arquivo `src/backend/__tests__/ograLayer.test.ts` está na `main`.
+A espera do callback, o prazo e a resposta ignorada (token, taskId desconhecido, duplicata, atraso) estão em `src/backend/__tests__/ograLayer.test.ts`.
 
 ### Como ligar a voz da Ogra
 
@@ -72,11 +72,12 @@ A flag é lida na subida (`parsePrivacyConfig(process.env)` em `src/backend/inde
 | `GROK_WEBHOOK_URL` | URL `http` ou `https`, não vazia (`readOgraWebhookEnv` em `ograSubAgent.ts`). Sem URL, sem chave, ou outro esquema, o turno fala "A Ogra está ligada, mas o webhook não está configurado." e não envia. |
 | `GROK_WEBHOOK_KEY` | Bearer desse webhook. Não é impressa nem entra no corpo. |
 | `RODRIGO_OGRA_CALLBACK_TOKEN` | Bearer de `POST /api/ogra/reply` e `POST /api/ogra/tool` (`ograCallbackAuth.ts`, comparação em tempo constante). Sem ele os dois respondem 401. A ida ao webhook ainda acontece; a volta é recusada. |
-| `RODRIGO_OGRA_FALLBACK` | Exatamente `0` ou `1`. Padrão `1` (`parseFlag` em `privacy.ts`). Outro valor impede a inicialização, como `RODRIGO_OGRA`. Com `1`, a falha de transporte abaixo não encerra o turno. Com `0`, o comportamento antigo permanece. |
+| `RODRIGO_OGRA_REPLY_TIMEOUT_MS` | Inteiro de 1000 a 600000. Padrão `120000` (`parseOgraReplyTimeoutMs` em `privacy.ts`). Vazio = padrão. Outro valor impede a inicialização. É o prazo entre o 2xx do webhook e o `POST /api/ogra/reply`. |
+| `RODRIGO_OGRA_FALLBACK` | Exatamente `0` ou `1`. Padrão `1` (`parseFlag` em `privacy.ts`). Outro valor impede a inicialização, como `RODRIGO_OGRA`. Com `1`, a falha de transporte abaixo, e o silêncio depois do 2xx, não encerram o turno. Com `0`, esses casos encerram. |
 
 ### Se a Ogra ou o webhook falha, ou devolve limite
 
-`RODRIGO_OGRA_FALLBACK=1` (padrão) faz o mesmo turno seguir o caminho de `RODRIGO_OGRA=0`: classificação, detectores locais, pergunta falada de mutação e geração no Gemini (ou o aviso de geração desligada, se `RODRIGO_CLOUD=0`). Antes disso o Ork fala "A Ogra não respondeu, vou seguir por aqui." (`OGRA_FALLBACK_NOTICE`). A Ogra é chamada uma vez. Não há segunda tentativa, não há leitura de `Retry-After`, e não há laço de volta para a Ogra. `GENERATION_MODELS` em `scripts/worker/worker.py` continua `gemini-flash-latest` e depois `gemini-3.5-flash-lite`: a Ogra não entra nessa cadeia, e uma falha do Gemini não chama a Ogra.
+`RODRIGO_OGRA_FALLBACK=1` (padrão) faz o mesmo turno seguir o caminho de `RODRIGO_OGRA=0`: classificação, detectores locais, pergunta falada de mutação e geração no Gemini (ou o aviso de geração desligada, se `RODRIGO_CLOUD=0`). Antes disso o Ork fala "A Ogra não respondeu, vou seguir por aqui." (`OGRA_FALLBACK_NOTICE`). Vale para falha de transporte do webhook e para o prazo da resposta (`RODRIGO_OGRA_REPLY_TIMEOUT_MS`) sem `POST /api/ogra/reply`. A Ogra é chamada uma vez. Não há segunda tentativa, não há leitura de `Retry-After`, e não há laço de volta para a Ogra. `GENERATION_MODELS` em `scripts/worker/worker.py` continua `gemini-flash-latest` e depois `gemini-3.5-flash-lite`: a Ogra não entra nessa cadeia, e uma falha do Gemini não chama a Ogra.
 
 O teste "flag ligada" em `ograLayer.test.ts` continua exigindo `classifyCalls` e `generateCalls` em zero quando o POST tem sucesso. Os testes de reserva cobrem 429, prazo, flag `0` e sucesso.
 
@@ -85,21 +86,34 @@ O teste "flag ligada" em `ograLayer.test.ts` continua exigindo `classifyCalls` e
 Com `RODRIGO_OGRA_FALLBACK=1`, caem no caminho normal:
 
 - HTTP fora de 2xx, inclusive 429 e 5xx (`OGRA_WEBHOOK_FAILED_TEXT` com o status).
-- Prazo de 20 s ou erro de rede: a mesma frase, sem o código HTTP.
+- Prazo de 20 s do POST ou erro de rede: a mesma frase, sem o código HTTP.
 - Webhook ausente (`OGRA_WEBHOOK_MISSING_TEXT`): URL, chave ou esquema inválido.
+- 2xx sem `POST /api/ogra/reply` dentro de `RODRIGO_OGRA_REPLY_TIMEOUT_MS`. Antes do prazo o Ork já falou "Um momento, a Ogra está pensando."
 
-Com `RODRIGO_OGRA_FALLBACK=0`, esses mesmos casos falam a frase de falha e encerram o turno, sem classificar e sem gerar.
+Com `RODRIGO_OGRA_FALLBACK=0`, a falha de transporte fala a frase de falha e encerra o turno, sem classificar e sem gerar. O prazo da resposta, depois da frase de espera, encerra com "A Ogra não respondeu a tempo."
 
 Não caem no caminho normal, com a flag em qualquer valor:
 
-- Sucesso (2xx): "Mandei para a Ogra." O turno não classifica nem gera.
+- 2xx com resposta a tempo: o Ork fala a espera e, em seguida, o `text` do callback. O turno não classifica nem gera.
 - Cancelamento do turno: "Tarefa cancelada pelo usuário."
 - Guarda de saída em `block`, com dado sensível: "Não enviei isso à Ogra: o texto contém um dado sensível e, pela configuração, não sai." O webhook não é chamado, e o texto não segue para o Gemini por esta reserva.
 - Teto local de subagentes (`SUBAGENT_BUDGET` em `src/backend/agents/subAgent.ts`: 6 chamadas por turno, 60 s, 2 tarefas assíncronas ao mesmo tempo). Estourar fala "Não consegui terminar isso dentro do tempo/dos passos previstos..." e não cai na geração.
 
 Mutação na reserva pede o SIM falado, mesmo com `RODRIGO_AUTO_CONFIRM=1` (`turn.fromOgraFallback` desliga a autonomia direta só nesse turno). O caminho com `RODRIGO_OGRA=0` não muda.
 
-A frase curta (o aceite ou a falha) sai pelo TTS já configurado (`synthesizeSentence` com `kind: 'local'`). Se o TTS do Gemini estiver no limite, vale o fallback que já existe nessa voz (a voz do sistema). Isso só troca a voz da frase. Não responde a pergunta no lugar da Ogra.
+A frase curta (a espera, o aviso de reserva ou a falha) e o `text` do callback saem pelo TTS do turno (`synthesizeSentence` com `kind: 'local'`). Se o TTS do Gemini estiver no limite, vale o fallback que já existe nessa voz (a voz do sistema). Isso só troca a voz da frase. Não coloca a Ogra no lugar do Gemini.
+
+### Contrato de `POST /api/ogra/reply`
+
+O webhook não devolve a resposta. A Ogra chama de volta:
+
+- Caminho: `POST /api/ogra/reply`
+- `Authorization: Bearer <RODRIGO_OGRA_CALLBACK_TOKEN>`
+- `Content-Type: application/json`
+- `Host`: `127.0.0.1` ou `localhost` na porta do app. Outro host: 403.
+- Corpo: `{ "taskId": "<o do webhook>", "sessionId": "<o do webhook>", "text": "<o que o Ork fala>" }`
+
+200 `{ "ok": true }` fala o texto. 200 `{ "ok": true, "ignored": true }` é duplicata, resposta tardia ou `sessionId` que não é o da tarefa (log, sem segunda fala, sem exceção). 401 é token errado. 404 `{ "error": "Tarefa desconhecida." }` é `taskId` que não está pendente. 409 é sessão da tarefa inativa. O detalhe, inclusive o `final` opcional, está em `docs/orquestracao/OGRA.md`.
 
 ## O que o handoff de 13/10 (fonte 35) chamava de "só neste Mac"
 

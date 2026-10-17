@@ -13,7 +13,13 @@ import { FakeVoiceProvider } from './helpers/sessionHarness.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { createSystemTools } from '../tools/index.js';
 import { createMutatingTools, type MutatingToolsResult } from '../tools/mutatingTools.js';
-import { parsePrivacyConfig, ograEffective, effectivePrivacy, type PrivacyConfig } from '../privacy.js';
+import {
+  parsePrivacyConfig,
+  ograEffective,
+  effectivePrivacy,
+  OGRA_REPLY_TIMEOUT_DEFAULT_MS,
+  type PrivacyConfig
+} from '../privacy.js';
 import { describePrivacy } from '../../shared/privacyText.js';
 import { runDoctor } from '../doctor.js';
 import { TOOL_NAMES } from '../../shared/voiceProtocol.js';
@@ -99,6 +105,8 @@ async function setup(opts: {
   /** webhook null: runTask devolve a frase de webhook ausente, sem POST. */
   missingWebhook?: boolean;
   registerEvenIfOff?: boolean;
+  /** Prazo da resposta depois do 2xx. undefined = padrão (120000). */
+  ograReplyTimeoutMs?: number;
 }): Promise<Harness> {
   const port = nextPort();
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
@@ -149,7 +157,7 @@ async function setup(opts: {
     mutating.tools,
     null,
     privacy,
-    { autoConfirm: opts.autoConfirm ?? false },
+    { autoConfirm: opts.autoConfirm ?? false, ograReplyTimeoutMs: opts.ograReplyTimeoutMs },
     null
   );
   const agentOpts = {
@@ -283,6 +291,33 @@ describe('camada Ogra — flag, subagente e política', () => {
     assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: '0' }).ograFallback, false);
     assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: 'sim' }), /RODRIGO_OGRA_FALLBACK/);
     assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_FALLBACK: '2' }), /RODRIGO_OGRA_FALLBACK/);
+  });
+
+  it('RODRIGO_OGRA_REPLY_TIMEOUT_MS: padrão 120000, vazio continua o padrão, fora da faixa aborta', () => {
+    assert.equal(parsePrivacyConfig({}).ograReplyTimeoutMs, OGRA_REPLY_TIMEOUT_DEFAULT_MS);
+    assert.equal(OGRA_REPLY_TIMEOUT_DEFAULT_MS, 120_000);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '' }).ograReplyTimeoutMs, 120_000);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: ' 120000 ' }).ograReplyTimeoutMs, 120_000);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '1000' }).ograReplyTimeoutMs, 1000);
+    assert.equal(parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '600000' }).ograReplyTimeoutMs, 600_000);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '999' }), /RODRIGO_OGRA_REPLY_TIMEOUT_MS/);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '600001' }), /RODRIGO_OGRA_REPLY_TIMEOUT_MS/);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '0' }), /RODRIGO_OGRA_REPLY_TIMEOUT_MS/);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: '12.5' }), /RODRIGO_OGRA_REPLY_TIMEOUT_MS/);
+    assert.throws(() => parsePrivacyConfig({ RODRIGO_OGRA_REPLY_TIMEOUT_MS: 'rapido' }), /RODRIGO_OGRA_REPLY_TIMEOUT_MS/);
+  });
+
+  it('doctor: RODRIGO_OGRA_REPLY_TIMEOUT_MS inválido cita só o nome da variável', () => {
+    const bad = runDoctor({
+      env: { RODRIGO_OGRA_REPLY_TIMEOUT_MS: 'oitenta-mil-nao-pode-vazar' },
+      rootDir: '/tmp/ogra-doctor',
+      exists: () => true,
+      now: () => new Date('2026-10-17T00:00:00.000Z')
+    });
+    const privacy = bad.checks.find((c) => c.id === 'privacy-config');
+    assert.equal(privacy?.severity, 'error');
+    assert.match(privacy!.detail, /RODRIGO_OGRA_REPLY_TIMEOUT_MS/);
+    assert.doesNotMatch(privacy!.detail, /oitenta-mil-nao-pode-vazar/);
   });
 
   it('doctor: RODRIGO_OGRA_FALLBACK inválido cita só o nome da variável', () => {
@@ -918,5 +953,149 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(stored.items.length, 1);
     assert.equal(stored.items[0].text, 'comprar pao');
     assert.equal(h.fetches.length, 1, 'o sim não vai à Ogra');
+  });
+
+  it('ack e depois a resposta do callback é falada no turno, sem classificar nem gerar', async () => {
+    h = await setup({ ogra: true, cloud: true });
+    h.engine.sentencesToEmit = ['Não devia gerar.'];
+    const session = await openSession(h);
+    await say(h, session, 'qual a capital');
+    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'espera');
+    const taskId = payloadOf(h.fetches[0]).taskId;
+    const reply = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId, sessionId: session.sessionId, text: 'A capital é Brasília.' })
+    );
+    assert.equal(reply.status, 200);
+    assert.equal(reply.json.ok, true);
+    assert.equal(reply.json.ignored, undefined);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('A capital é Brasília.'), 'resposta falada');
+    const ackAt = h.tts.synthesizeCalls.indexOf(OGRA_ACK_TEXT);
+    const replyAt = h.tts.synthesizeCalls.indexOf('A capital é Brasília.');
+    assert.ok(ackAt >= 0 && replyAt > ackAt);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
+    assert.equal(h.fetches.length, 1);
+  });
+
+  it('sem resposta no prazo, o mesmo turno segue o caminho normal', async () => {
+    h = await setup({ ogra: true, cloud: true, ograReplyTimeoutMs: 40 });
+    h.engine.sentencesToEmit = ['Segui sem a Ogra.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.engine.generateCalls.length === 1, 'geração após o prazo', 4000);
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.classifyCalls.length, 1);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), true);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
+    assert.ok(h.tts.synthesizeCalls.includes('Segui sem a Ogra.'));
+    const ackAt = h.tts.synthesizeCalls.indexOf(OGRA_ACK_TEXT);
+    const noticeAt = h.tts.synthesizeCalls.indexOf(OGRA_FALLBACK_NOTICE);
+    const answerAt = h.tts.synthesizeCalls.indexOf('Segui sem a Ogra.');
+    assert.ok(ackAt >= 0 && noticeAt > ackAt && answerAt > noticeAt);
+    const taskId = payloadOf(h.fetches[0]).taskId;
+    const late = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId, sessionId: session.sessionId, text: 'chegou tarde' })
+    );
+    assert.equal(late.status, 200);
+    assert.equal(late.json.ignored, true);
+    assert.equal(h.tts.synthesizeCalls.includes('chegou tarde'), false);
+    assert.equal(h.engine.generateCalls.length, 1);
+    assert.equal(h.fetches.length, 1);
+  });
+
+  it('prazo esgotado com RODRIGO_OGRA_FALLBACK=0 encerra sem classificar nem gerar', async () => {
+    h = await setup({ ogra: true, cloud: true, ograFallback: false, ograReplyTimeoutMs: 40 });
+    h.engine.sentencesToEmit = ['Não devia chegar aqui.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(
+      () => live(h!.sm)?.activeTurn === null && h!.tts.synthesizeCalls.includes('A Ogra não respondeu a tempo.'),
+      'frase de prazo e turno encerrado'
+    );
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), true);
+  });
+
+  it('token errado no callback responde 401 e não fala o texto', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    const taskId = payloadOf(h.fetches[0]).taskId;
+    const wrong = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: 'Bearer outro' },
+      JSON.stringify({ taskId, sessionId: session.sessionId, text: 'não pode falar isto' })
+    );
+    assert.equal(wrong.status, 401);
+    assert.equal(h.tts.synthesizeCalls.includes('não pode falar isto'), false);
+  });
+
+  it('taskId desconhecido é ignorado sem derrubar a sessão', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'espera');
+    const unknown = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: 'tarefa-inexistente', sessionId: session.sessionId, text: 'texto solto' })
+    );
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.json.error, 'Tarefa desconhecida.');
+    assert.equal(h.tts.synthesizeCalls.includes('texto solto'), false);
+    assert.ok(live(h.sm), 'a sessão segue de pé');
+  });
+
+  it('resposta duplicada é ignorada e não é falada de novo', async () => {
+    h = await setup({ ogra: true, cloud: true });
+    h.engine.sentencesToEmit = ['Não devia gerar.'];
+    const session = await openSession(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    const taskId = payloadOf(h.fetches[0]).taskId;
+    const body = JSON.stringify({ taskId, sessionId: session.sessionId, text: 'só uma vez' });
+    const first = await rawPost(h.port, '/api/ogra/reply', { Authorization: `Bearer ${CALLBACK_TOKEN}` }, body);
+    assert.equal(first.status, 200);
+    assert.equal(first.json.ignored, undefined);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('só uma vez'), 'primeira fala');
+    const second = await rawPost(h.port, '/api/ogra/reply', { Authorization: `Bearer ${CALLBACK_TOKEN}` }, body);
+    assert.equal(second.status, 200);
+    assert.equal(second.json.ignored, true);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'só uma vez').length, 1);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+  });
+
+  it('prazo da resposta com AUTO_CONFIRM não grava lembrete sem o SIM falado', async () => {
+    h = await setup({ ogra: true, autoConfirm: true, ograReplyTimeoutMs: 40 });
+    h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar pao'];
+    const session = await openSession(h);
+    const turnId = await say(h, session, 'me lembra de comprar pao');
+    const question = 'Posso criar o lembrete: comprar pao?';
+    await waitFor(() => live(h!.sm)?.armedMutation?.question === question, 'pergunta de confirmação');
+    assert.equal(h.fetches.length, 1);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.sm.peekMutationConfirmationToken(turnId), undefined);
+    const storePath = path.join(h.dir, 'lembretes.json');
+    if (fs.existsSync(storePath)) {
+      const early = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { items: unknown[] };
+      assert.equal(early.items.length, 0);
+    }
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), true);
   });
 });

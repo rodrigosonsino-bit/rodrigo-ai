@@ -6,8 +6,16 @@ import { DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 
 export const OGRA_AGENT_ID = 'ogra';
 
-/** Fala curta do Ork enquanto a Ogra (10–60 s, resposta inteira) ainda não voltou. */
-export const OGRA_ACK_TEXT = 'Mandei para a Ogra.';
+/**
+ * Fala curta do Ork depois do 2xx do webhook, enquanto POST /api/ogra/reply não chega.
+ * O webhook só acusa o recebimento; a resposta é o callback.
+ */
+export const OGRA_HOLDING_TEXT = 'Um momento, a Ogra está pensando.';
+/** Mesma frase de OGRA_HOLDING_TEXT: o 2xx não é a resposta, é a espera. */
+export const OGRA_ACK_TEXT = OGRA_HOLDING_TEXT;
+
+/** Silêncio depois do ack, com RODRIGO_OGRA_FALLBACK=0: o turno encerra com esta frase. */
+export const OGRA_REPLY_TIMEOUT_TEXT = 'A Ogra não respondeu a tempo.';
 
 export const OGRA_BLOCKED_TEXT =
   'Não enviei isso à Ogra: o texto contém um dado sensível e, pela configuração, não sai.';
@@ -112,8 +120,10 @@ export interface OgraSubAgentOptions {
 }
 
 /**
- * Subagente da Ogra. A resposta dela chega depois, inteira, em POST /api/ogra/reply —
- * `runTask` só entrega o texto e devolve `async_deferred`. Não substitui o LLM do turno.
+ * Subagente da Ogra. O webhook só acusa o recebimento (2xx, sem corpo de resposta).
+ * `runTask` devolve `async_deferred`; quem espera `POST /api/ogra/reply` e fala o texto
+ * é o turno, até RODRIGO_OGRA_REPLY_TIMEOUT_MS. Não substitui o LLM do turno e não entra
+ * na reserva do Gemini.
  *
  * Mutação: o mesmo trinco do OpenClaw (token presente, prefixo do turnId, emitido pelo gatekeeper).
  * A fala do usuário NÃO é mutação. Quem propõe ferramenta mutante é o endpoint /api/ogra/tool,
