@@ -222,7 +222,7 @@ export function runDoctor(input: DoctorInput): DoctorReport {
           'risk-ogra',
           'Canal Ogra ligado',
           'warn',
-          'RODRIGO_OGRA=1: o texto da fala vai ao webhook da Ogra. Mutação local ainda exige SIM falado. Se o webhook falhar, RODRIGO_OGRA_FALLBACK=1 (padrão) continua o turno no caminho normal, sem chamar a Ogra de novo. Desktop, cursor e WhatsApp não estão nesta fase.'
+          'RODRIGO_OGRA=1: o texto da fala vai ao webhook da Ogra. O 2xx só confirma o envio; a fala espera POST /api/ogra/reply até RODRIGO_OGRA_REPLY_TIMEOUT_MS (padrão 120000). Mutação local ainda exige SIM falado. Se o webhook falhar ou a resposta não chegar no prazo, RODRIGO_OGRA_FALLBACK=1 (padrão) continua o turno no caminho normal, sem chamar a Ogra de novo e sem colocá-la na reserva do Gemini. Desktop, cursor e WhatsApp não estão nesta fase.'
         )
       );
     }

@@ -56,12 +56,24 @@ export interface PrivacyConfig {
   readonly ogra: boolean;
   /**
    * RODRIGO_OGRA_FALLBACK. Padrão LIGADO. Com 1, falha de transporte da Ogra (HTTP fora de 2xx,
-   * prazo, rede, webhook ausente) segue o mesmo turno pelo caminho de RODRIGO_OGRA=0.
-   * Com 0, a falha encerra o turno. A Ogra não entra na cadeia de reserva do Gemini.
+   * prazo do webhook, rede, webhook ausente) e o silêncio depois do 2xx (sem POST /api/ogra/reply
+   * dentro de ograReplyTimeoutMs) seguem o mesmo turno pelo caminho de RODRIGO_OGRA=0.
+   * Com 0, esses casos encerram o turno. A Ogra não entra na cadeia de reserva do Gemini.
    * Valor inválido aborta o boot.
    */
   readonly ograFallback: boolean;
+  /**
+   * RODRIGO_OGRA_REPLY_TIMEOUT_MS. Prazo, em milissegundos, entre o 2xx do webhook e o
+   * POST /api/ogra/reply. Padrão 120000. Inteiro entre 1000 e 600000. Vazio = padrão.
+   * Valor inválido aborta o boot.
+   */
+  readonly ograReplyTimeoutMs: number;
 }
+
+/** Prazo padrão da resposta assíncrona da Ogra (RODRIGO_OGRA_REPLY_TIMEOUT_MS). */
+export const OGRA_REPLY_TIMEOUT_DEFAULT_MS = 120_000;
+export const OGRA_REPLY_TIMEOUT_MIN_MS = 1_000;
+export const OGRA_REPLY_TIMEOUT_MAX_MS = 600_000;
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
 export const TTS_DEFAULT_MODEL = 'gemini-3.8-flash-lite-tts';
@@ -193,6 +205,26 @@ export function parseTurns(env: Env, name: string, defaultValue: number, max: nu
   return n;
 }
 
+export function parseOgraReplyTimeoutMs(
+  env: Env,
+  name = 'RODRIGO_OGRA_REPLY_TIMEOUT_MS',
+  defaultValue = OGRA_REPLY_TIMEOUT_DEFAULT_MS,
+  min = OGRA_REPLY_TIMEOUT_MIN_MS,
+  max = OGRA_REPLY_TIMEOUT_MAX_MS
+): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const v = raw.trim();
+  if (!/^[1-9][0-9]{0,6}$/.test(v)) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
+  }
+  const n = parseInt(v, 10);
+  if (n < min || n > max) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
+  }
+  return n;
+}
+
 export function parseIdleMinutes(env: Env, name = 'RODRIGO_IDLE_TIMEOUT_MINUTES', defaultValue = 60, min = 1, max = 1440): number {
   const raw = env[name];
   if (raw === undefined || raw.trim() === '') return defaultValue;
@@ -224,7 +256,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
     autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false),
     ogra: parseFlag(env, 'RODRIGO_OGRA', false),
-    ograFallback: parseFlag(env, 'RODRIGO_OGRA_FALLBACK', true)
+    ograFallback: parseFlag(env, 'RODRIGO_OGRA_FALLBACK', true),
+    ograReplyTimeoutMs: parseOgraReplyTimeoutMs(env)
   };
 }
 

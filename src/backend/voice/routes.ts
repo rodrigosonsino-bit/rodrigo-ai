@@ -392,12 +392,28 @@ export async function handleOgraRoute(
       sendJson(res, 400, { error: 'Texto da resposta inválido.' });
       return true;
     }
-    if (typeof body.final !== 'boolean') {
-      sendJson(res, 400, { error: 'Campo final deve ser booleano.' });
+    let sessionId: string | undefined;
+    if (body.sessionId !== undefined) {
+      sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+      if (!sessionId || sessionId.length > 80 || !/^[A-Za-z0-9_.:-]+$/.test(sessionId)) {
+        sendJson(res, 400, { error: 'sessionId inválido.' });
+        return true;
+      }
+    }
+    let final = true;
+    if (body.final !== undefined) {
+      if (typeof body.final !== 'boolean') {
+        sendJson(res, 400, { error: 'Campo final deve ser booleano.' });
+        return true;
+      }
+      final = body.final;
+    }
+    const result = await deps.sessionManager.consumeOgraReply({ taskId, sessionId, text: body.text, final });
+    if (!result.ok) {
+      sendJson(res, result.status, { error: result.error });
       return true;
     }
-    const result = await deps.sessionManager.consumeOgraReply({ taskId, text: body.text, final: body.final });
-    sendJson(res, result.status, result.ok ? { ok: true } : { error: result.error });
+    sendJson(res, result.status, result.ignored ? { ok: true, ignored: true } : { ok: true });
     return true;
   }
 

@@ -29,7 +29,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       claudeCode: false,
       autoDesktop: false,
       ogra: false,
-      ograFallback: true
+      ograFallback: true,
+      ograReplyTimeoutMs: 120_000
     });
   });
 
