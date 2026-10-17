@@ -18,13 +18,20 @@ from pathlib import Path
 
 MODELS_DIR = Path.home() / ".venvs" / "tts-say" / "models"
 
+# As 3 vozes pt-BR do voices-v1.0.bin; espelha KOKORO_VOICES em ttsProviders.ts.
+VOICES = ("pf_dora", "pm_alex", "pm_santa")
+
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("Uso: kokoro_synth.py <output.wav>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print("Uso: kokoro_synth.py <output.wav> [pf_dora|pm_alex|pm_santa]", file=sys.stderr)
         return 1
 
     output_path = sys.argv[1]
+    voice = sys.argv[2] if len(sys.argv) == 3 else "pf_dora"
+    if voice not in VOICES:
+        print(f"Voz desconhecida: {voice}", file=sys.stderr)
+        return 1
     text = sys.stdin.read()
     if not text.strip():
         print("Texto vazio recebido via stdin.", file=sys.stderr)
@@ -43,7 +50,7 @@ def main() -> int:
         str(MODELS_DIR / "voices-v1.0.bin"),
     )
 
-    samples, sample_rate = kokoro.create(text, voice="pf_dora", speed=1.0, lang="pt-br")
+    samples, sample_rate = kokoro.create(text, voice=voice, speed=1.0, lang="pt-br")
     sf.write(output_path, samples, sample_rate)
     return 0
 
