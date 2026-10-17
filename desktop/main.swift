@@ -380,6 +380,7 @@ enum IconState: String {
     case processing = "processando"
     case speaking = "falando"
     case muted = "mutado"
+    case waiting = "aguardando"
 }
 
 final class FloatingIconView: NSView {
@@ -412,6 +413,9 @@ final class FloatingIconView: NSView {
 
     private let cMute1 = NSColor(red: 0.90, green: 0.35, blue: 0.15, alpha: 1)
     private let cMute2 = NSColor(red: 0.95, green: 0.20, blue: 0.20, alpha: 1)
+
+    private let cWait1 = NSColor(red: 0.95, green: 0.62, blue: 0.10, alpha: 1)
+    private let cWait2 = NSColor(red: 0.90, green: 0.40, blue: 0.05, alpha: 1)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -460,7 +464,13 @@ final class FloatingIconView: NSView {
         layer!.add(a, forKey: "popIn"); layer!.transform = CATransform3DIdentity
     }
 
+    private func clearSpin() {
+        disc.removeAnimation(forKey: "spin")
+        toolTip = nil
+    }
+
     private func breathe() {
+        clearSpin()
         glowRing.removeAllAnimations()
         bars.forEach { $0.removeAllAnimations() }
         CATransaction.begin()
@@ -487,6 +497,7 @@ final class FloatingIconView: NSView {
     }
 
     private func listenAnim() {
+        clearSpin()
         glowRing.removeAllAnimations()
         bars.forEach { $0.removeAllAnimations() }
         CATransaction.begin()
@@ -520,6 +531,7 @@ final class FloatingIconView: NSView {
     }
 
     private func processAnim() {
+        clearSpin()
         glowRing.removeAllAnimations()
         bars.forEach { $0.removeAllAnimations() }
         CATransaction.begin()
@@ -546,6 +558,7 @@ final class FloatingIconView: NSView {
     }
 
     private func speakAnim() {
+        clearSpin()
         glowRing.removeAllAnimations()
         bars.forEach { $0.removeAllAnimations() }
         CATransaction.begin()
@@ -572,6 +585,7 @@ final class FloatingIconView: NSView {
     }
 
     private func muteAnim() {
+        clearSpin()
         glowRing.removeAllAnimations()
         bars.forEach { $0.removeAllAnimations() }
         CATransaction.begin()
@@ -591,6 +605,39 @@ final class FloatingIconView: NSView {
         glowRing.add(o, forKey: "glow")
     }
 
+    private func waitAnim() {
+        glowRing.removeAllAnimations()
+        bars.forEach { $0.removeAllAnimations() }
+        disc.removeAnimation(forKey: "spin")
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.3)
+        disc.colors = [cWait1.cgColor, cWait2.cgColor]
+        disc.shadowColor = cWait1.cgColor
+        glowRing.backgroundColor = cWait1.withAlphaComponent(0.4).cgColor
+        for bar in bars {
+            bar.bounds.size.height = 4
+            bar.backgroundColor = NSColor.white.withAlphaComponent(0.92).cgColor
+        }
+        CATransaction.commit()
+
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = Double.pi * 2
+        spin.duration = 1.1
+        spin.repeatCount = .infinity
+        spin.isRemovedOnCompletion = false
+        disc.add(spin, forKey: "spin")
+
+        let o = CABasicAnimation(keyPath: "opacity")
+        o.fromValue = 0.35
+        o.toValue = 0.9
+        o.duration = 0.9
+        o.autoreverses = true
+        o.repeatCount = .infinity
+        glowRing.add(o, forKey: "glow")
+        toolTip = "Aguardando a Ogra"
+    }
+
     private func transitionTo(_ st: IconState) {
         switch st {
         case .idle: breathe()
@@ -598,6 +645,7 @@ final class FloatingIconView: NSView {
         case .processing: processAnim()
         case .speaking: speakAnim()
         case .muted: muteAnim()
+        case .waiting: waitAnim()
         }
     }
 
@@ -1226,6 +1274,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         guard message.name == "iconState", let stateStr = message.body as? String else { return }
         dlog("iconState: \(stateStr)")
+        if let button = status?.button {
+            let symbol = stateStr == "aguardando" ? "hourglass" : "waveform.circle"
+            let label = stateStr == "aguardando" ? "Aguardando a Ogra" : "Rodrigo AI"
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+            button.image?.isTemplate = true
+        }
         if stateStr == "mutado" {
             isMuted = true
             iconView?.iconState = .muted

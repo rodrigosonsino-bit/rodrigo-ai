@@ -14,6 +14,7 @@ A resposta da Ogra leva 10–60 s e chega inteira, não em stream. Por isso a in
 | `GROK_WEBHOOK_URL` | URL do webhook de saída. Só é usada com a flag em `1`. | vazia |
 | `GROK_WEBHOOK_KEY` | Bearer desse webhook. Não é impressa nem vai no corpo. | vazia |
 | `RODRIGO_OGRA_CALLBACK_TOKEN` | Token local de `POST /api/ogra/reply` e `POST /api/ogra/tool` (`Authorization: Bearer`, comparação em tempo constante). Sem ele os dois recusam. | vazio |
+| indicador `ogra_waiting` | Evento SSE `start`/`stop`. O painel mostra um spinner com "Aguardando a Ogra". Começa quando a fala é enviada. Para quando a resposta começa a ser falada, no prazo, no cancelamento ou no erro. Não há áudio de espera. | — |
 
 Com a flag em `0` o caminho de voz permanece o de hoje. A flag não depende de `RODRIGO_CLOUD`: é outro destino. O cartão de privacidade e `GET /api/privacy` declaram o canal (`ogra` / `sends.ograUtterance`). O áudio do usuário não sai.
 
@@ -22,7 +23,7 @@ Com a flag em `0` o caminho de voz permanece o de hoje. A flag não depende de `
 - `src/backend/agents/ograSubAgent.ts` — `ISubAgent`. Passa o texto por `guardText`, posta o payload (mesmo formato de `scripts/avisar-grok.sh`: `source`, `project`, `message`, `session`; mais `taskId`, `sessionId` e o catálogo do `ExtensionRegistry`) e devolve `kind: 'async_deferred'`. Não segue redirecionamento. Mutação neste agente exige `confirmationToken` do mesmo jeito que o OpenClaw (presente, prefixo do turno, emitido pelo gatekeeper).
 - `voiceRuntime.ts` registra o subagente só com `RODRIGO_OGRA=1`.
 - `DELEGAR_OGRA` em `src/shared/voiceProtocol.ts`. O worker de intenção não emite esse nome: o roteamento é do app.
-- `sessionManager.processTranscript` — depois de tratar confirmação pendente (mutação ou delegação), a fala vai à Ogra. No 2xx o Ork diz "Pensando..." e segura o turno até o callback ou o prazo. Se o POST falha, ou se a resposta não chega em `RODRIGO_OGRA_REPLY_TIMEOUT_MS`, e `RODRIGO_OGRA_FALLBACK=1`, o mesmo turno segue o caminho normal (classificação, ferramentas, geração) sem segunda ida à Ogra. Mutação nesse caminho pede SIM falado, mesmo com `RODRIGO_AUTO_CONFIRM=1`. A Ogra não entra em `GENERATION_MODELS`.
+- `sessionManager.processTranscript` — depois de tratar confirmação pendente (mutação ou delegação), a fala vai à Ogra. Não há áudio de espera (nem TTS, nem sinal). O evento `ogra_waiting` liga o indicador visual no envio e apaga na fala, no prazo, no cancelamento ou no erro. A tarefa fica pendente até o callback ou o prazo. Microfone mutado (`POST /api/voice/session/mute`) não inicia turno de áudio e não chama o webhook; texto digitado continua. Uma fala nova não encerra a tarefa anterior: a resposta dela, se chegar dentro do prazo, ainda é falada. Eco do TTS, inclusive "Pensando...", não abre tarefa nem chama o webhook. Com uma tarefa já pendente, a fala nova espera (há log) e o webhook sai só quando essa tarefa encerra. Só o cancelamento explícito do turno (`POST /api/voice/session/cancel`), o fim da sessão ou o prazo descartam essa resposta. Se o POST falha, ou se a resposta não chega em `RODRIGO_OGRA_REPLY_TIMEOUT_MS` com o turno ainda ativo, e `RODRIGO_OGRA_FALLBACK=1`, o mesmo turno segue o caminho normal (classificação, ferramentas, geração) sem segunda ida à Ogra. Mutação nesse caminho pede SIM falado, mesmo com `RODRIGO_AUTO_CONFIRM=1`. A Ogra não entra em `GENERATION_MODELS`.
 - `POST /api/ogra/reply` — contrato na seção abaixo. Host do `hostValidator` mais o token. O texto é dado não confiável (`memory/untrustedData.ts`: `neutralizeUntrusted`, depois o guarda de saída) e sai pelo TTS do turno.
 - `POST /api/ogra/tool` `{ taskId, tool, args }` — passa por `runSubAgentDelegation` nas leituras (política de capacidade, orçamento, auditoria do caminho que já existe). Mutação não executa neste POST.
 
@@ -61,7 +62,7 @@ O que o Ork responde:
 | HTTP | Corpo | Quando |
 |---|---|---|
 | 200 | `{ "ok": true }` | Texto aceito e mandado ao TTS |
-| 200 | `{ "ok": true, "ignored": true }` | Duplicata, resposta depois do prazo ou do cancelamento, ou `sessionId` que não é o da tarefa. Não fala de novo. Não lança. |
+| 200 | `{ "ok": true, "ignored": true }` | Duplicata, resposta depois do prazo, resposta depois do cancelamento explícito do turno, ou `sessionId` que não é o da tarefa. Uma fala nova não entra aqui. Não fala de novo. Não lança. |
 | 401 | `{ "error": "Token do callback recusado." }` | Token ausente ou errado |
 | 404 | `{ "error": "Tarefa desconhecida." }` | `taskId` que não está pendente e não foi encerrado aqui. Registrado em log, sem fala |
 | 409 | `{ "error": "Sessão da tarefa não está ativa." }` | A sessão dona da tarefa não é a sessão corrente |

@@ -40,6 +40,8 @@ import {
 import { ograCallbackAuthorized } from '../agents/ograCallbackAuth.js';
 import { OGRA_PHASE1_REFUSAL, classifyOgraTool } from '../agents/ograPolicy.js';
 import type { OpenClawHttpClient } from '../agents/openClawHttpClient.js';
+import { type OgraCuePlayback, type PlayOgraCue } from '../voice/ograCue.js';
+import { buildTestWav } from './helpers/egress.js';
 
 const CALLBACK_TOKEN = 'token-de-teste-ogra';
 
@@ -65,6 +67,8 @@ interface Harness {
   dir: string;
   mutating: MutatingToolsResult;
   fetches: FetchCall[];
+  /** 'cue' no momento do sinal, 'post' na entrada do fetch do webhook. */
+  cueOrder: string[];
   /** Quando definido, o webhook fica pendente até `releaseFetch`. */
   releaseFetch: ((response: Response) => void) | null;
 }
@@ -107,6 +111,8 @@ async function setup(opts: {
   registerEvenIfOff?: boolean;
   /** Prazo da resposta depois do 2xx. undefined = padrão (120000). */
   ograReplyTimeoutMs?: number;
+  /** Sinal injetado. O harness registra 'cue' antes de chamá-lo. */
+  playOgraCue?: PlayOgraCue;
 }): Promise<Harness> {
   const port = nextPort();
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
@@ -124,8 +130,10 @@ async function setup(opts: {
   const privacy: PrivacyConfig = parsePrivacyConfig(privacyEnv);
   const mutating = createMutatingTools(dir);
   const fetches: FetchCall[] = [];
+  const cueOrder: string[] = [];
   const pending: { releaseFetch: ((response: Response) => void) | null } = { releaseFetch: null };
   const fetchImpl: typeof fetch = async (url, init) => {
+    cueOrder.push('post');
     fetches.push({ url: String(url), init: init ?? {} });
     if (opts.hangUntilAbort) {
       return new Promise<Response>((_resolve, reject) => {
@@ -157,7 +165,14 @@ async function setup(opts: {
     mutating.tools,
     null,
     privacy,
-    { autoConfirm: opts.autoConfirm ?? false, ograReplyTimeoutMs: opts.ograReplyTimeoutMs },
+    {
+      autoConfirm: opts.autoConfirm ?? false,
+      ograReplyTimeoutMs: opts.ograReplyTimeoutMs,
+      playOgraCue: async (playback: OgraCuePlayback) => {
+        cueOrder.push('cue');
+        await opts.playOgraCue?.(playback);
+      }
+    },
     null
   );
   const agentOpts = {
@@ -184,6 +199,7 @@ async function setup(opts: {
     dir,
     mutating,
     fetches,
+    cueOrder,
     get releaseFetch() {
       return pending.releaseFetch;
     },
@@ -267,6 +283,67 @@ function rawPost(
 
 function payloadOf(call: FetchCall): OgraWebhookPayload {
   return JSON.parse(String(call.init.body)) as OgraWebhookPayload;
+}
+
+function assertNoAck(h: Harness): void {
+  assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
+}
+
+/** Sem resposta falada da Ogra, o sinal não toca. */
+function assertNoCue(h: Harness): void {
+  assert.equal(h.cueOrder.filter((e) => e === 'cue').length, 0, `sinal ${h.cueOrder.join(',')}`);
+  assertNoAck(h);
+}
+
+function ograWaitingPhases(events: unknown[]): Array<{ phase: string; turnId?: string }> {
+  return events.filter((event): event is { type: string; phase: string; turnId?: string } => {
+    return typeof event === 'object' && event !== null && (event as { type?: string }).type === 'ogra_waiting';
+  });
+}
+
+function readSse(url: string): { events: unknown[]; close: () => void; waitFor: (n: number, timeoutMs?: number) => Promise<void> } {
+  const events: unknown[] = [];
+  const controller = new AbortController();
+  let resolveWait: (() => void) | null = null;
+  let waitCount = 0;
+  void fetch(url, { signal: controller.signal })
+    .then(async (res) => {
+      const reader = res.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!line) continue;
+          events.push(JSON.parse(line.slice(6)));
+          if (resolveWait && events.length >= waitCount) {
+            resolveWait();
+            resolveWait = null;
+          }
+        }
+      }
+    })
+    .catch(() => {});
+  return {
+    events,
+    close: () => controller.abort(),
+    waitFor: (n: number, timeoutMs = 3000) =>
+      new Promise<void>((resolve, reject) => {
+        if (events.length >= n) {
+          resolve();
+          return;
+        }
+        waitCount = n;
+        resolveWait = resolve;
+        setTimeout(() => reject(new Error(`Timeout esperando ${n} eventos SSE (recebidos: ${events.length})`)), timeoutMs);
+      })
+  };
 }
 
 const DUMMY_OPENCLAW: OpenClawHttpClient = {
@@ -593,14 +670,16 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await say(h, session, 'olá');
     await waitFor(() => h!.engine.classifyCalls.length > 0, 'classify');
     assert.equal(h.fetches.length, 0);
-    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
+    assert.deepEqual(h.cueOrder, []);
+    assertNoAck(h);
   });
 
-  it('flag ligada: a fala vai à Ogra, confirma por voz e não classifica nem gera', async () => {
+  it('flag ligada: a fala vai à Ogra sem sinal antes do webhook, e não classifica nem gera', async () => {
     h = await setup({ ogra: true });
     const session = await openSession(h);
     await say(h, session, 'olá');
-    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'ack');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.generateCalls.length, 0);
     assert.equal(h.fetches.length, 1);
@@ -622,6 +701,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     h.engine.releaseClassifyGate(turnId);
     await waitFor(() => h!.tts.synthesizeCalls.length > 0, 'turno local');
     assert.equal(h.tts.synthesizeCalls.includes('fala tardia que deve sumir'), false);
+    assert.deepEqual(h.cueOrder, []);
 
     await teardown(h);
     h = await setup({ ogra: true, hangFetch: true });
@@ -641,13 +721,9 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     h.releaseFetch?.(new Response('', { status: 200 }));
     h.releaseFetch = null;
     await said;
-    await waitFor(
-      () => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT) && h!.tts.synthesizeCalls.includes('resposta tardia da ogra'),
-      'dreno'
-    );
-    const ackAt = h.tts.synthesizeCalls.indexOf(OGRA_ACK_TEXT);
-    const replyAt = h.tts.synthesizeCalls.indexOf('resposta tardia da ogra');
-    assert.ok(ackAt >= 0 && replyAt > ackAt, `ordem ${h.tts.synthesizeCalls.join(' | ')}`);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('resposta tardia da ogra'), 'dreno');
+    assertNoCue(h);
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'resposta tardia da ogra').length, 1);
   });
 
   it('reply: host ruim, token ruim e flag desligada recusam; texto não confiável é neutralizado ou bloqueado', async () => {
@@ -681,6 +757,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     const session = await openSession(h);
     await say(h, session, 'olá');
     await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const taskId = payloadOf(h.fetches[0]).taskId;
 
     const internal = h.sm as unknown as { current: { id: string } | null };
@@ -705,6 +782,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await waitFor(() => h!.tts.synthesizeCalls.some((s) => s.includes('[delimitador removido]')), 'neutralizado');
     const spoken = h.tts.synthesizeCalls.find((s) => s.includes('[delimitador removido]')) ?? '';
     assert.doesNotMatch(spoken, /<<<DADOS/);
+    assertNoCue(h);
 
     await teardown(h);
     h = await setup({ ogra: false });
@@ -734,6 +812,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     const session = await openSession(h);
     await say(h, session, 'olá');
     await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const taskId = payloadOf(h.fetches[0]).taskId;
     const res = await rawPost(
       h.port,
@@ -743,6 +822,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     );
     assert.equal(res.status, 200);
     await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_REPLY_BLOCKED_TEXT), 'bloqueio');
+    assertNoCue(h);
     assert.equal(h.tts.synthesizeCalls.some((s) => s.includes('Jacaranda2026')), false);
   });
 
@@ -750,7 +830,8 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     h = await setup({ ogra: true, autoConfirm: true });
     const session = await openSession(h);
     const turnId = await say(h, session, 'olá');
-    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'ack');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const taskId = payloadOf(h.fetches[0]).taskId;
     assert.equal(h.sm.peekMutationConfirmationToken(turnId), undefined);
 
@@ -819,6 +900,8 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(stored.items.length, 1);
     assert.equal(stored.items[0].text, 'comprar pao');
     assert.equal(h.fetches.length, 1, 'o sim local não vai à Ogra');
+    assert.equal(h.cueOrder.filter((e) => e === 'cue').length, 0, 'ferramenta e o sim local não tocam o sinal');
+    assertNoAck(h);
     assert.equal(h.sm.peekMutationConfirmationToken(turnId), undefined);
   });
 
@@ -832,8 +915,8 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(payloadOf(h.fetches[0]).message, 'olá');
     assert.equal(h.engine.classifyCalls.length, 1);
     assert.equal(h.engine.classifyCalls[0].text, 'olá');
+    assertNoCue(h);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
-    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
     assert.ok(h.tts.synthesizeCalls.includes('Segui pelo caminho normal.'));
     const noticeAt = h.tts.synthesizeCalls.indexOf(OGRA_FALLBACK_NOTICE);
     const answerAt = h.tts.synthesizeCalls.indexOf('Segui pelo caminho normal.');
@@ -848,6 +931,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await say(h, session, 'olá');
     await waitFor(() => h!.engine.generateCalls.length === 1, 'geração após prazo', 4000);
     assert.equal(h.fetches.length, 1);
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 1);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
     assert.equal(h.tts.synthesizeCalls.filter((s) => s.startsWith(OGRA_WEBHOOK_FAILED_TEXT)).length, 0);
@@ -864,6 +948,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
       'fala de falha e turno encerrado'
     );
     assert.equal(h.fetches.length, 1);
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.generateCalls.length, 0);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
@@ -876,8 +961,8 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     h.engine.sentencesToEmit = ['Não devia gerar.'];
     const session = await openSession(h);
     await say(h, session, 'olá');
-    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'ack');
-    assert.equal(h.fetches.length, 1);
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.generateCalls.length, 0);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
@@ -890,7 +975,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     const session = await openSession(h);
     await say(h, session, 'olá');
     await waitFor(() => h!.tts.synthesizeCalls.includes('Sem webhook, sigo aqui.'), 'geração sem webhook');
-    assert.equal(h.fetches.length, 0);
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 1);
     assert.equal(h.engine.generateCalls.length, 1);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
@@ -915,6 +1000,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await say(h, session2, 'olá de novo');
     await waitFor(() => h!.tts.synthesizeCalls.includes('Depois do erro de rede.'), 'geração após rede');
     assert.equal(networkErrors, 1, 'a reserva não chama a Ogra outra vez');
+    assertNoCue(h);
     assert.equal(h.engine.generateCalls.length, 1);
   });
 
@@ -933,6 +1019,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
       const early = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { items: unknown[] };
       assert.equal(early.items.length, 0);
     }
+    assertNoCue(h);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
 
     const played = await fetch(`${h.baseUrl}/api/voice/session/played`, {
@@ -955,12 +1042,13 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(h.fetches.length, 1, 'o sim não vai à Ogra');
   });
 
-  it('ack e depois a resposta do callback é falada no turno, sem classificar nem gerar', async () => {
+  it('a resposta do callback é falada no turno, sem ack sintetizado e sem classificar nem gerar', async () => {
     h = await setup({ ogra: true, cloud: true });
     h.engine.sentencesToEmit = ['Não devia gerar.'];
     const session = await openSession(h);
     await say(h, session, 'qual a capital');
-    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'espera');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const taskId = payloadOf(h.fetches[0]).taskId;
     const reply = await rawPost(
       h.port,
@@ -972,9 +1060,9 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(reply.json.ok, true);
     assert.equal(reply.json.ignored, undefined);
     await waitFor(() => h!.tts.synthesizeCalls.includes('A capital é Brasília.'), 'resposta falada');
-    const ackAt = h.tts.synthesizeCalls.indexOf(OGRA_ACK_TEXT);
-    const replyAt = h.tts.synthesizeCalls.indexOf('A capital é Brasília.');
-    assert.ok(ackAt >= 0 && replyAt > ackAt);
+    assertNoCue(h);
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'A capital é Brasília.').length, 1);
+    assertNoAck(h);
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.generateCalls.length, 0);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
@@ -988,14 +1076,13 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await say(h, session, 'olá');
     await waitFor(() => h!.engine.generateCalls.length === 1, 'geração após o prazo', 4000);
     assert.equal(h.fetches.length, 1);
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 1);
-    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), true);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
     assert.ok(h.tts.synthesizeCalls.includes('Segui sem a Ogra.'));
-    const ackAt = h.tts.synthesizeCalls.indexOf(OGRA_ACK_TEXT);
     const noticeAt = h.tts.synthesizeCalls.indexOf(OGRA_FALLBACK_NOTICE);
     const answerAt = h.tts.synthesizeCalls.indexOf('Segui sem a Ogra.');
-    assert.ok(ackAt >= 0 && noticeAt > ackAt && answerAt > noticeAt);
+    assert.ok(noticeAt >= 0 && answerAt > noticeAt);
     const taskId = payloadOf(h.fetches[0]).taskId;
     const late = await rawPost(
       h.port,
@@ -1020,10 +1107,11 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
       'frase de prazo e turno encerrado'
     );
     assert.equal(h.fetches.length, 1);
+    assertNoCue(h);
     assert.equal(h.engine.classifyCalls.length, 0);
     assert.equal(h.engine.generateCalls.length, 0);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), false);
-    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), true);
+    assert.equal(h.tts.synthesizeCalls.includes('A Ogra não respondeu a tempo.'), true);
   });
 
   it('token errado no callback responde 401 e não fala o texto', async () => {
@@ -1031,6 +1119,7 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     const session = await openSession(h);
     await say(h, session, 'olá');
     await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const taskId = payloadOf(h.fetches[0]).taskId;
     const wrong = await rawPost(
       h.port,
@@ -1046,7 +1135,8 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     h = await setup({ ogra: true });
     const session = await openSession(h);
     await say(h, session, 'olá');
-    await waitFor(() => h!.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), 'espera');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const unknown = await rawPost(
       h.port,
       '/api/ogra/reply',
@@ -1065,17 +1155,20 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     const session = await openSession(h);
     await say(h, session, 'olá');
     await waitFor(() => h!.fetches.length === 1, 'webhook');
+    assertNoCue(h);
     const taskId = payloadOf(h.fetches[0]).taskId;
     const body = JSON.stringify({ taskId, sessionId: session.sessionId, text: 'só uma vez' });
     const first = await rawPost(h.port, '/api/ogra/reply', { Authorization: `Bearer ${CALLBACK_TOKEN}` }, body);
     assert.equal(first.status, 200);
     assert.equal(first.json.ignored, undefined);
     await waitFor(() => h!.tts.synthesizeCalls.includes('só uma vez'), 'primeira fala');
+    assertNoCue(h);
     const second = await rawPost(h.port, '/api/ogra/reply', { Authorization: `Bearer ${CALLBACK_TOKEN}` }, body);
     assert.equal(second.status, 200);
     assert.equal(second.json.ignored, true);
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'só uma vez').length, 1);
+    assertNoCue(h);
     assert.equal(h.engine.generateCalls.length, 0);
     assert.equal(h.engine.classifyCalls.length, 0);
   });
@@ -1095,7 +1188,341 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
       const early = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { items: unknown[] };
       assert.equal(early.items.length, 0);
     }
+    assertNoCue(h);
     assert.equal(h.tts.synthesizeCalls.includes(OGRA_FALLBACK_NOTICE), true);
-    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), true);
+  });
+
+  it('ogra_waiting começa no envio e para quando a resposta é falada, sem áudio de espera', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${session.sessionId}&token=${session.token}`);
+    await sse.waitFor(1);
+    const turnId = await say(h, session, 'olá');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    await waitFor(() => ograWaitingPhases(sse.events).some((e) => e.phase === 'start'), 'indicador liga');
+    assertNoCue(h);
+    assert.equal(
+      (sse.events as Array<{ type?: string; text?: string }>).some(
+        (e) => e.type === 'sentence_audio_ready' && e.text === ''
+      ),
+      false,
+      'não há áudio de espera'
+    );
+    const started = ograWaitingPhases(sse.events).filter((e) => e.phase === 'start');
+    assert.equal(started.length, 1);
+    assert.equal(started[0].turnId, turnId);
+
+    const taskId = payloadOf(h.fetches[0]).taskId;
+    const reply = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId, sessionId: session.sessionId, text: 'A resposta chegou.' })
+    );
+    assert.equal(reply.status, 200);
+    assert.equal(reply.json.ignored, undefined);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('A resposta chegou.'), 'resposta falada');
+    await waitFor(() => ograWaitingPhases(sse.events).some((e) => e.phase === 'stop'), 'indicador desliga');
+    await waitFor(
+      () =>
+        (sse.events as Array<{ type?: string; text?: string }>).some(
+          (e) => e.type === 'sentence_audio_ready' && e.text === 'A resposta chegou.'
+        ),
+      'áudio da resposta'
+    );
+    const events = sse.events as Array<{ type?: string; phase?: string; text?: string }>;
+    const startAt = events.findIndex((e) => e.type === 'ogra_waiting' && e.phase === 'start');
+    const stopAt = events.findIndex((e) => e.type === 'ogra_waiting' && e.phase === 'stop');
+    const audioAt = events.findIndex((e) => e.type === 'sentence_audio_ready' && e.text === 'A resposta chegou.');
+    assert.ok(startAt >= 0 && stopAt > startAt && audioAt > stopAt, `ordem ${startAt},${stopAt},${audioAt}`);
+    assert.equal(ograWaitingPhases(sse.events).filter((e) => e.phase === 'stop').length, 1);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
+    assertNoCue(h);
+    sse.close();
+  });
+
+  it('ogra_waiting para no cancelamento, no prazo e no erro do webhook', async () => {
+    h = await setup({ ogra: true, ograReplyTimeoutMs: 5000 });
+    const session = await openSession(h);
+    const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${session.sessionId}&token=${session.token}`);
+    await sse.waitFor(1);
+    const turnId = await say(h, session, 'olá');
+    await waitFor(() => ograWaitingPhases(sse.events).some((e) => e.phase === 'start'), 'indicador liga');
+    const cancel = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rodrigo-Session': session.sessionId,
+        'X-Rodrigo-Token': session.token
+      },
+      body: JSON.stringify({ turnId })
+    });
+    assert.equal(cancel.status, 200);
+    await waitFor(() => ograWaitingPhases(sse.events).some((e) => e.phase === 'stop'), 'indicador desliga no cancelamento');
+    assertNoCue(h);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
+    sse.close();
+
+    await teardown(h);
+    h = await setup({ ogra: true, cloud: true, ograFallback: false, ograReplyTimeoutMs: 80 });
+    const session2 = await openSession(h);
+    const sse2 = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${session2.sessionId}&token=${session2.token}`);
+    await sse2.waitFor(1);
+    await say(h, session2, 'olá');
+    await waitFor(() => ograWaitingPhases(sse2.events).some((e) => e.phase === 'start'), 'indicador liga no prazo');
+    await waitFor(() => ograWaitingPhases(sse2.events).some((e) => e.phase === 'stop'), 'indicador desliga no prazo', 4000);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('A Ogra não respondeu a tempo.'), 'frase de prazo', 4000);
+    await waitFor(
+      () =>
+        (sse2.events as Array<{ type?: string; text?: string }>).some(
+          (e) => e.type === 'sentence_audio_ready' && e.text === 'A Ogra não respondeu a tempo.'
+        ),
+      'áudio da frase de prazo',
+      4000
+    );
+    const timed = sse2.events as Array<{ type?: string; phase?: string; text?: string }>;
+    const stopAt = timed.findIndex((e) => e.type === 'ogra_waiting' && e.phase === 'stop');
+    const phraseAt = timed.findIndex((e) => e.type === 'sentence_audio_ready' && e.text === 'A Ogra não respondeu a tempo.');
+    assert.ok(stopAt >= 0 && phraseAt > stopAt, 'o indicador apaga antes da frase de prazo');
+    assert.equal(ograWaitingPhases(sse2.events).filter((e) => e.phase === 'start').length, 1);
+    assertNoCue(h);
+    sse2.close();
+
+    await teardown(h);
+    h = await setup({ ogra: true, ograFallback: false, httpStatus: 500 });
+    const session3 = await openSession(h);
+    const sse3 = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${session3.sessionId}&token=${session3.token}`);
+    await sse3.waitFor(1);
+    await say(h, session3, 'olá');
+    await waitFor(() => h!.fetches.length === 1, 'webhook com erro');
+    await waitFor(() => ograWaitingPhases(sse3.events).some((e) => e.phase === 'start'), 'indicador liga no erro');
+    await waitFor(() => ograWaitingPhases(sse3.events).some((e) => e.phase === 'stop'), 'indicador desliga no erro');
+    const phases = ograWaitingPhases(sse3.events).map((e) => e.phase);
+    assert.deepEqual(phases, ['start', 'stop']);
+    assertNoCue(h);
+    assert.equal(h.tts.synthesizeCalls.includes(OGRA_ACK_TEXT), false);
+    sse3.close();
+  });
+
+  it('fala nova não descarta a tarefa anterior; cancelamento explícito sim', async () => {
+    h = await setup({ ogra: true, cloud: true, ograReplyTimeoutMs: 5000 });
+    const session = await openSession(h);
+    const turn1 = await say(h, session, 'primeira');
+    await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    const turn2 = await say(h, session, 'segunda');
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(h.fetches.length, 1, 'segunda espera a tarefa pendente');
+    assert.notEqual(turn1, turn2);
+    assertNoCue(h);
+
+    const older = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'resposta da primeira' })
+    );
+    assert.equal(older.status, 200);
+    assert.equal(older.json.ok, true);
+    assert.equal(older.json.ignored, undefined);
+    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda depois da primeira');
+    const task2 = payloadOf(h.fetches[1]).taskId;
+    assert.notEqual(task1, task2);
+    assert.equal(payloadOf(h.fetches[1]).message, 'segunda');
+    await waitFor(() => h!.tts.synthesizeCalls.includes('resposta da primeira'), 'resposta anterior falada');
+    assertNoCue(h);
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'resposta da primeira').length, 1);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+
+    const cancel = await fetch(`${h.baseUrl}/api/voice/session/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rodrigo-Session': session.sessionId,
+        'X-Rodrigo-Token': session.token
+      },
+      body: JSON.stringify({ turnId: turn2 })
+    });
+    assert.equal(cancel.status, 200);
+    const dropped = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task2, sessionId: session.sessionId, text: 'resposta da segunda' })
+    );
+    assert.equal(dropped.status, 200);
+    assert.equal(dropped.json.ok, true);
+    assert.equal(dropped.json.ignored, true);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(h.tts.synthesizeCalls.includes('resposta da segunda'), false);
+  });
+
+  it('o prazo da tarefa anterior segue depois que uma fala nova a substitui', async () => {
+    h = await setup({ ogra: true, cloud: true, ograFallback: false, ograReplyTimeoutMs: 500 });
+    const session = await openSession(h);
+    await say(h, session, 'primeira');
+    await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    await say(h, session, 'segunda');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(h.fetches.length, 1, 'segunda não abre webhook enquanto a primeira está pendente');
+    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda quando a primeira encerra', 4000);
+    assert.equal(payloadOf(h.fetches[1]).message, 'segunda');
+    await waitFor(
+      () => h!.tts.synthesizeCalls.includes('A Ogra não respondeu a tempo.'),
+      'prazo da tarefa ainda ativa',
+      4000
+    );
+    const late = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'resposta da primeira' })
+    );
+    assert.equal(late.status, 200);
+    assert.equal(late.json.ignored, true);
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(h.tts.synthesizeCalls.includes('resposta da primeira'), false);
+  });
+
+  it('microfone mutado não processa o áudio nem chama o webhook da Ogra', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    const headers = {
+      'X-Rodrigo-Session': session.sessionId,
+      'X-Rodrigo-Token': session.token,
+      'Content-Type': 'application/json'
+    };
+    const mute = await fetch(`${h.baseUrl}/api/voice/session/mute`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ muted: true })
+    });
+    assert.equal(mute.status, 200);
+    const audio = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: {
+        'X-Rodrigo-Session': session.sessionId,
+        'X-Rodrigo-Token': session.token,
+        'Content-Type': 'audio/wav'
+      },
+      body: buildTestWav(1)
+    });
+    const audioBody = (await audio.json()) as { ignored?: boolean; turnId?: string };
+    assert.equal(audio.status, 200);
+    assert.equal(audioBody.ignored, true);
+    assert.equal(audioBody.turnId, undefined);
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 0, 'mudo não posta o webhook');
+    assert.equal(h.engine.transcribeCalls.length, 0, 'mudo não transcreve');
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assertNoCue(h);
+
+    await say(h, session, 'texto digitado');
+    await waitFor(() => h!.fetches.length === 1, 'digitação segue com o microfone mudo');
+    assert.equal(payloadOf(h.fetches[0]).message, 'texto digitado');
+    const typedTask = payloadOf(h.fetches[0]).taskId;
+    const typedReply = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: typedTask, sessionId: session.sessionId, text: 'Recebi o texto.' })
+    );
+    assert.equal(typedReply.status, 200);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('Recebi o texto.'), 'texto falado antes do áudio');
+
+    const unmute = await fetch(`${h.baseUrl}/api/voice/session/mute`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ muted: false })
+    });
+    assert.equal(unmute.status, 200);
+    const again = await fetch(`${h.baseUrl}/api/voice/session/audio`, {
+      method: 'POST',
+      headers: {
+        'X-Rodrigo-Session': session.sessionId,
+        'X-Rodrigo-Token': session.token,
+        'Content-Type': 'audio/wav'
+      },
+      body: buildTestWav(1)
+    });
+    const againBody = (await again.json()) as { turnId?: string; ignored?: boolean };
+    assert.equal(again.status, 200);
+    assert.equal(againBody.ignored, undefined);
+    assert.ok(againBody.turnId);
+    await waitFor(() => h!.fetches.length === 2, 'áudio depois de reativar vai à Ogra');
+  });
+
+  it('eco "Pensando..." não abre tarefa da Ogra', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    for (const text of ['Pensando...', 'pensando', 'Pensando']) {
+      await say(h, session, text);
+    }
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assertNoAck(h);
+    assertNoCue(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.fetches.length === 1, 'fala real chama o webhook');
+    assert.equal(payloadOf(h.fetches[0]).message, 'olá');
+    assert.equal(h.fetches.length, 1);
+  });
+
+  it('eco do TTS com tarefa pendente não abre outra, e a resposta pendente é falada', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    await say(h, session, 'qual a capital');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    await say(h, session, 'Pensando...');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 1, 'eco não chama o webhook');
+    const reply = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'A capital é Brasília.' })
+    );
+    assert.equal(reply.status, 200);
+    assert.equal(reply.json.ignored, undefined);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('A capital é Brasília.'), 'resposta falada');
+    await new Promise((r) => setTimeout(r, 50));
+    await say(h, session, 'A capital é Brasília.');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 1, 'eco da resposta não abre tarefa');
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'A capital é Brasília.').length, 1);
+    assertNoAck(h);
+  });
+
+  it('fala nova com tarefa pendente espera e só então chama o webhook uma vez', async () => {
+    h = await setup({ ogra: true, ograReplyTimeoutMs: 5000 });
+    const session = await openSession(h);
+    await say(h, session, 'primeira');
+    await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    await say(h, session, 'segunda');
+    await say(h, session, 'terceira');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(h.fetches.length, 1);
+    const older = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'resposta da primeira' })
+    );
+    assert.equal(older.status, 200);
+    assert.equal(older.json.ignored, undefined);
+    await waitFor(() => h!.fetches.length === 2, 'um webhook da fala que ficou na fila');
+    assert.equal(payloadOf(h.fetches[1]).message, 'terceira');
+    assert.notEqual(payloadOf(h.fetches[1]).taskId, task1);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('resposta da primeira'), 'resposta pendente falada');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 2, 'não há rajada');
+    assertNoAck(h);
   });
 });

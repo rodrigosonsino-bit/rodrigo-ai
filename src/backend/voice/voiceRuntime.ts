@@ -12,6 +12,7 @@ import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
 import { UsageLedger, parseUsageCaps } from './usageLedger.js';
 import { SessionManager, parseAutoConfirm } from './sessionManager.js';
+import { createDefaultPlayOgraCue } from './ograCue.js';
 import { createDynamicVoiceProvider } from './ttsProviders.js';
 import { GeminiVoiceProvider } from './geminiVoiceProvider.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
@@ -183,7 +184,7 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     mutatingTools,
     memoriaStore,
     privacy,
-    { autoConfirm },
+    { autoConfirm, playOgraCue: createDefaultPlayOgraCue(process.env) },
     pendingAsyncStore,
     coordinator
   );

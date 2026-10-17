@@ -176,6 +176,23 @@ export async function handleVoiceRoute(
     return true;
   }
 
+  if (pathname === '/api/voice/session/mute' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readJsonBody(req, 4096)) as Record<string, unknown>;
+    } catch {
+      sendJson(res, 400, { error: 'JSON inválido.' });
+      return true;
+    }
+    if (typeof body.muted !== 'boolean') {
+      sendJson(res, 400, { error: 'muted precisa ser booleano.' });
+      return true;
+    }
+    const ok = deps.sessionManager.setMicMuted(sessionId, token, body.muted);
+    sendJson(res, ok ? 200 : 401, ok ? { ok: true, muted: body.muted } : { error: 'Sessão inválida ou expirada.' });
+    return true;
+  }
+
   if (pathname === '/api/voice/session/audio' && req.method === 'POST') {
     let bodyBuffer: Buffer;
     try {
@@ -205,6 +222,10 @@ export async function handleVoiceRoute(
     const result = await deps.sessionManager.submitAudio(sessionId, token, audioPath);
     if ('error' in result) {
       sendJson(res, 401, { error: result.error });
+      return true;
+    }
+    if ('ignored' in result) {
+      sendJson(res, 200, { ok: true, ignored: true });
       return true;
     }
     sendJson(res, 200, { turnId: result.turnId });

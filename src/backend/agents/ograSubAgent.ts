@@ -7,14 +7,14 @@ import { DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 export const OGRA_AGENT_ID = 'ogra';
 
 /**
- * Fala curta do Ork depois do 2xx do webhook, enquanto POST /api/ogra/reply não chega.
- * O webhook só acusa o recebimento; a resposta é o callback.
+ * Frase que o Ork já não fala. A espera da Ogra é só visual (`ogra_waiting`).
+ * A constante fica para o teste garantir que o TTS não a sintetiza.
  */
 export const OGRA_HOLDING_TEXT = 'Pensando...';
-/** Mesma frase de OGRA_HOLDING_TEXT: o 2xx não é a resposta, é a espera. */
+/** Mesma frase de OGRA_HOLDING_TEXT. Não é sintetizada. */
 export const OGRA_ACK_TEXT = OGRA_HOLDING_TEXT;
 
-/** Silêncio depois do ack, com RODRIGO_OGRA_FALLBACK=0: o turno encerra com esta frase. */
+/** Silêncio depois do 2xx, com RODRIGO_OGRA_FALLBACK=0: o turno encerra com esta frase. */
 export const OGRA_REPLY_TIMEOUT_TEXT = 'A Ogra não respondeu a tempo.';
 
 export const OGRA_BLOCKED_TEXT =

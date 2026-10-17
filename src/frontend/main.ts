@@ -339,6 +339,20 @@ const voiceScreenBtn = document.getElementById('voice-screen-btn') as HTMLButton
 const voiceScreenNote = document.getElementById('voice-screen-note') as HTMLParagraphElement;
 const voiceTranscriptLog = document.getElementById('voice-transcript-log') as HTMLDivElement;
 const voiceAgentIndicator = document.getElementById('voice-agent-indicator') as HTMLSpanElement;
+const ograWaitingEl = document.getElementById('ogra-waiting') as HTMLElement;
+
+let ograWaiting = false;
+
+function publishVoiceIcon(state: string): void {
+  const shown = muted ? 'mutado' : ograWaiting && state !== 'falando' ? 'aguardando' : state;
+  (window as unknown as { webkit?: { messageHandlers?: { iconState?: { postMessage: (s: string) => void } } } }).webkit?.messageHandlers?.iconState?.postMessage(shown);
+}
+
+function setOgraWaiting(waiting: boolean): void {
+  ograWaiting = waiting;
+  ograWaitingEl.hidden = !waiting;
+  publishVoiceIcon(voiceController.getState());
+}
 
 const VOICE_STATE_LABELS: Record<string, string> = {
   idle: 'Parado — clique em "Iniciar conversa" para começar.',
@@ -407,8 +421,7 @@ const voiceController = new VoiceController(
       if (state === 'processando' || state === 'erro') {
         resetAgentIndicator();
       }
-      const effectiveState = muted ? 'mutado' : state;
-      (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
+      publishVoiceIcon(state);
     },
   (text) => appendTranscriptEntry('Você', text),
   (text) => appendTranscriptEntry('Orque', text),
@@ -427,7 +440,8 @@ const voiceController = new VoiceController(
     voiceScreenBtn.textContent = sharing ? 'Parar compartilhamento' : 'Compartilhar tela';
     voiceScreenNote.hidden = !sharing;
   },
-  (message) => appendNoticeEntry(message)
+  (message) => appendNoticeEntry(message),
+  (waiting) => setOgraWaiting(waiting)
 );
 
 voiceStartBtn.addEventListener('click', () => {
@@ -457,6 +471,7 @@ voiceEndBtn.addEventListener('click', () => {
     voiceMuteBtn.setAttribute('aria-pressed', 'false');
     voiceMuteBtn.textContent = 'Silenciar microfone';
     resetAgentIndicator();
+    setOgraWaiting(false);
   })();
 });
 
@@ -600,6 +615,7 @@ voiceTypeInput.addEventListener('keydown', (ev: KeyboardEvent) => {
     voiceMuteBtn.setAttribute('aria-pressed', 'false');
     voiceMuteBtn.textContent = 'Silenciar microfone';
     resetAgentIndicator();
+    setOgraWaiting(false);
     (window as any).webkit?.messageHandlers?.iconState?.postMessage('idle');
     return 'stopped';
   } catch (e) {
@@ -615,8 +631,7 @@ voiceTypeInput.addEventListener('keydown', (ev: KeyboardEvent) => {
     voiceController.muteMicrophone(muted);
     voiceMuteBtn.setAttribute('aria-pressed', String(muted));
     voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
-    const stateToSend = muted ? 'mutado' : voiceController.getState();
-    (window as any).webkit?.messageHandlers?.iconState?.postMessage(stateToSend);
+    publishVoiceIcon(voiceController.getState());
     return muted ? 'muted' : 'unmuted';
   } catch (e) {
     return 'error:' + (e instanceof Error ? e.message : String(e));

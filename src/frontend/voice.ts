@@ -13,6 +13,7 @@ import {
   SPEAKERPHONE_STORAGE_KEY,
   vadThresholds
 } from '../shared/speakerphoneProfile.ts';
+import { micIgnoredWhileOutput, OUTPUT_TAIL_MS } from '../shared/ttsEcho.ts';
 
 // --- Parâmetros de VAD (Fase 2 v2 + adendo) ---
 const PRE_ROLL_MS = 400; // Preserva 400ms de áudio pré-início para garantir integridade do onset com tolerância
@@ -56,6 +57,8 @@ export class VoiceController {
   private ringBuffer: Float32Array[] = [];
   private ringBufferMs = 0;
   private recording = false;
+  /** Silenciar o microfone. A track.enabled sozinha não zera o worklet no WKWebView. */
+  private micMuted = false;
   private recordedChunks: Float32Array[] = [];
   private recordedMs = 0;
   private continuousVoiceMs = 0;
@@ -74,6 +77,8 @@ export class VoiceController {
   // --- Playback ---
   private playbackQueue: QueuedChunk[] = [];
   private playbackActive = false;
+  /** Ignora o microfone até este instante, depois que a reprodução termina. */
+  private outputTailUntil = 0;
   private currentSource: AudioBufferSourceNode | null = null;
   /** Gain único no caminho de TTS (duck do viva-voz). */
   private playbackGain: GainNode | null = null;
@@ -95,7 +100,8 @@ export class VoiceController {
     private readonly onError: (message: string) => void,
     private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void,
     private readonly onScreenSharingChange: (sharing: boolean) => void = () => {},
-    private readonly onNotice: (message: string) => void = () => {}
+    private readonly onNotice: (message: string) => void = () => {},
+    private readonly onOgraWaiting: (waiting: boolean, turnId?: string) => void = () => {}
   ) {
     this.speakerphone = this.loadSpeakerphonePreference();
   }
@@ -315,6 +321,9 @@ export class VoiceController {
       case 'error':
         this.onError(event.message);
         break;
+      case 'ogra_waiting':
+        this.onOgraWaiting(event.phase === 'start', event.turnId);
+        break;
     }
   }
 
@@ -380,7 +389,41 @@ export class VoiceController {
     }
   }
 
+  private outputGuardsMic(): boolean {
+    return micIgnoredWhileOutput({
+      playbackActive: this.playbackActive,
+      sseSpeaking: this.state === 'falando',
+      tailUntil: this.outputTailUntil,
+      now: Date.now()
+    });
+  }
+
+  private armOutputTail(): void {
+    this.outputTailUntil = Date.now() + OUTPUT_TAIL_MS;
+  }
+
+  /** Descarta gravação e pré-roll. O áudio do próprio Ork não pode virar turno. */
+  private discardOpenCapture(): void {
+    this.recording = false;
+    this.recordedChunks = [];
+    this.recordedMs = 0;
+    this.continuousSilenceMs = 0;
+    this.continuousVoiceMs = 0;
+    this.onsetGraceMs = 0;
+    this.bargeInCandidateMs = 0;
+    this.ringBuffer = [];
+    this.ringBufferMs = 0;
+  }
+
   private processAudioBlock(rms: number, samples: Float32Array): void {
+    if (this.micMuted) return;
+    // Surdo enquanto o Ork fala ou toca o sinal, e por um rabo curto. O viva-voz
+    // desligado não trata playback como "falando" (speakingForVad); sem isto o
+    // microfone transcreve o próprio TTS e reabre o turno.
+    if (this.outputGuardsMic()) {
+      this.discardOpenCapture();
+      return;
+    }
     const durationMs = this.blockDurationMs(samples);
     const profile = vadThresholds(this.speakerphone);
     const speaking = speakingForVad(this.speakerphone, this.playbackActive, this.state === 'falando');
@@ -465,8 +508,9 @@ export class VoiceController {
     this.continuousSilenceMs = 0;
     this.onsetGraceMs = 0;
 
+    if (this.micMuted) return;
     const wavBuffer = encodeWavPcm16(chunks, this.sampleRate);
-    if (wavBuffer.byteLength === 0) return;
+    if (wavBuffer.byteLength === 0 || this.micMuted) return;
 
     this.setState('processando');
 
@@ -618,6 +662,7 @@ export class VoiceController {
     }
 
     this.playbackActive = false;
+    if (generation === this.playbackGeneration) this.armOutputTail();
   }
 
   private async playChunk(chunk: QueuedChunk): Promise<void> {
@@ -638,7 +683,12 @@ export class VoiceController {
     // playbackGeneration acima) — as duas checagens são necessárias, nenhuma sozinha basta.
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // cancelado enquanto decodificava
 
-    console.log(`[playback:start] reproduzindo turnId=${chunk.turnId} frase=${chunk.sentenceIndex}: "${chunk.text}"`);
+    const wordless = chunk.text.trim() === '';
+    if (wordless) {
+      console.log(`[playback:start] sinal sem fala turnId=${chunk.turnId}`);
+    } else {
+      console.log(`[playback:start] reproduzindo turnId=${chunk.turnId} frase=${chunk.sentenceIndex}: "${chunk.text}"`);
+    }
 
     await new Promise<void>((resolve) => {
       const source = this.audioContext!.createBufferSource();
@@ -659,6 +709,10 @@ export class VoiceController {
     });
 
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // barge-in ocorreu durante a reprodução
+
+    // Toque da Ogra: texto vazio. Toca e não vira linha de conversa nem /played
+    // (não há frase para o histórico confirmar).
+    if (wordless) return;
 
     console.log(`[playback:done] turnId=${chunk.turnId} frase=${chunk.sentenceIndex}`);
     this.onAssistantText(chunk.text);
@@ -687,15 +741,38 @@ export class VoiceController {
   }
 
   muteMicrophone(muted: boolean): void {
+    this.micMuted = muted;
     this.mediaStream?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
     });
+    if (muted) {
+      this.recording = false;
+      this.recordedChunks = [];
+      this.recordedMs = 0;
+      this.continuousVoiceMs = 0;
+      this.continuousSilenceMs = 0;
+      this.onsetGraceMs = 0;
+      this.bargeInCandidateMs = 0;
+      this.ringBuffer = [];
+      this.ringBufferMs = 0;
+    }
+    this.publishMicMuted(muted);
+  }
+
+  private publishMicMuted(muted: boolean): void {
+    if (!this.sessionId || !this.token) return;
+    void fetch('/api/voice/session/mute', {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ muted })
+    }).catch(() => {});
   }
 
   private teardown(): void {
     this.stopSharingScreen();
     this.playbackGeneration++;
     this.stopPlaybackImmediately();
+    this.outputTailUntil = 0;
     this.eventSource?.close();
     this.eventSource = null;
     this.workletNode?.port.close();
@@ -709,6 +786,8 @@ export class VoiceController {
     this.token = null;
     this.currentTurnId = null;
     this.recording = false;
+    this.micMuted = false;
+    this.onOgraWaiting(false);
     this.setState('idle');
   }
 
