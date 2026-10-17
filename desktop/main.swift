@@ -769,6 +769,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             env["RODRIGO_NATIVE_BRIDGE_PORT"] = String(NativePasteBridge.shared.port)
             env["RODRIGO_NATIVE_BRIDGE_TOKEN"] = NativePasteBridge.shared.token
         }
+        // App gráfico (Launch Services) não herda o PATH do zsh — sem /opt/homebrew/bin o worker
+        // não acha `ffmpeg` e a transcrição cai em erro. Prepende os caminhos comuns do Homebrew.
+        let brewBins = "/opt/homebrew/bin:/usr/local/bin"
+        if let path = env["PATH"], !path.isEmpty {
+            env["PATH"] = "\(brewBins):\(path)"
+        } else {
+            env["PATH"] = "\(brewBins):/usr/bin:/bin:/usr/sbin:/sbin"
+        }
         // Um app gráfico não herda o ~/.zshenv: carrega o .env do projeto NÃO é feito aqui (o servidor já lê o .env).
         p.environment = env
         let log = URL(fileURLWithPath: repoRoot).appendingPathComponent(".runtime/desktop-server.log")

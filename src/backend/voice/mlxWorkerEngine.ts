@@ -3,6 +3,7 @@ import { createLineSink } from './lineSink.js';
 import { redact } from '../redact.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline';
 import type { ConversationMessage, IntentDetection, IntentName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import { isMutationName, isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
@@ -242,12 +243,21 @@ export class MlxWorkerEngine implements VoiceEngine {
     this.spawnGeneration += 1;
     fs.mkdirSync(this.options.hfCacheDir, { recursive: true });
 
+    // Defesa: app desktop macOS pode nascer sem /opt/homebrew/bin no PATH → whisper/ffmpeg falham.
+    const pathParts = String(process.env.PATH ?? '')
+      .split(path.delimiter)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    for (const brew of ['/opt/homebrew/bin', '/usr/local/bin']) {
+      if (!pathParts.includes(brew)) pathParts.unshift(brew);
+    }
     const child = spawn(this.options.pythonBin, [this.options.workerScript], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       env: {
         ...process.env,
         ...this.options.env,
+        PATH: pathParts.join(path.delimiter),
         HF_HOME: this.options.hfCacheDir,
         HF_HUB_OFFLINE: '1',
         TRANSFORMERS_OFFLINE: '1'
