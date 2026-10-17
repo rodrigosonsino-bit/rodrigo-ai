@@ -12,6 +12,7 @@ Gerado a partir do código em `main` (`4369973`), com os pontos de aplicação c
 | Visão | a **imagem da tela**, só com o canal ligado **e** autorização falada naquele pedido | `RODRIGO_CLOUD_VISION` | **desligado** | só a **pergunta** que acompanha a imagem (`worker.py:1207`); **a imagem não é varrida** | Google (Gemini) |
 | Busca web | o texto da tarefa delegada | `RODRIGO_WEB_SEARCH` | **desligado** | (texto da tarefa; fora do guarda) | gateway do OpenClaw em `RODRIGO_OPENCLAW_GATEWAY_URL` (padrão `http://127.0.0.1:18789`, loopback) e, daí, o provedor que o OpenClaw usar |
 | Claude Code (Fase 17) | a **ordem falada** (após confirmação por voz) e o **conteúdo dos arquivos** que o `claude -p` ler no `cwd` | `RODRIGO_CLAUDE_CODE` (só efetivo com `RODRIGO_CLOUD=1`) | **desligado** | `guardText` no prompt e na saída: `claudeCodeSubAgent.ts:85` e `:191`; intenção de nuvem que classifica `DELEGAR_CODIGO` também passa pelo guarda (`sessionManager.ts:1051`) | Anthropic (CLI `claude -p` sob o plano da assinatura); áudio e stores do app **não** vão nesta chamada |
+| Ogra (fase 1) | o **texto da fala** (depois do `guardText`) e o catálogo de capacidades (id/nome/tipo). A resposta volta pelo callback local | `RODRIGO_OGRA` (não depende do mestre Gemini) | **desligado** | `guardText` no texto que sai (`ograSubAgent.ts`) e de novo na resposta, depois de `neutralizeUntrusted` | webhook `GROK_WEBHOOK_URL` (Bearer `GROK_WEBHOOK_KEY`). Áudio não vai. Callback: `POST /api/ogra/reply` com `RODRIGO_OGRA_CALLBACK_TOKEN` |
 
 ## O que NUNCA sai
 

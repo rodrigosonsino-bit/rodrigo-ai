@@ -202,7 +202,19 @@ export function runDoctor(input: DoctorInput): DoctorReport {
       if (cfg.cloudVision) on.push('visão');
       if (webSearchEffective(cfg)) on.push('busca web');
       if (claudeCodeEffective(cfg)) on.push('Claude Code');
+      if (cfg.ogra) on.push('Ogra');
       checks.push(check('cloud-channels', 'Canais declarados como ligados', 'info', on.length ? on.join(', ') : 'nenhum além da geração de texto'));
+    }
+
+    if (cfg.ogra) {
+      checks.push(
+        check(
+          'risk-ogra',
+          'Canal Ogra ligado',
+          'warn',
+          'RODRIGO_OGRA=1: o texto da fala vai ao webhook da Ogra. Mutação local ainda exige SIM falado. Desktop, cursor e WhatsApp não estão nesta fase.'
+        )
+      );
     }
 
     // 6. Combinações de risco (avisos com gravidade). O app não conhece o nível da chave do Google.

@@ -68,6 +68,10 @@ Abertas: H13a.10 (ouvir a voz Charon); voz das confirmações (Gemini TTS ou `sa
 | Cursor CLI / cloud agents | — | — | Plano Pro: "Outros modelos" 100% usado até 11/11, on-demand desligado; `auto`/Composer/Grok OK; precisa de `--trust` |
 | `delegar` | — | — | Filas: `antigravity-gemini-3.1-pro` primeiro. **Código desde 2026-10-12 (revisão semanal): gemini-3.1-pro → cursor-composer25 → cursor-auto**; codex, agy e gpt5-codex-high saíram da fila, mas continuam em AGENTES. Opus/Sonnet fora até 11/11. Log com `tarefa`, `modelo` e `teste`; cooldown de 1 h após erro de cota (`--sem-cooldown` ignora). Backup: `~/.local/bin/delegar.bak-20261012-0817-revisao`. Validado: py_compile, `--help`, `--lista`, uma tarefa real com `--teste` (OK em 9 s, registrada no log) e teste unitário do cooldown |
 
+## Camada Ogra — fase 1 (estrutura, 2026-10-17)
+
+Flag `RODRIGO_OGRA` padrão **0**. Com 0 a voz não muda. Com 1 a Ogra é o ouvido e a boca e o Ork é o braço; subagentes ficam abaixo. Detalhe, endpoints, SIM e o que ficou só documentado: `docs/orquestracao/OGRA.md` e a seção homônima de `CLAUDE.md`. Não cobre desktop, cursor, WhatsApp nem envio de mensagens.
+
 ## Último passo / próximo passo
 - Último: PRs #2, #3 e #4 mergeados; agentes OpenClaw em kimi-k3; skill `agent-catalog` com as filas reais; NotebookLM atualizado a partir do `main`.
 - Próximo: **Fase V Fatia 5**, plano curto antes do código, numa sessão nova do `orquestrador-de-voz`; nenhum código antes do aval do Rodrigo.

@@ -27,7 +27,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       webSearch: false,
       outboundGuard: 'redact',
       claudeCode: false,
-      autoDesktop: false
+      autoDesktop: false,
+      ogra: false
     });
   });
 
@@ -200,13 +201,15 @@ describe('effectivePrivacy (Fase 12)', () => {
         ttsText: true,
         visionImage: true,
         webSearch: false,
-        claudeCodeOrder: false
+        claudeCodeOrder: false,
+        ograUtterance: false
       },
       models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
       webSearch: { enabled: false, reason: 'channel-off' },
       claudeCode: { enabled: false, reason: 'channel-off' },
       autoDesktop: { enabled: false, reason: 'flag-off' },
+      ogra: { enabled: false },
       neverSends: ['audio'],
       outboundGuard: 'redact'
     };
@@ -233,7 +236,8 @@ describe('effectivePrivacy (Fase 12)', () => {
       ttsText: false,
       visionImage: false,
       webSearch: false,
-      claudeCodeOrder: false
+      claudeCodeOrder: false,
+      ograUtterance: false
     });
     assert.deepEqual(st.models, { generation: null, intent: null, tts: null });
     assert.deepEqual(st.tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });

@@ -48,6 +48,12 @@ export interface PrivacyConfig {
    * executam sem SIM por passo (kill switch por voz ainda vale). Valor inválido aborta o boot.
    */
   readonly autoDesktop: boolean;
+  /**
+   * Camada Ogra (fase 1): RODRIGO_OGRA. Padrão DESLIGADO. Com 1, a fala vai ao webhook
+   * da Ogra e a resposta volta em POST /api/ogra/reply. Independente do mestre Gemini.
+   * Valor inválido aborta o boot. Com 0, o caminho de voz não muda.
+   */
+  readonly ogra: boolean;
 }
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
@@ -142,6 +148,11 @@ export function autoDesktopOffReason(
   return null;
 }
 
+/** Ogra efetiva: só RODRIGO_OGRA=1. Não depende do mestre Gemini (é outro destino). */
+export function ograEffective(cfg: PrivacyConfig): boolean {
+  return cfg.ogra;
+}
+
 type Env = Readonly<Record<string, string | undefined>>;
 
 function parseFlag(env: Env, name: string, defaultValue: boolean): boolean {
@@ -204,7 +215,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
     outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact'),
     claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
-    autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false)
+    autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false),
+    ogra: parseFlag(env, 'RODRIGO_OGRA', false)
   };
 }
 
@@ -263,7 +275,8 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       ttsText: ttsOn,
       visionImage: cfg.cloud && cfg.cloudVision,
       webSearch: webOn,
-      claudeCodeOrder: claudeOn
+      claudeCodeOrder: claudeOn,
+      ograUtterance: cfg.ogra
     },
     models: {
       generation: cfg.cloud ? 'gemini-flash-latest' : null,
@@ -274,6 +287,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
     webSearch: { enabled: webOn, reason: webSearchOffReason(cfg) },
     claudeCode: { enabled: claudeOn, reason: claudeCodeOffReason(cfg) },
     autoDesktop: { enabled: autoOn, reason: autoDesktopOffReason(cfg, desktopOn) },
+    ogra: { enabled: cfg.ogra },
     neverSends: ['audio'],
     outboundGuard: cfg.outboundGuard
   };

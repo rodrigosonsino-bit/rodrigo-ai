@@ -53,6 +53,8 @@ export interface PrivacyStatus {
     webSearch: boolean;
     /** Fase 17: ordem (e arquivos lidos pelo claude -p) podem ir à Anthropic. */
     claudeCodeOrder: boolean;
+    /** Camada Ogra: o texto da fala vai ao webhook quando RODRIGO_OGRA=1. O áudio não. */
+    ograUtterance: boolean;
   };
   models: { generation: string | null; intent: string | null; tts: string | null };
   /** Fase 13a: estado EFETIVO do TTS em nuvem (a flag sozinha não basta; ver ttsCloudEffective). */
@@ -78,6 +80,10 @@ export interface PrivacyStatus {
   autoDesktop: {
     enabled: boolean;
     reason: 'flag-off' | 'desktop-control-off' | null;
+  };
+  /** Camada Ogra. Padrão desligado. Não depende do mestre Gemini. */
+  ogra: {
+    enabled: boolean;
   };
   neverSends: readonly ['audio'];
   /** T1: modo do guarda que varre o TEXTO antes de sair (não varre imagem). */
