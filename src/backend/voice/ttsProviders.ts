@@ -75,19 +75,41 @@ export class SayVoiceProvider implements IVoiceProvider {
  * (nunca toca áudio nem apaga o arquivo) — Achado v2-4: o servidor MCP existente
  * usa `afplay` e não pode ser reaproveitado diretamente para isso.
  */
+/** As 3 vozes pt-BR do Kokoro-82M (todas já no voices-v1.0.bin). Lista fechada: o valor vira argumento do script. */
+export const KOKORO_VOICES = ['pf_dora', 'pm_alex', 'pm_santa'] as const;
+export type KokoroVoice = (typeof KOKORO_VOICES)[number];
+export const DEFAULT_KOKORO_VOICE: KokoroVoice = 'pf_dora';
+
+/** `KOKORO_VOICE` fora da lista volta para a padrão com aviso (não derruba o app: é preferência, não segurança). */
+export function parseKokoroVoice(
+  env: NodeJS.ProcessEnv,
+  log: (msg: string) => void = (m) => console.warn(m)
+): KokoroVoice {
+  const raw = env.KOKORO_VOICE;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_KOKORO_VOICE;
+  const v = raw.trim().toLowerCase();
+  if ((KOKORO_VOICES as readonly string[]).includes(v)) return v as KokoroVoice;
+  log(`[voice] KOKORO_VOICE="${raw}" não existe (use ${KOKORO_VOICES.join(', ')}) — usando ${DEFAULT_KOKORO_VOICE}.`);
+  return DEFAULT_KOKORO_VOICE;
+}
+
 export class KokoroVoiceProvider implements IVoiceProvider {
   readonly id = 'kokoro';
-  readonly name = 'Kokoro-82M (pf_dora)';
+  readonly name: string;
 
   private readonly pythonBin: string;
   private readonly scriptPath: string;
+  private readonly voice: KokoroVoice;
 
   constructor(
     pythonBin = path.join(os.homedir(), '.venvs', 'tts-say', 'bin', 'python3'),
-    scriptPath = path.resolve(process.cwd(), 'scripts', 'worker', 'kokoro_synth.py')
+    scriptPath = path.resolve(process.cwd(), 'scripts', 'worker', 'kokoro_synth.py'),
+    voice: KokoroVoice = DEFAULT_KOKORO_VOICE
   ) {
     this.pythonBin = pythonBin;
     this.scriptPath = scriptPath;
+    this.voice = voice;
+    this.name = `Kokoro-82M (${voice})`;
   }
 
   isAvailable(): boolean {
@@ -98,7 +120,7 @@ export class KokoroVoiceProvider implements IVoiceProvider {
     await new Promise<void>((resolve, reject) => {
       const child = execFile(
         this.pythonBin,
-        [this.scriptPath, outputPath],
+        [this.scriptPath, outputPath, this.voice],
         { timeout: 30_000, signal },
         (error) => {
           if (error) reject(error);
@@ -114,7 +136,7 @@ export class KokoroVoiceProvider implements IVoiceProvider {
 export function selectVoiceProvider(env: NodeJS.ProcessEnv = process.env): IVoiceProvider {
   const engine = (env.TTS_ENGINE || 'say').toLowerCase();
   if (engine === 'kokoro') {
-    const kokoro = new KokoroVoiceProvider();
+    const kokoro = new KokoroVoiceProvider(undefined, undefined, parseKokoroVoice(env));
     if (kokoro.isAvailable()) return kokoro;
     console.error('[voice] TTS_ENGINE=kokoro solicitado, mas indisponível — usando "say" como padrão.');
   }
