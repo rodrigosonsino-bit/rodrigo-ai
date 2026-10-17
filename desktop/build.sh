@@ -25,6 +25,7 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>NSMicrophoneUsageDescription</key><string>O Rodrigo AI usa o microfone para ouvir você falar.</string>
 <key>NSAppleEventsUsageDescription</key><string>O Rodrigo AI usa Automação do macOS para controlar mídia, aplicativos e digitação autorizados por voz.</string>
+<key>NSScreenCaptureUsageDescription</key><string>O Rodrigo AI captura um quadro da tela quando você pergunta o que aparece nela.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 <key>RodrigoRepoRoot</key><string>$ROOT</string>
 <key>RodrigoNodePath</key><string>$NODE</string>

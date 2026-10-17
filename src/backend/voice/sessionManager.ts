@@ -38,6 +38,7 @@ import { mightBeTemporal, selectToolByName, TOOL_FAILURE_TEXT } from '../tools/s
 import { mightBeMutation, selectMutatingToolByAction } from '../tools/mutatingTools.js';
 import {
   DesktopTool,
+  captureScreenViaNativeBridge,
   defaultCommandExecutor,
   parseDesktopControlFlag,
   ToolPreviewRefusedError
@@ -885,7 +886,15 @@ export class SessionManager {
         // Fatia 3: captura de uso único. A visão em si (ler o quadro) chega na fatia 4 — por ora, com captura bem
         // sucedida, a resposta ainda é a frase fixa, mas o arquivo já passou por todo o protocolo real (pedido,
         // validação, limpeza) para a fatia seguinte só precisar trocar "descarta" por "manda ao motor de visão".
-        const capture = await this.requestScreenCapture(session, turn);
+        let capture = await this.requestScreenCapture(session, turn);
+        // App desktop (WKWebView): getDisplayMedia costuma falhar — tenta captura nativa via bridge.
+        if (!capture.ok && (capture.reason === 'unavailable' || capture.reason === 'timeout')) {
+          const native = await this.tryNativeScreenCapture(session);
+          if (native) {
+            console.log(`[screen] turno=${turn.turnId} captura nativa (${native.bytes} bytes)`);
+            capture = native;
+          }
+        }
         if (session.activeTurn !== turn) {
           if (capture.ok) {
             await fs.promises.rm(capture.filePath, { force: true }).catch((e) => console.warn('[screen] falha ao remover captura', capture.filePath, e));
@@ -2253,6 +2262,24 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     }
 
     return true;
+  }
+
+  /** Fallback: JPEG via Rodrigo AI.app (Gravação de Tela). null se bridge/permissão ausentes. */
+  private async tryNativeScreenCapture(
+    session: Session
+  ): Promise<{ ok: true; filePath: string; bytes: number } | null> {
+    const filePath = this.audioStore.newScreenCapturePath(session.id);
+    try {
+      const bytes = await captureScreenViaNativeBridge(filePath);
+      return { ok: true, filePath, bytes };
+    } catch (err) {
+      await fs.promises.rm(filePath, { force: true }).catch(() => {});
+      console.warn(
+        '[screen] captura nativa indisponível:',
+        err instanceof Error ? err.message : String(err)
+      );
+      return null;
+    }
   }
 
   /**

@@ -76,6 +76,34 @@ async function pasteViaNativeBridge(text: string, bridge: NativeBridgeInfo, bund
   }
 }
 
+/**
+ * Captura um JPEG da tela via bridge nativo do Rodrigo AI.app (Gravação de Tela no processo assinado).
+ * Grava em `outPath` e devolve o tamanho em bytes. Sem bridge / sem permissão => lança.
+ */
+export async function captureScreenViaNativeBridge(
+  outPath: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<number> {
+  const bridge = readNativeBridgeInfo(env);
+  if (!bridge) {
+    throw new Error('NATIVE_BRIDGE_ABSENT');
+  }
+  const res = await fetch(`http://127.0.0.1:${bridge.port}/screenshot`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${bridge.token}` }
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`NATIVE_SCREENSHOT_HTTP_${res.status}: ${body || res.statusText}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.byteLength < 100 || buf[0] !== 0xff || buf[1] !== 0xd8) {
+    throw new Error('NATIVE_SCREENSHOT_NOT_JPEG');
+  }
+  await fs.promises.writeFile(outPath, buf);
+  return buf.byteLength;
+}
+
 export class ToolPreviewRefusedError extends Error {
   constructor(message: string) {
     super(message);

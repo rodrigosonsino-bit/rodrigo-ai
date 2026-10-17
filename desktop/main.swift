@@ -19,6 +19,33 @@ func dlog(_ s: String) { if debugLog { FileHandle.standardError.write(Data(("[de
 
 // MARK: - Clipboard paste (DitadoLocal ClipboardPaster) no processo com Acessibilidade
 
+/// Captura a tela principal via `/usr/sbin/screencapture` no processo assinado do app
+/// (permissão de Gravação de Tela em Ajustes → Privacidade → Gravação de Tela).
+enum NativeScreenCapture {
+    static func captureJpeg() -> Data? {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rodrigo-screen-\(UUID().uuidString).jpg")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        // -x: sem som; -t jpg: JPEG; captura o display principal.
+        p.arguments = ["-x", "-t", "jpg", tmp.path]
+        do {
+            try p.run()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0 else {
+                try? FileManager.default.removeItem(at: tmp)
+                return nil
+            }
+            let data = try Data(contentsOf: tmp)
+            try? FileManager.default.removeItem(at: tmp)
+            return data.isEmpty ? nil : data
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            return nil
+        }
+    }
+}
+
 /// Cola texto no app em foco via clipboard + Cmd+V sintético (CGEvent HID).
 /// Roda DENTRO do RodrigoAI.app — o processo que já tem Acessibilidade liberada.
 enum NativeClipboardPaster {
@@ -234,6 +261,17 @@ final class NativePasteBridge {
             respond(connection, status: 200, json: respJson)
             return
         }
+        if firstLine.hasPrefix("POST /screenshot") {
+            // Captura nativa (Gravação de Tela no Rodrigo AI.app). Fallback quando o WKWebView
+            // não tem getDisplayMedia / compartilhamento do navegador ativo.
+            let jpeg = NativeScreenCapture.captureJpeg()
+            guard let jpeg, !jpeg.isEmpty else {
+                respond(connection, status: 503, json: #"{"ok":false,"error":"screenshot_unavailable"}"#)
+                return
+            }
+            respondBinary(connection, status: 200, contentType: "image/jpeg", body: jpeg)
+            return
+        }
         guard firstLine.hasPrefix("POST /paste") else {
             respond(connection, status: 400, json: #"{"ok":false,"error":"unknown route"}"#)
             return
@@ -275,9 +313,19 @@ final class NativePasteBridge {
     }
 
     private func respond(_ connection: NWConnection, status: Int, json: String) {
-        let reason = status == 200 ? "OK" : (status == 401 ? "Unauthorized" : "Bad Request")
-        let body = Data(json.utf8)
-        let head = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+        let reason = status == 200 ? "OK" : (status == 401 ? "Unauthorized" : (status == 503 ? "Service Unavailable" : "Bad Request"))
+        respondBinary(connection, status: status, contentType: "application/json; charset=utf-8", body: Data(json.utf8), reason: reason)
+    }
+
+    private func respondBinary(
+        _ connection: NWConnection,
+        status: Int,
+        contentType: String,
+        body: Data,
+        reason: String? = nil
+    ) {
+        let statusReason = reason ?? (status == 200 ? "OK" : "Error")
+        let head = "HTTP/1.1 \(status) \(statusReason)\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
         var packet = Data(head.utf8)
         packet.append(body)
         connection.send(content: packet, completion: .contentProcessed { _ in
