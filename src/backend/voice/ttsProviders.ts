@@ -94,6 +94,20 @@ export function parseKokoroVoice(
   return DEFAULT_KOKORO_VOICE;
 }
 
+const KOKORO_VOICE_NAMES: Record<string, KokoroVoice> = { dora: 'pf_dora', alex: 'pm_alex', santa: 'pm_santa' };
+
+/**
+ * Pedido de troca de voz → voz do Kokoro, ou null se não for Kokoro. Aceita "dora"/"alex"/"santa", o id
+ * ("pm_alex") e "kokoro" sozinho (= KOKORO_VOICE do .env) ou seguido do nome ("kokoro alex").
+ * Vem antes das vozes do macOS na troca: "alex" aqui é o Kokoro, não a voz inglesa Alex do sistema.
+ */
+export function resolveKokoroVoiceRequest(normalized: string, env: NodeJS.ProcessEnv): KokoroVoice | null {
+  const rest = normalized.replace(/^kokoro\b\s*/, '').trim();
+  if (rest === '') return normalized.startsWith('kokoro') ? parseKokoroVoice(env) : null;
+  if ((KOKORO_VOICES as readonly string[]).includes(rest)) return rest as KokoroVoice;
+  return KOKORO_VOICE_NAMES[rest] ?? null;
+}
+
 export class KokoroVoiceProvider implements IVoiceProvider {
   readonly id = 'kokoro';
   readonly name: string;
@@ -383,21 +397,23 @@ export class DynamicVoiceProvider implements IVoiceProvider {
       return {
         ok: false,
         speech:
-          'Não entendi qual voz você quer usar. Você pode escolher Kokoro, VoxCPM, uma voz do Gemini como Charon, Puck e Aoede, ou qualquer voz local instalada do macOS.'
+          'Não entendi qual voz você quer usar. Você pode escolher as vozes locais Alex, Dora ou Santa, VoxCPM, uma voz do Gemini como Charon, Puck e Aoede, ou qualquer voz local instalada do macOS.'
       };
     }
 
-    // 1. Kokoro local
-    if (normalized === 'kokoro' || normalized === 'dora' || normalized === 'pf_dora') {
-      const kokoro = new KokoroVoiceProvider();
+    // 1. Kokoro local (Dora, Alex ou Santa)
+    const kokoroVoice = resolveKokoroVoiceRequest(normalized, this.deps.env ?? process.env);
+    if (kokoroVoice) {
+      const kokoro = new KokoroVoiceProvider(undefined, undefined, kokoroVoice);
       if (!kokoro.isAvailable()) {
         return {
           ok: false,
           speech: 'A voz local Kokoro não está disponível neste computador no momento.'
         };
       }
-      this.setProvider(kokoro, { engine: 'kokoro', voice: 'pf_dora' });
-      return { ok: true, speech: 'Pronto, mudei para a voz local Kokoro.', engine: 'kokoro', voice: 'pf_dora' };
+      this.setProvider(kokoro, { engine: 'kokoro', voice: kokoroVoice });
+      const friendly = kokoroVoice.slice(3, 4).toUpperCase() + kokoroVoice.slice(4);
+      return { ok: true, speech: `Pronto, mudei para a voz local ${friendly}.`, engine: 'kokoro', voice: kokoroVoice };
     }
 
     // 1b. VoxCPM2 local (servidor MLX em loopback)
@@ -499,7 +515,7 @@ export class DynamicVoiceProvider implements IVoiceProvider {
 
     return {
       ok: false,
-      speech: `Não reconheci a voz ${rawRequest}. Você pode pedir Kokoro, VoxCPM, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr, ou dizer o nome de qualquer voz local instalada no macOS.`
+      speech: `Não reconheci a voz ${rawRequest}. Você pode pedir Alex, Dora, Santa, VoxCPM, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr, ou dizer o nome de qualquer voz local instalada no macOS.`
     };
   }
 

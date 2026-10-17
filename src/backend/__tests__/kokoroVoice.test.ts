@@ -1,6 +1,27 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { KOKORO_VOICES, KokoroVoiceProvider, parseKokoroVoice } from '../voice/ttsProviders.js';
+import { KOKORO_VOICES, KokoroVoiceProvider, parseKokoroVoice, resolveKokoroVoiceRequest } from '../voice/ttsProviders.js';
+
+describe('troca de voz por pedido → Kokoro', () => {
+  it('nomes, ids e "kokoro <nome>"', () => {
+    assert.equal(resolveKokoroVoiceRequest('alex', {}), 'pm_alex');
+    assert.equal(resolveKokoroVoiceRequest('santa', {}), 'pm_santa');
+    assert.equal(resolveKokoroVoiceRequest('dora', {}), 'pf_dora');
+    assert.equal(resolveKokoroVoiceRequest('pm_santa', {}), 'pm_santa');
+    assert.equal(resolveKokoroVoiceRequest('kokoro alex', {}), 'pm_alex');
+  });
+
+  it('"kokoro" sozinho usa o KOKORO_VOICE do .env', () => {
+    assert.equal(resolveKokoroVoiceRequest('kokoro', { KOKORO_VOICE: 'pm_alex' }), 'pm_alex');
+    assert.equal(resolveKokoroVoiceRequest('kokoro', {}), 'pf_dora');
+  });
+
+  it('outros pedidos não são Kokoro (seguem para say/Gemini)', () => {
+    for (const r of ['charon', 'felipe', 'alexandra', 'kokoroalex', 'voxcpm']) {
+      assert.equal(resolveKokoroVoiceRequest(r, {}), null, r);
+    }
+  });
+});
 
 describe('KOKORO_VOICE', () => {
   it('ausente ou vazio usa pf_dora', () => {
