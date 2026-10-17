@@ -151,6 +151,17 @@ export interface ErrorEvent {
   turnId?: string;
 }
 
+/**
+ * Espera da Ogra, só visual. `start` quando a fala é enviada ao webhook.
+ * `stop` quando a resposta começa a ser falada, no prazo, no cancelamento ou no erro.
+ * Não carrega áudio.
+ */
+export interface OgraWaitingEvent {
+  type: 'ogra_waiting';
+  phase: 'start' | 'stop';
+  turnId?: string;
+}
+
 export type VoiceServerEvent =
   | StateEvent
   | TranscriptEvent
@@ -160,7 +171,8 @@ export type VoiceServerEvent =
   | SessionPreemptedEvent
   | ScreenRequestEvent
   | VoiceNoticeEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | OgraWaitingEvent;
 
 export interface CreateSessionResponse {
   sessionId: string;

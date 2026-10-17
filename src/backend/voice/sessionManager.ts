@@ -22,13 +22,7 @@ import {
   ograFailureFallsBack
 } from '../agents/ograSubAgent.js';
 import { isTtsEchoTranscript, RECENT_SPOKEN_LIMIT } from '../../shared/ttsEcho.js';
-import {
-  OGRA_CUE_MAX_BYTES,
-  OGRA_CUE_SENTENCE_INDEX,
-  createDefaultPlayOgraCue,
-  isCueWav,
-  type PlayOgraCue
-} from './ograCue.js';
+import { createDefaultPlayOgraCue, type PlayOgraCue } from './ograCue.js';
 import type { ServerResponse } from 'node:http';
 import type { IAgent } from '../../shared/extensions/agents.js';
 import type { ITool, IMutatingTool } from '../../shared/extensions/tools.js';
@@ -392,7 +386,7 @@ interface Session {
    * Falas fora de turno que chegaram com um turno ativo. Só enche com RODRIGO_OGRA=1;
    * com a flag em 0, speakOutOfTurn continua descartando.
    */
-  outOfTurnQueue: Array<{ text: string; afterSpoken?: (turnId: string, spoken: string) => void; withCue?: boolean }>;
+  outOfTurnQueue: Array<{ text: string; afterSpoken?: (turnId: string, spoken: string) => void; endsOgraWait?: boolean }>;
   drainingOutOfTurn: boolean;
   /**
    * 2xx já recebido e o turno ainda aberto à espera de POST /api/ogra/reply.
@@ -421,6 +415,13 @@ interface Session {
    * o webhook. Uma fala mais nova substitui este id; o turno antigo não posta.
    */
   ograDeferredTurnId: string | null;
+  /** Último `ogra_waiting` emitido. Evita start/stop repetido. */
+  ograWaiting: boolean;
+  /**
+   * Resposta final já recebida e ainda na fila de fala. Segura o indicador
+   * depois que a tarefa sai do mapa, até o áudio ser emitido.
+   */
+  ograUnspokenReplies: number;
 }
 
 type OgraWaitResult = 'reply' | 'timeout' | 'cancelled';
@@ -434,6 +435,8 @@ interface OgraTaskRecord {
   /** Resolve quando a tarefa sai do mapa, para quem esperava a vaga seguir. */
   done: Promise<void>;
   markDone: () => void;
+  /** A resposta final já foi entregue à fala (ou a espera acabou sem fala). */
+  replyHandedOff: boolean;
 }
 
 interface OgraClosedTask {
@@ -790,6 +793,7 @@ export class SessionManager {
     }
     this.clearOpenClawPollers(session);
     session.outOfTurnQueue.length = 0;
+    session.ograUnspokenReplies = 0;
     session.ograAwaitingReply = false;
     session.ograAwaitingTurnId = null;
     session.ograDeferredTurnId = null;
@@ -863,7 +867,9 @@ export class SessionManager {
         ograAwaitingTurnId: null,
         micMuted: false,
         recentSpoken: [],
-        ograDeferredTurnId: null
+        ograDeferredTurnId: null,
+        ograWaiting: false,
+        ograUnspokenReplies: 0
       };
       clearTimeout(session.idleTimer);
       this.touch(session);
@@ -2141,7 +2147,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       while (session.outOfTurnQueue.length > 0 && !session.activeTurn && this.current === session) {
         const item = session.outOfTurnQueue.shift();
         if (!item) break;
-        await this.speakOutOfTurn(session, item.text, item.afterSpoken, item.withCue === true);
+        await this.speakOutOfTurn(session, item.text, item.afterSpoken, item.endsOgraWait === true);
       }
     } finally {
       session.drainingOutOfTurn = false;
@@ -2150,8 +2156,8 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
 
   /**
    * RODRIGO_OGRA=1: uma ida à Ogra. O 2xx só acusa o recebimento: não há frase de
-   * espera e o sinal sem palavras não toca aqui. Ele toca uma vez, na hora de falar
-   * a resposta (playOgraCue). A tarefa fica pendente até POST /api/ogra/reply ou o prazo
+   * espera e não há áudio nenhum nesse intervalo (nem frase, nem sinal). O cliente
+   * mostra o indicador `ogra_waiting`. A tarefa fica pendente até POST /api/ogra/reply ou o prazo
    * RODRIGO_OGRA_REPLY_TIMEOUT_MS, mesmo se uma fala nova substituir o turno. Só o
    * cancelamento explícito desse turno, o fim da sessão ou o prazo descartam a
    * resposta. A resposta entra pelo TTS do turno, ou fora de turno se ele já passou.
@@ -2233,6 +2239,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     task.resolveWait = null;
     this.ograTasks.delete(taskId);
     task.markDone();
+    if (this.current?.id === task.sessionId) this.syncOgraWaiting(this.current, task.turnId);
   }
 
   private createOgraTask(session: Session, turn: ActiveTurn, transcript: string): string {
@@ -2248,7 +2255,8 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       timer: null,
       resolveWait: null,
       done,
-      markDone: () => markDone()
+      markDone: () => markDone(),
+      replyHandedOff: false
     };
     this.ograTasks.set(taskId, task);
     if (session.ograDeferredTurnId === turn.turnId) session.ograDeferredTurnId = null;
@@ -2264,6 +2272,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     }
     this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
     const taskId = this.createOgraTask(session, turn, transcript);
+    this.syncOgraWaiting(session, turn.turnId);
     const r = await this.runSubAgentDelegation({
       turnId: turn.turnId,
       query: transcript,
@@ -2329,7 +2338,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       if (session.outOfTurnQueue.length > 0 && session.activeTurn === turn) {
         const queued = session.outOfTurnQueue.splice(0);
         for (const item of queued) {
-          await this.speakOutOfTurn(session, item.text, item.afterSpoken, item.withCue === true);
+          await this.speakOutOfTurn(session, item.text, item.afterSpoken, item.endsOgraWait === true);
           if (session.activeTurn !== turn) return true;
         }
       }
@@ -2361,46 +2370,6 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
         session.ograAwaitingTurnId = null;
       }
     }
-  }
-
-  /**
-   * Toque imediatamente antes da resposta falada. Erro aqui não segura a fala.
-   * Não espera o cliente terminar de tocar.
-   */
-  private async signalOgraCue(session: Session, turnId: string): Promise<void> {
-    try {
-      await this.playOgraCue({
-        deliverWav: (wav) => this.publishOgraCueWav(session, turnId, wav)
-      });
-    } catch (err) {
-      console.warn(`[ogra] sinal sonoro falhou: ${err instanceof Error ? err.message : 'erro'}`);
-    }
-  }
-
-  /**
-   * Entrega o toque pelo mesmo evento do TTS (`sentence_audio_ready`), com texto vazio.
-   * Não entra em emittedSentences: /played não grava isso no histórico nem arma mutação.
-   */
-  private publishOgraCueWav(session: Session, turnId: string, wav: Buffer): void {
-    if (this.current !== session || !turnId) return;
-    if (!isCueWav(wav) || wav.length > OGRA_CUE_MAX_BYTES) {
-      console.warn('[ogra] sinal sonoro ignorado: WAV inválido ou grande demais.');
-      return;
-    }
-    const { audioId, filePath } = this.audioStore.newOutputPath(session.id);
-    try {
-      fs.writeFileSync(filePath, wav);
-    } catch (err) {
-      console.warn(`[ogra] sinal sonoro não gravou: ${err instanceof Error ? err.message : 'erro'}`);
-      return;
-    }
-    this.emit(session, {
-      type: 'sentence_audio_ready',
-      turnId,
-      sentenceIndex: OGRA_CUE_SENTENCE_INDEX,
-      audioId,
-      text: ''
-    });
   }
 
   /** Frase do turno da Ogra. Devolve false se o turno já não é o ativo. */
@@ -2489,22 +2458,73 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     }
     this.coordinator.releaseAsyncSlot(taskId);
     task.markDone();
+    if (this.current?.id === task.sessionId) this.syncOgraWaiting(this.current, task.turnId);
     return wake;
+  }
+
+  /** Liga o indicador enquanto há tarefa sem resposta falada, ou resposta final ainda na fila. */
+  private ograWaitVisible(session: Session): boolean {
+    if (session.ograUnspokenReplies > 0) return true;
+    for (const task of this.ograTasks.values()) {
+      if (task.sessionId === session.id && !task.replyHandedOff) return true;
+    }
+    return false;
+  }
+
+  private syncOgraWaiting(session: Session, turnId?: string): void {
+    const waiting = this.ograWaitVisible(session);
+    if (session.ograWaiting === waiting) return;
+    session.ograWaiting = waiting;
+    this.emit(session, {
+      type: 'ogra_waiting',
+      phase: waiting ? 'start' : 'stop',
+      ...(turnId ? { turnId } : {})
+    });
+  }
+
+  /** A resposta final passou a ser da fila de fala. O indicador continua até ela sair. */
+  private holdOgraReplySpeech(session: Session, task: OgraTaskRecord): void {
+    if (task.replyHandedOff) return;
+    task.replyHandedOff = true;
+    session.ograUnspokenReplies += 1;
+    this.syncOgraWaiting(session, task.turnId);
+  }
+
+  private releaseOgraSpeechHold(session: Session, turnId: string | null, endsOgraWait: boolean): void {
+    if (!endsOgraWait) return;
+    if (session.ograUnspokenReplies > 0) session.ograUnspokenReplies -= 1;
+    this.syncOgraWaiting(session, turnId ?? undefined);
   }
 
   /**
    * Fala a resposta no turno que a pediu, pelo mesmo TTS das outras frases. Fora dele, pela fila.
-   * O sinal sem palavras toca imediatamente antes desta fala, não no webhook.
+   * Sem áudio antes desta fala. O indicador visual apaga quando a fala final começa
+   * (na hora, ou quando a fila realmente emite).
    */
-  private async deliverOgraSpeech(session: Session, task: OgraTaskRecord, text: string): Promise<void> {
+  private async deliverOgraSpeech(
+    session: Session,
+    task: OgraTaskRecord,
+    text: string,
+    finalReply: boolean
+  ): Promise<void> {
     const turn = session.activeTurn;
     if (turn && turn.turnId === task.turnId && session.ograAwaitingReply) {
       const clean = cleanTextForSpeech(text);
-      if (!clean) return;
-      await this.signalOgraCue(session, turn.turnId);
-      if (session.activeTurn !== turn) {
-        await this.speakOutOfTurn(session, clean);
+      if (!clean) {
+        if (finalReply) {
+          task.replyHandedOff = true;
+          this.syncOgraWaiting(session, task.turnId);
+        }
         return;
+      }
+      if (session.activeTurn !== turn) {
+        if (finalReply) this.holdOgraReplySpeech(session, task);
+        await this.speakOutOfTurn(session, clean, undefined, finalReply);
+        return;
+      }
+      if (finalReply) {
+        task.replyHandedOff = true;
+        this.syncOgraWaiting(session, task.turnId);
       }
       this.emit(session, { type: 'state', state: 'falando' });
       const index = turn.nextSeq;
@@ -2514,7 +2534,8 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       await pending;
       return;
     }
-    await this.speakOutOfTurn(session, text, undefined, true);
+    if (finalReply) this.holdOgraReplySpeech(session, task);
+    await this.speakOutOfTurn(session, text, undefined, finalReply);
   }
 
   /**
@@ -2583,7 +2604,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     else if (!guarded.text.trim()) spoken = input.final ? OGRA_REPLY_EMPTY_TEXT : '';
     else spoken = guarded.text;
     try {
-      if (spoken) await this.deliverOgraSpeech(session, task, spoken);
+      if (spoken) await this.deliverOgraSpeech(session, task, spoken, input.final);
+      else if (input.final) {
+        task.replyHandedOff = true;
+        this.syncOgraWaiting(session, task.turnId);
+      }
     } finally {
       if (input.final) {
         this.settleOgraTask(input.taskId, 'replied')?.('reply');
@@ -2673,22 +2698,22 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     session: Session,
     text: string,
     afterSpoken?: (turnId: string, spoken: string) => void,
-    withCue = false
+    endsOgraWait = false
   ): Promise<void> {
     const clean = cleanTextForSpeech(text);
     const turnId = session.lastTurnId;
-    if (!clean || !turnId || this.current !== session) return;
+    if (!clean || !turnId || this.current !== session) {
+      this.releaseOgraSpeechHold(session, turnId, endsOgraWait);
+      return;
+    }
     // Webhook ainda em curso: enfileira. Já na espera da resposta, a fala (ferramenta, pergunta
     // de SIM) sai na hora — o turno continua aberto de propósito.
     if (session.activeTurn && !session.ograAwaitingReply) {
-      if (this.privacy.ogra) session.outOfTurnQueue.push({ text: clean, afterSpoken, withCue });
-      return;
-    }
-
-    if (withCue) await this.signalOgraCue(session, turnId);
-    if (!session.lastTurnId || this.current !== session) return;
-    if (session.activeTurn && !session.ograAwaitingReply) {
-      if (this.privacy.ogra) session.outOfTurnQueue.push({ text: clean, afterSpoken, withCue });
+      if (this.privacy.ogra) {
+        session.outOfTurnQueue.push({ text: clean, afterSpoken, endsOgraWait });
+        return;
+      }
+      this.releaseOgraSpeechHold(session, turnId, endsOgraWait);
       return;
     }
 
@@ -2710,6 +2735,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       if (this.current === session && !session.activeTurn) {
         this.emit(session, { type: 'state', state: 'ouvindo' });
       }
+      this.releaseOgraSpeechHold(session, turnId, endsOgraWait);
       return;
     }
 
@@ -2720,8 +2746,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     ) {
       fs.rm(filePath, { force: true }, () => {});
       if (this.privacy.ogra && this.current === session && session.activeTurn) {
-        session.outOfTurnQueue.unshift({ text: clean, afterSpoken, withCue });
+        session.outOfTurnQueue.unshift({ text: clean, afterSpoken, endsOgraWait });
+        return;
       }
+      this.releaseOgraSpeechHold(session, turnId, endsOgraWait);
       return;
     }
 
@@ -2730,6 +2758,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     }
     session.emittedSentences.items.push({ text: clean, consumed: false });
     this.rememberSpoken(session, clean);
+    this.releaseOgraSpeechHold(session, turnId, endsOgraWait);
     this.emit(session, {
       type: 'sentence_audio_ready',
       turnId,

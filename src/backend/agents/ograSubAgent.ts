@@ -7,9 +7,8 @@ import { DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 export const OGRA_AGENT_ID = 'ogra';
 
 /**
- * Frase que o Ork já não fala. O toque sem palavras (playOgraCue) sai na hora
- * de falar a resposta da Ogra, não antes do webhook. A constante fica para o
- * teste garantir que o TTS não a sintetiza.
+ * Frase que o Ork já não fala. A espera da Ogra é só visual (`ogra_waiting`).
+ * A constante fica para o teste garantir que o TTS não a sintetiza.
  */
 export const OGRA_HOLDING_TEXT = 'Pensando...';
 /** Mesma frase de OGRA_HOLDING_TEXT. Não é sintetizada. */

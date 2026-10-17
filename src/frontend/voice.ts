@@ -100,7 +100,8 @@ export class VoiceController {
     private readonly onError: (message: string) => void,
     private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void,
     private readonly onScreenSharingChange: (sharing: boolean) => void = () => {},
-    private readonly onNotice: (message: string) => void = () => {}
+    private readonly onNotice: (message: string) => void = () => {},
+    private readonly onOgraWaiting: (waiting: boolean, turnId?: string) => void = () => {}
   ) {
     this.speakerphone = this.loadSpeakerphonePreference();
   }
@@ -319,6 +320,9 @@ export class VoiceController {
         break;
       case 'error':
         this.onError(event.message);
+        break;
+      case 'ogra_waiting':
+        this.onOgraWaiting(event.phase === 'start', event.turnId);
         break;
     }
   }
@@ -783,6 +787,7 @@ export class VoiceController {
     this.currentTurnId = null;
     this.recording = false;
     this.micMuted = false;
+    this.onOgraWaiting(false);
     this.setState('idle');
   }
 

@@ -561,6 +561,36 @@ html, body {
   color: var(--color-text-muted);
 }
 
+.ogra-waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #9a5b00;
+}
+
+.ogra-waiting[hidden] {
+  display: none;
+}
+
+.ogra-waiting-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ogra-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes ogra-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .voice-agent-indicator {
   font-size: 0.8rem;
   font-weight: 600;
