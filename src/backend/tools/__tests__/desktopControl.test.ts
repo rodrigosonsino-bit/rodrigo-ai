@@ -569,6 +569,7 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
     assert.deepEqual(inserted, [{ text: 'e complemento', mode: 'append' }]);
   });
 
+
   it('DigitarTool responde honestamente quando traduzir-e-inserir não está disponível', async () => {
     const tool = new DigitarTool({
       env: { RODRIGO_DESKTOP_CONTROL: '1' },
@@ -583,5 +584,45 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
     tool.preview('DIGITAR_TRADUZIR_INSERIR', 'inglês:Bom dia');
     const result = await tool.execute('DIGITAR_TRADUZIR_INSERIR', 'inglês:Bom dia');
     assert.match(result, /tradução local para inserir não está disponível/i);
+  });
+
+  it('DigitarTool funciona em execução direta (autoConfirm, sem preview() prévio) e reativa app atrás do painel Rodrigo AI', async () => {
+    const hidCalls: Array<{ text: string; bundleId?: string }> = [];
+    const activated: string[] = [];
+    const tool = new DigitarTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      getFrontmostAppSync: () => ({
+        name: 'Notes',
+        bundleId: 'com.apple.Notes',
+        behindRodrigoPanel: true
+      }),
+      getFrontmostApp: async () => ({ name: 'Notes', bundleId: 'com.apple.Notes' }),
+      activateApp: async (bId) => {
+        activated.push(bId);
+      },
+      pasteViaHid: async (text, bundleId) => {
+        hidCalls.push({ text, bundleId });
+      }
+    });
+
+    const result = await tool.execute('DIGITAR_TEXTO', 'texto:Escrito direto no cursor');
+    assert.match(result, /Pronto, digitei o texto em Notes/);
+    assert.deepEqual(activated, ['com.apple.Notes']);
+    assert.deepEqual(hidCalls, [{ text: 'Escrito direto no cursor', bundleId: 'com.apple.Notes' }]);
+  });
+
+  it('splitDigitarAppTarget trata "cursor" e "campo atual" como o cursor de texto no app em foco (appRaw: null)', () => {
+    assert.deepEqual(splitDigitarAppTarget('app:Cursor|texto:olá mundo'), {
+      appRaw: null,
+      rest: 'texto:olá mundo'
+    });
+    assert.deepEqual(splitDigitarAppTarget('app:campo atual|texto:olá mundo'), {
+      appRaw: null,
+      rest: 'texto:olá mundo'
+    });
+    assert.deepEqual(splitDigitarAppTarget('app:app Cursor|texto:olá mundo'), {
+      appRaw: 'app Cursor',
+      rest: 'texto:olá mundo'
+    });
   });
 });

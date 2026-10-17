@@ -966,8 +966,7 @@ function buildDigitarSuccess(appName: string, request: TextRequest, strategy: 'a
     : `Pronto, digitei o texto em ${appName}.`;
 }
 
-function formatAccessibilityFailure(err: unknown, targetLabel: string): string {
-  const msg = err instanceof Error ? err.message : String(err);
+function formatAccessibilityFailure(err: unknown, targetLabel: string): string {  const msg = err instanceof Error ? err.message : String(err);
   if (/not editable/i.test(msg)) {
     return `Cancelado por segurança: ${targetLabel} está em foco, mas o elemento atual não é um campo editável.`;
   }

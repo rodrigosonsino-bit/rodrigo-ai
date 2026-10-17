@@ -230,6 +230,7 @@ export class DefaultMacAccessibilityAdapter implements AccessibilityAdapter {
   }
 
   private async runHelper(args: readonly string[]): Promise<HelperJson> {
+    // Fonte .swift roda via JIT (lento, identidade instável); binário executa direto.
     const isSwiftSource = this.helperPath.endsWith('.swift');
     const cmd = isSwiftSource ? '/usr/bin/xcrun' : this.helperPath;
     const cmdArgs = isSwiftSource ? ['swift', this.helperPath, ...args] : [...args];

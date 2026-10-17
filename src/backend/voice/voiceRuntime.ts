@@ -166,6 +166,8 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   const coordinator = new SubAgentCoordinator();
   const openClawClient = makeOpenClawHttpClient();
   const pendingAsyncStore = new PendingAsyncTaskStore(dataDir);
+  // Autonomia direta (RODRIGO_AUTO_CONFIRM=1): mutações executam sem pergunta falada.
+  // Valor inválido derruba o startup, mesma regra fail-high da privacidade.
   const autoConfirm = parseAutoConfirm(process.env);
   if (autoConfirm) {
     console.log('[Rodrigo AI] Autonomia direta ativa (RODRIGO_AUTO_CONFIRM=1): mutações executam sem pergunta (exceto críticas).');

@@ -256,7 +256,6 @@ func snapshot() throws -> TargetSnapshot {
     let title = try stringAttribute(ctx.element, kAXTitleAttribute as CFString)
     let focused = try boolAttribute(ctx.element, kAXFocusedAttribute as CFString) ?? true
     let enabled = try boolAttribute(ctx.element, kAXEnabledAttribute as CFString) ?? true
-    let editableAttr = try boolAttribute(ctx.element, "AXEditable" as CFString) ?? false
     let value = try stringAttribute(ctx.element, kAXValueAttribute as CFString)
     let selectedText = try stringAttribute(ctx.element, kAXSelectedTextAttribute as CFString)
     let selectedRange = try rangeAttribute(ctx.element, kAXSelectedTextRangeAttribute as CFString)
@@ -264,6 +263,8 @@ func snapshot() throws -> TargetSnapshot {
     let supportsValue = (value != nil) || settable
     let directInsertSupported = supportsValue && selectedRange != nil
     let appendSupported = supportsValue && value != nil
+    // Não existe kAXEditableAttribute na API de Acessibilidade: editabilidade = papel de texto + valor gravável.
+    // Inclui roles comuns em Electron/Chromium onde o caret existe; campos de senha nunca são editáveis.
     let secureRoles = Set(["AXSecureTextField"])
     let textRoles = Set([
         "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea",
@@ -271,8 +272,7 @@ func snapshot() throws -> TargetSnapshot {
     ])
     let secure = secureRoles.contains(role ?? "") || secureRoles.contains(subrole ?? "")
     let editable = !secure && (
-        editableAttr
-            || (supportsValue && textRoles.contains(role ?? ""))
+        (supportsValue && textRoles.contains(role ?? ""))
             || (selectedRange != nil && textRoles.contains(role ?? ""))
     )
     let rangeSnapshot = selectedRange.map { TargetSnapshot.SelectedRangeSnapshot(location: $0.location, length: $0.length) }
@@ -562,6 +562,9 @@ guard let command = args.first else {
 do {
     switch command {
     case "prompt":
+        // Pede o consentimento: abre os Ajustes no painel certo COM este binário já
+        // listado (a permissão é atribuída a QUEM chama a API de Acessibilidade, ou seja,
+        // a este helper — não ao node). Devolve trusted=false até o usuário ligar a chave.
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(options)
         encode(SuccessOutput(snapshot: nil, strategy: nil, tree: nil, text: nil, trusted: trusted))
