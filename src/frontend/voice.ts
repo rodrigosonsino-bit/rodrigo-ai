@@ -13,6 +13,7 @@ import {
   SPEAKERPHONE_STORAGE_KEY,
   vadThresholds
 } from '../shared/speakerphoneProfile.ts';
+import { micIgnoredWhileOutput, OUTPUT_TAIL_MS } from '../shared/ttsEcho.ts';
 
 // --- Parâmetros de VAD (Fase 2 v2 + adendo) ---
 const PRE_ROLL_MS = 400; // Preserva 400ms de áudio pré-início para garantir integridade do onset com tolerância
@@ -76,6 +77,8 @@ export class VoiceController {
   // --- Playback ---
   private playbackQueue: QueuedChunk[] = [];
   private playbackActive = false;
+  /** Ignora o microfone até este instante, depois que a reprodução termina. */
+  private outputTailUntil = 0;
   private currentSource: AudioBufferSourceNode | null = null;
   /** Gain único no caminho de TTS (duck do viva-voz). */
   private playbackGain: GainNode | null = null;
@@ -382,8 +385,41 @@ export class VoiceController {
     }
   }
 
+  private outputGuardsMic(): boolean {
+    return micIgnoredWhileOutput({
+      playbackActive: this.playbackActive,
+      sseSpeaking: this.state === 'falando',
+      tailUntil: this.outputTailUntil,
+      now: Date.now()
+    });
+  }
+
+  private armOutputTail(): void {
+    this.outputTailUntil = Date.now() + OUTPUT_TAIL_MS;
+  }
+
+  /** Descarta gravação e pré-roll. O áudio do próprio Ork não pode virar turno. */
+  private discardOpenCapture(): void {
+    this.recording = false;
+    this.recordedChunks = [];
+    this.recordedMs = 0;
+    this.continuousSilenceMs = 0;
+    this.continuousVoiceMs = 0;
+    this.onsetGraceMs = 0;
+    this.bargeInCandidateMs = 0;
+    this.ringBuffer = [];
+    this.ringBufferMs = 0;
+  }
+
   private processAudioBlock(rms: number, samples: Float32Array): void {
     if (this.micMuted) return;
+    // Surdo enquanto o Ork fala ou toca o sinal, e por um rabo curto. O viva-voz
+    // desligado não trata playback como "falando" (speakingForVad); sem isto o
+    // microfone transcreve o próprio TTS e reabre o turno.
+    if (this.outputGuardsMic()) {
+      this.discardOpenCapture();
+      return;
+    }
     const durationMs = this.blockDurationMs(samples);
     const profile = vadThresholds(this.speakerphone);
     const speaking = speakingForVad(this.speakerphone, this.playbackActive, this.state === 'falando');
@@ -622,6 +658,7 @@ export class VoiceController {
     }
 
     this.playbackActive = false;
+    if (generation === this.playbackGeneration) this.armOutputTail();
   }
 
   private async playChunk(chunk: QueuedChunk): Promise<void> {
@@ -731,6 +768,7 @@ export class VoiceController {
     this.stopSharingScreen();
     this.playbackGeneration++;
     this.stopPlaybackImmediately();
+    this.outputTailUntil = 0;
     this.eventSource?.close();
     this.eventSource = null;
     this.workletNode?.port.close();

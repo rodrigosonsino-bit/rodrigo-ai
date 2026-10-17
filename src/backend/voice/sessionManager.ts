@@ -12,6 +12,7 @@ import { guardMessages, guardText, OutboundBlockedError } from '../privacy/outbo
 import { neutralizeUntrusted } from '../memory/untrustedData.js';
 import { classifyOgraTool, OGRA_PHASE1_REFUSAL } from '../agents/ograPolicy.js';
 import {
+  OGRA_ACK_TEXT,
   OGRA_AGENT_ID,
   OGRA_FALLBACK_NOTICE,
   OGRA_REPLY_BLOCKED_TEXT,
@@ -20,6 +21,7 @@ import {
   OGRA_WEBHOOK_FAILED_TEXT,
   ograFailureFallsBack
 } from '../agents/ograSubAgent.js';
+import { isTtsEchoTranscript, RECENT_SPOKEN_LIMIT } from '../../shared/ttsEcho.js';
 import {
   OGRA_CUE_MAX_BYTES,
   OGRA_CUE_SENTENCE_INDEX,
@@ -409,6 +411,16 @@ interface Session {
    * POST /api/voice/session/audio neste estado. Texto digitado continua valendo.
    */
   micMuted: boolean;
+  /**
+   * Últimas frases emitidas ao cliente (anel). Transcrição igual a uma delas
+   * é eco do alto-falante e não abre turno de verdade.
+   */
+  recentSpoken: string[];
+  /**
+   * Turno que espera a única tarefa Ogra pendente terminar para então chamar
+   * o webhook. Uma fala mais nova substitui este id; o turno antigo não posta.
+   */
+  ograDeferredTurnId: string | null;
 }
 
 type OgraWaitResult = 'reply' | 'timeout' | 'cancelled';
@@ -419,6 +431,9 @@ interface OgraTaskRecord {
   prompt: string;
   timer: NodeJS.Timeout | null;
   resolveWait: ((result: OgraWaitResult) => void) | null;
+  /** Resolve quando a tarefa sai do mapa, para quem esperava a vaga seguir. */
+  done: Promise<void>;
+  markDone: () => void;
 }
 
 interface OgraClosedTask {
@@ -777,6 +792,7 @@ export class SessionManager {
     session.outOfTurnQueue.length = 0;
     session.ograAwaitingReply = false;
     session.ograAwaitingTurnId = null;
+    session.ograDeferredTurnId = null;
     for (const [taskId, task] of this.ograTasks) {
       if (task.sessionId !== session.id) continue;
       const wake = this.settleOgraTask(taskId, 'cancelled');
@@ -845,7 +861,9 @@ export class SessionManager {
         drainingOutOfTurn: false,
         ograAwaitingReply: false,
         ograAwaitingTurnId: null,
-        micMuted: false
+        micMuted: false,
+        recentSpoken: [],
+        ograDeferredTurnId: null
       };
       clearTimeout(session.idleTimer);
       this.touch(session);
@@ -984,6 +1002,15 @@ export class SessionManager {
     transcript: string
   ): Promise<void> {
     try {
+      if (this.isEchoTranscript(session, transcript)) {
+        console.warn(
+          this.privacy.ogra
+            ? '[ogra] transcrição ignorada (eco do TTS)'
+            : '[voice] transcrição ignorada (eco do TTS)'
+        );
+        if (session.activeTurn === turn) this.finishTurn(session, turn);
+        return;
+      }
       const commandTranscript = stripLeadingOrqueVocative(transcript);
       this.mark(turn, 'stt');
       if (session.activeTurn !== turn) return; // superado por cancelamento/preempção
@@ -2132,18 +2159,111 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
    * o mesmo turno seguir o caminho normal.
    * Falha de transporte do webhook faz o mesmo, sem segunda tentativa. A Ogra não entra
    * na reserva do Gemini. Com a flag de reserva em 0, o prazo encerra o turno.
+   * No máximo uma tarefa pendente por sessão. Outra fala espera essa tarefa (a
+   * resposta dela continua valendo) e só então chama o webhook. Eco do TTS não chega aqui.
    * @returns true se o turno foi encerrado aqui.
    */
-  private async delegateTranscriptToOgra(session: Session, turn: ActiveTurn, transcript: string): Promise<boolean> {
-    this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+  private isEchoTranscript(session: Session, transcript: string): boolean {
+    const spoken = this.privacy.ogra ? [OGRA_ACK_TEXT, ...session.recentSpoken] : session.recentSpoken;
+    return isTtsEchoTranscript(transcript, spoken);
+  }
+
+  private rememberSpoken(session: Session, text: string): void {
+    const clean = text.trim();
+    if (!clean) return;
+    session.recentSpoken.push(clean);
+    while (session.recentSpoken.length > RECENT_SPOKEN_LIMIT) session.recentSpoken.shift();
+  }
+
+  private pendingOgraTaskFor(sessionId: string): { taskId: string; task: OgraTaskRecord } | null {
+    for (const [taskId, task] of this.ograTasks) {
+      if (task.sessionId === sessionId) return { taskId, task };
+    }
+    return null;
+  }
+
+  private waitForPendingOgra(task: OgraTaskRecord, turn: ActiveTurn): Promise<'free' | 'aborted'> {
+    if (turn.abortController.signal.aborted) return Promise.resolve('aborted');
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: 'free' | 'aborted'): void => {
+        if (settled) return;
+        settled = true;
+        turn.abortController.signal.removeEventListener('abort', onAbort);
+        resolve(result);
+      };
+      const onAbort = (): void => finish('aborted');
+      void task.done.then(() => finish('free'));
+      turn.abortController.signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  /**
+   * Uma tarefa pendente por sessão. false: este turno não chama o webhook
+   * (foi substituído, cancelado ou a sessão acabou).
+   */
+  private async acquireOgraSlot(session: Session, turn: ActiveTurn): Promise<boolean> {
+    for (;;) {
+      const pending = this.pendingOgraTaskFor(session.id);
+      if (!pending) return true;
+      console.warn(
+        `[ogra] webhook não repetido; tarefa pendente taskId=${pending.taskId} segue; fala enfileirada`
+      );
+      if (session.ograDeferredTurnId && session.ograDeferredTurnId !== turn.turnId) {
+        console.warn(`[ogra] fila substituída; turno ${session.ograDeferredTurnId} não chama o webhook`);
+      }
+      session.ograDeferredTurnId = turn.turnId;
+      const gate = await this.waitForPendingOgra(pending.task, turn);
+      if (gate === 'aborted' || session.ograDeferredTurnId !== turn.turnId) return false;
+      if (
+        session.cancelledTurnIds.has(turn.turnId) ||
+        session.activeTurn !== turn ||
+        this.current !== session
+      ) {
+        return false;
+      }
+    }
+  }
+
+  private forgetOgraTask(taskId: string): void {
+    const task = this.ograTasks.get(taskId);
+    if (!task) return;
+    if (task.timer) clearTimeout(task.timer);
+    task.timer = null;
+    task.resolveWait = null;
+    this.ograTasks.delete(taskId);
+    task.markDone();
+  }
+
+  private createOgraTask(session: Session, turn: ActiveTurn, transcript: string): string {
+    let markDone: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      markDone = () => resolve();
+    });
     const taskId = crypto.randomUUID();
-    this.ograTasks.set(taskId, {
+    const task: OgraTaskRecord = {
       sessionId: session.id,
       turnId: turn.turnId,
       prompt: transcript,
       timer: null,
-      resolveWait: null
-    });
+      resolveWait: null,
+      done,
+      markDone: () => markDone()
+    };
+    this.ograTasks.set(taskId, task);
+    if (session.ograDeferredTurnId === turn.turnId) session.ograDeferredTurnId = null;
+    return taskId;
+  }
+
+  private async delegateTranscriptToOgra(session: Session, turn: ActiveTurn, transcript: string): Promise<boolean> {
+    const slot = await this.acquireOgraSlot(session, turn);
+    if (!slot) {
+      if (session.ograDeferredTurnId === turn.turnId) session.ograDeferredTurnId = null;
+      if (session.activeTurn === turn) this.finishTurn(session, turn);
+      return true;
+    }
+    this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
+    const taskId = this.createOgraTask(session, turn, transcript);
     const r = await this.runSubAgentDelegation({
       turnId: turn.turnId,
       query: transcript,
@@ -2157,7 +2277,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       sessionToken: session.token
     });
     const deferred = Boolean(r.ok && r.result?.kind === 'async_deferred' && r.result.success);
-    if (!deferred) this.ograTasks.delete(taskId);
+    if (!deferred) this.forgetOgraTask(taskId);
     if (r.budgetExceeded) {
       if (session.activeTurn === turn) this.finishTurn(session, turn);
       return true;
@@ -2368,6 +2488,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       this.ograClosed.delete(oldest);
     }
     this.coordinator.releaseAsyncSlot(taskId);
+    task.markDone();
     return wake;
   }
 
@@ -2608,6 +2729,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       session.emittedSentences = { turnId, items: [] };
     }
     session.emittedSentences.items.push({ text: clean, consumed: false });
+    this.rememberSpoken(session, clean);
     this.emit(session, {
       type: 'sentence_audio_ready',
       turnId,
@@ -2751,6 +2873,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
       session.emittedSentences.items.push(
         turn.provenance === 'screen' ? { text: ready.text, consumed: false, origin: 'screen' } : { text: ready.text, consumed: false }
       );
+      this.rememberSpoken(session, ready.text);
       if (session.emittedSentences.items.length === 1) {
         this.mark(turn, 'primeiro_audio');
         console.log(`[timing] turno=${turn.turnId} ${turn.marks.map(([k, ms]) => `${k}=${ms}ms`).join(' ')}`);

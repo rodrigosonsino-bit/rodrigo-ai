@@ -1337,9 +1337,8 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
     const task1 = payloadOf(h.fetches[0]).taskId;
     const turn2 = await say(h, session, 'segunda');
-    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda');
-    const task2 = payloadOf(h.fetches[1]).taskId;
-    assert.notEqual(task1, task2);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(h.fetches.length, 1, 'segunda espera a tarefa pendente');
     assert.notEqual(turn1, turn2);
     assertNoCue(h);
 
@@ -1352,6 +1351,10 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(older.status, 200);
     assert.equal(older.json.ok, true);
     assert.equal(older.json.ignored, undefined);
+    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda depois da primeira');
+    const task2 = payloadOf(h.fetches[1]).taskId;
+    assert.notEqual(task1, task2);
+    assert.equal(payloadOf(h.fetches[1]).message, 'segunda');
     await waitFor(() => h!.tts.synthesizeCalls.includes('resposta da primeira'), 'resposta anterior falada');
     assertCueOnceBeforeReply(h);
     assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'resposta da primeira').length, 1);
@@ -1388,7 +1391,10 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
     const task1 = payloadOf(h.fetches[0]).taskId;
     await say(h, session, 'segunda');
-    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(h.fetches.length, 1, 'segunda não abre webhook enquanto a primeira está pendente');
+    await waitFor(() => h!.fetches.length === 2, 'webhook da segunda quando a primeira encerra', 4000);
+    assert.equal(payloadOf(h.fetches[1]).message, 'segunda');
     await waitFor(
       () => h!.tts.synthesizeCalls.includes('A Ogra não respondeu a tempo.'),
       'prazo da tarefa ainda ativa',
@@ -1443,6 +1449,15 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     await say(h, session, 'texto digitado');
     await waitFor(() => h!.fetches.length === 1, 'digitação segue com o microfone mudo');
     assert.equal(payloadOf(h.fetches[0]).message, 'texto digitado');
+    const typedTask = payloadOf(h.fetches[0]).taskId;
+    const typedReply = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: typedTask, sessionId: session.sessionId, text: 'Recebi o texto.' })
+    );
+    assert.equal(typedReply.status, 200);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('Recebi o texto.'), 'texto falado antes do áudio');
 
     const unmute = await fetch(`${h.baseUrl}/api/voice/session/mute`, {
       method: 'POST',
@@ -1464,5 +1479,76 @@ describe('camada Ogra — voz, callback e SIM', { concurrency: 1 }, () => {
     assert.equal(againBody.ignored, undefined);
     assert.ok(againBody.turnId);
     await waitFor(() => h!.fetches.length === 2, 'áudio depois de reativar vai à Ogra');
+  });
+
+  it('eco "Pensando..." não abre tarefa da Ogra', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    for (const text of ['Pensando...', 'pensando', 'Pensando']) {
+      await say(h, session, text);
+    }
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 0);
+    assert.equal(h.engine.classifyCalls.length, 0);
+    assert.equal(h.engine.generateCalls.length, 0);
+    assertNoAck(h);
+    assertNoCue(h);
+    await say(h, session, 'olá');
+    await waitFor(() => h!.fetches.length === 1, 'fala real chama o webhook');
+    assert.equal(payloadOf(h.fetches[0]).message, 'olá');
+    assert.equal(h.fetches.length, 1);
+  });
+
+  it('eco do TTS com tarefa pendente não abre outra, e a resposta pendente é falada', async () => {
+    h = await setup({ ogra: true });
+    const session = await openSession(h);
+    await say(h, session, 'qual a capital');
+    await waitFor(() => h!.fetches.length === 1, 'webhook');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    await say(h, session, 'Pensando...');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 1, 'eco não chama o webhook');
+    const reply = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'A capital é Brasília.' })
+    );
+    assert.equal(reply.status, 200);
+    assert.equal(reply.json.ignored, undefined);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('A capital é Brasília.'), 'resposta falada');
+    await new Promise((r) => setTimeout(r, 50));
+    await say(h, session, 'A capital é Brasília.');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 1, 'eco da resposta não abre tarefa');
+    assert.equal(h.tts.synthesizeCalls.filter((s) => s === 'A capital é Brasília.').length, 1);
+    assertNoAck(h);
+  });
+
+  it('fala nova com tarefa pendente espera e só então chama o webhook uma vez', async () => {
+    h = await setup({ ogra: true, ograReplyTimeoutMs: 5000 });
+    const session = await openSession(h);
+    await say(h, session, 'primeira');
+    await waitFor(() => h!.fetches.length === 1, 'webhook da primeira');
+    const task1 = payloadOf(h.fetches[0]).taskId;
+    await say(h, session, 'segunda');
+    await say(h, session, 'terceira');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(h.fetches.length, 1);
+    const older = await rawPost(
+      h.port,
+      '/api/ogra/reply',
+      { Authorization: `Bearer ${CALLBACK_TOKEN}` },
+      JSON.stringify({ taskId: task1, sessionId: session.sessionId, text: 'resposta da primeira' })
+    );
+    assert.equal(older.status, 200);
+    assert.equal(older.json.ignored, undefined);
+    await waitFor(() => h!.fetches.length === 2, 'um webhook da fala que ficou na fila');
+    assert.equal(payloadOf(h.fetches[1]).message, 'terceira');
+    assert.notEqual(payloadOf(h.fetches[1]).taskId, task1);
+    await waitFor(() => h!.tts.synthesizeCalls.includes('resposta da primeira'), 'resposta pendente falada');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(h.fetches.length, 2, 'não há rajada');
+    assertNoAck(h);
   });
 });
