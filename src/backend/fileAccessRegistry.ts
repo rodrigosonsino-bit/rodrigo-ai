@@ -24,7 +24,7 @@ export const FILE_ACCESS_REGISTRY: readonly FileAccessEntry[] = [
   { file: 'src/backend/knowledge/corpus.ts', cls: 'exception', reason: 'lê docs/research/ para a busca BM25 local; o trecho só sai para a nuvem com RODRIGO_SEND_KNOWLEDGE=1 (padrão desligado)' },
   { file: 'src/backend/server.ts', cls: 'exception', reason: 'serve arquivos estáticos públicos de dist/client com guarda de path traversal (hostValidator + testes)' },
   { file: 'src/backend/storage/jsonStore.ts', cls: 'exception', reason: 'decisão 12: JsonStore (lembretes, notas, memórias) fica em data/ ou RODRIGO_DATA_DIR, nomes fixos, escrita tmp + rename; migração para a API fica para depois' },
-  { file: 'src/backend/tools/desktopControlTool.ts', cls: 'exception', reason: 'lê só o arquivo operacional .runtime/native-bridge.json (caminho fixo do app) para localizar o socket do bridge nativo; sem conteúdo do usuário' },
+  { file: 'src/backend/tools/desktopControlTool.ts', cls: 'exception', reason: 'lê .runtime/native-bridge.json (porta+token do app nativo para colar em processo) e verifica existência do binário de paste; comandos de SO via executor com allowlist, nunca shell' },
   { file: 'src/backend/tools/macosAccessibility.ts', cls: 'existence-only', reason: 'só existsSync do binário pré-compilado .runtime/bin/desktop-accessibility; nunca abre nem lê conteúdo de arquivo do usuário' },
   { file: 'src/backend/voice/audioStore.ts', cls: 'exception', reason: 'cria diretórios por sessão; todo nome de arquivo é gerado com crypto.randomUUID(), nunca derivado de entrada' },
   { file: 'src/backend/voice/fakeEngine.ts', cls: 'non-production', reason: 'motor de voz FALSO usado só nos testes; não é carregado em produção (voiceRuntime só constrói o MlxWorkerEngine real)' },
@@ -34,8 +34,6 @@ export const FILE_ACCESS_REGISTRY: readonly FileAccessEntry[] = [
   { file: 'src/backend/voice/tmpSweeper.ts', cls: 'exception', reason: 'varre e apaga SOMENTE dentro de .runtime/tmp (lstat; nunca segue symlink para fora)' },
   { file: 'src/backend/voice/usageLedger.ts', cls: 'exception', reason: 'livro-caixa do gasto próprio (.runtime/usage-ledger.jsonl): só números por (fonte, modelo), nunca texto de conversa; append + leitura filtrada pelo dia' },
   { file: 'src/backend/voice/ttsBudget.ts', cls: 'exception', reason: 'arquivo operacional do app (.runtime/tts-budget.json): contadores, sem dado do usuário; escrita tmp + rename' },
-  { file: 'src/backend/tools/macosAccessibility.ts', cls: 'exception', reason: 'só verifica a existência do binário pré-compilado (.runtime/bin/desktop-accessibility); a execução do helper passa pelo executor de comandos auditado' },
-  { file: 'src/backend/tools/desktopControlTool.ts', cls: 'exception', reason: 'lê .runtime/native-bridge.json (porta+token do app nativo para colar em processo) e verifica existência do binário de paste; comandos de SO via executor com allowlist, nunca shell' },
   { file: 'src/backend/voice/ttsProviders.ts', cls: 'exception', reason: 'verifica binários/vozes e apaga o AIFF temporário que ele mesmo gerou para o `say` (nome gerado pelo app)' },
   { file: 'src/backend/voice/voxcpmVoiceProvider.ts', cls: 'exception', reason: 'grava WAV de síntese local VoxCPM no caminho de sessão já escolhido pelo runtime (tmp + rename); só fala com loopback' },
   { file: 'src/backend/voice/voiceRuntime.ts', cls: 'existence-only', reason: 'só verifica a existência do runtime de voz e do manifesto' }
