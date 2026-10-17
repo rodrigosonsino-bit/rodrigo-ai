@@ -1,0 +1,41 @@
+[0m
+> build · nemotron-3.5-lightning-free
+[0m
+[0m→ [0mRead .
+[0m✱ [0mGlob "**/*t# Auditoria do Plano TTS-OSS (docs/phase-tts-oss-v1.md)
+
+## Achados por Severidade
+
+### 🔴 **Crítico**
+- **H2 falha em latência**: Medição de 4.3-6.1s no M5 16GB **excede** o critério de ≤4s (línea 61). Isso invalida a integração OSS como engine padrão até que latência seja red[0m→ [0mRead scripts/audicao-tts-oss.mjs
+[0m→ [0mRead src/backend/__tests__/voxcpmVoiceProvider.test.ts
+[0m✱ [0mGlob "docs/audits/tts-oss/**"[90m in . · 3 matches[0m
+[93m[1m! [0mpermission requested: read (.env); auto-rejecting
+[0m✗ [0mRead .env failed
+[91m[1mError: [0mThe user rejected permission to use this specific tool call.
+Let me also check the test files and any existing audit documents.
+1s/frase — só Turbo seria elegível.
+- **Licenças arriscadas**: Fish-speech (NC/Research pesos), Coqui XTTS (CPML NC permanente), Qwen3-TTS (rejeitado por carga ~173s) — não cumprem filtro "licença permissiva".
+
+### 🟡 **Médio**
+- **Shortlist incompleta**: Dia só inglês (fora do escopo PT), nari-labs/dia sem português. VoxCPM2 licença precisa confirmação do checkpoint ("confirmar card do checkpoint").
+- **Dependência de servidor externo**: MLX server em `127.0.0.1:5077` — ponto único de falha se o servidor cair; sem fallback claro.
+- **Auditoria adversarial pendente**: Seção 3.item 5 prevê auditoria Cursor→Gemini→OpenCode mas ainda não executada antes de implementar provider.
+
+### 🟢 **Baixo**
+- **Documentação de variáveis incompleta**: `RODRIGO_VOXCPM_VOICE` descrito como "vazio / preset do servidor" — comportamento indefinido se vazio.
+- **Gate H1 não iniciado**: Seção 8 não tem data/pasta preenchidas — auditoria cega ainda não foi gerada/rodada.
+- **Sem novo canal de nuvem**: Restrição `127.0.0.1` é boa, mas não há menção a como recuperar se servidor MLX não iniciar.
+
+---
+
+## Resumo Executivo
+
+| Critério | Status |
+|---|---|
+| **H1 (Audição cega)** | Não iniciado — seção 8 em branco |
+| **H2 (Latência ≤4s)** | **Falha** — medida 4.3-6.1s excede limite |
+| **H3 (CONFIGURAR_VOZ)** | Pendente — depende de H1/H2 |
+| **H4 (Testes unitários)** | Pendente — após H1/H2 |
+
+**Recomendação imediata**: Reduzir latência do VoxCPM2 para ≤4s/frase no M5 16GB ou rebaixar critério H2. Se não possível, manter Gemini Charon como default e documentar "OSS avaliado, nuvem permanece default" (plano Seção 3.item 4).

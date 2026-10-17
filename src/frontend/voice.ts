@@ -114,6 +114,20 @@ export class VoiceController {
     return { sessionId: this.sessionId, token: this.token };
   }
 
+  /**
+   * Entrada por texto: o servidor devolve turnId no POST /session/text, mas o player
+   * só aceita áudio cujo turnId === currentTurnId (definido no fluxo de voz em
+   * finishRecording). Sem isso, sentence_audio_ready chega e é descartado — a resposta
+   * gera no worker e nunca toca nem aparece no log.
+   */
+  beginTextTurn(turnId: string): void {
+    this.stopPlaybackImmediately();
+    this.playbackGeneration++;
+    this.playbackQueue = [];
+    this.currentTurnId = turnId;
+    this.setState('processando');
+  }
+
   isSpeakerphone(): boolean {
     return this.speakerphone;
   }

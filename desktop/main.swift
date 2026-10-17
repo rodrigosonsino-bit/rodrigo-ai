@@ -73,12 +73,32 @@ final class NativePasteBridge {
     private(set) var port: UInt16 = 0
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "local.rodrigo-ai.native-bridge")
+    private(set) var lastExternalApp: NSRunningApplication?
+    private var workspaceObserver: NSObjectProtocol?
 
     private var bridgeInfoURL: URL {
         URL(fileURLWithPath: repoRoot).appendingPathComponent(".runtime/native-bridge.json")
     }
 
+    func recordExternalApp(_ app: NSRunningApplication?) {
+        guard let app, app != NSRunningApplication.current, !app.isTerminated else { return }
+        if app.bundleIdentifier == "local.rodrigo-ai.desktop" { return }
+        lastExternalApp = app
+    }
+
     func start() {
+        if let front = NSWorkspace.shared.frontmostApplication, front != NSRunningApplication.current {
+            recordExternalApp(front)
+        }
+        workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                self?.recordExternalApp(app)
+            }
+        }
         do {
             let params = NWParameters.tcp
             params.requiredInterfaceType = .loopback
@@ -110,6 +130,10 @@ final class NativePasteBridge {
     }
 
     func stop() {
+        if let obs = workspaceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+            workspaceObserver = nil
+        }
         listener?.cancel()
         listener = nil
         try? FileManager.default.removeItem(at: bridgeInfoURL)
@@ -162,29 +186,91 @@ final class NativePasteBridge {
         }
     }
 
+    private func resolveTargetExternalApp(requestedBundleId: String?) -> NSRunningApplication? {
+        if let bId = requestedBundleId, !bId.isEmpty, bId != "local.rodrigo-ai.desktop" {
+            if let match = NSRunningApplication.runningApplications(withBundleIdentifier: bId).first(where: { !$0.isTerminated }) {
+                return match
+            }
+        }
+        if let front = NSWorkspace.shared.frontmostApplication,
+           front != NSRunningApplication.current,
+           front.bundleIdentifier != "local.rodrigo-ai.desktop",
+           !front.isTerminated {
+            return front
+        }
+        if let prev = (NSApp.delegate as? AppDelegate)?.previousApp, !prev.isTerminated, prev != NSRunningApplication.current {
+            return prev
+        }
+        if let last = lastExternalApp, !last.isTerminated, last != NSRunningApplication.current {
+            return last
+        }
+        return nil
+    }
+
     private func serve(header: String, body: Data, on connection: NWConnection) {
         let firstLine = header.split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? ""
         let authorized = header.range(of: "Authorization: Bearer \(token)", options: .caseInsensitive) != nil
-        guard firstLine.hasPrefix("POST /paste"), authorized else {
+        guard authorized else {
             respond(connection, status: 401, json: #"{"ok":false,"error":"unauthorized"}"#)
             return
         }
+        if firstLine.hasPrefix("GET /frontmost") {
+            var bundleId = ""
+            var name = ""
+            let sem = DispatchSemaphore(value: 0)
+            DispatchQueue.main.async {
+                if let app = self.resolveTargetExternalApp(requestedBundleId: nil) {
+                    bundleId = app.bundleIdentifier ?? ""
+                    name = app.localizedName ?? bundleId
+                } else if let front = NSWorkspace.shared.frontmostApplication {
+                    bundleId = front.bundleIdentifier ?? ""
+                    name = front.localizedName ?? bundleId
+                }
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 2)
+            let respObj: [String: Any] = ["ok": !bundleId.isEmpty, "bundleId": bundleId, "name": name]
+            let respJson = (try? JSONSerialization.data(withJSONObject: respObj)).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"ok":false}"#
+            respond(connection, status: 200, json: respJson)
+            return
+        }
+        guard firstLine.hasPrefix("POST /paste") else {
+            respond(connection, status: 400, json: #"{"ok":false,"error":"unknown route"}"#)
+            return
+        }
         var text = ""
-        if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-           let t = obj["text"] as? String {
-            text = t
+        var targetBundleId: String? = nil
+        if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            if let t = obj["text"] as? String { text = t }
+            if let b = obj["bundleId"] as? String, !b.isEmpty { targetBundleId = b }
         }
         guard !text.isEmpty else {
             respond(connection, status: 400, json: #"{"ok":false,"error":"empty text"}"#)
             return
         }
-        // CGEvent e pasteboard no main thread.
+        // CGEvent e pasteboard no main thread. Se o painel do Rodrigo AI estiver na frente,
+        // devolve o foco ao aplicativo onde estava o cursor antes de disparar Cmd+V.
         let sem = DispatchSemaphore(value: 0)
         DispatchQueue.main.async {
-            NativeClipboardPaster.paste(text)
-            sem.signal()
+            let currentFront = NSWorkspace.shared.frontmostApplication
+            let targetApp = self.resolveTargetExternalApp(requestedBundleId: targetBundleId)
+            let needsActivate = targetApp != nil && (
+                currentFront == NSRunningApplication.current ||
+                currentFront?.bundleIdentifier == "local.rodrigo-ai.desktop" ||
+                (targetBundleId != nil && currentFront?.bundleIdentifier != targetBundleId)
+            )
+            if let targetApp, needsActivate {
+                targetApp.activate(options: [])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    NativeClipboardPaster.paste(text)
+                    sem.signal()
+                }
+            } else {
+                NativeClipboardPaster.paste(text)
+                sem.signal()
+            }
         }
-        _ = sem.wait(timeout: .now() + 2)
+        _ = sem.wait(timeout: .now() + 3)
         respond(connection, status: 200, json: #"{"ok":true,"strategy":"native-cgevent"}"#)
     }
 
@@ -756,7 +842,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func showPanel() {
         let me = NSRunningApplication.current
-        if let front = NSWorkspace.shared.frontmostApplication, front != me { previousApp = front }
+        if let front = NSWorkspace.shared.frontmostApplication, front != me {
+            previousApp = front
+            NativePasteBridge.shared.recordExternalApp(front)
+        }
         if let screen = NSScreen.main {
             let f = screen.visibleFrame
             panel.setFrameOrigin(NSPoint(x: f.maxX - panel.frame.width - 16, y: f.maxY - panel.frame.height - 8))

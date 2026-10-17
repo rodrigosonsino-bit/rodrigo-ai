@@ -152,7 +152,11 @@ MUTATION_NAMES = {
 OPTIONAL_CONTENT_QUERY_NAMES = {"LEMBRETE_CONSULTAR", "NOTA_CONSULTAR", "MEMORIA_CONSULTAR"}
 QUERY_NAMES = OPTIONAL_CONTENT_QUERY_NAMES | {"DESKTOP_COMANDO", "DITADO_LOCAL", "CONFIGURAR_VOZ"}
 STRUCTURED_ACTION_NAMES = {"DESKTOP_COMANDO", "DESKTOP_CRITICO", "CONFIGURAR_VOZ"}
-PREFIXED_CONTENT_RE = re.compile(r"^(?:texto|limpar|traduzir_pt|traduzir:[a-z]{2,5})\s*:\s*", re.IGNORECASE)
+PREFIXED_CONTENT_RE = re.compile(
+    r"^(?:(?:app|alvo|em)\s*:[^|]+\|\s*)?(?:texto|limpar|traduzir_pt|traduzir:[a-z]{2,5})\s*:\s*",
+    re.IGNORECASE,
+)
+APP_TARGET_PREFIX_RE = re.compile(r"^(?:app|alvo|em)\s*:[^|]+\|\s*", re.IGNORECASE)
 MAX_MUTATION_CONTENT_CHARS = 200
 
 DETECT_MUTATION_SYSTEM_PROMPT = (
@@ -196,10 +200,13 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "'window_minimize' (minimizar janela atual), 'open_folder:downloads|documentos|desktop'.\n"
     "DESKTOP_CRITICO: comando destrutivo ou de bloqueio do macOS (exige confirmação): "
     "'app_quit:<Nome>' (fechar aplicativo), 'empty_trash' (esvaziar lixeira), "
-    "'lock_screen' (bloquear tela), 'system_sleep' (suspender/dormir o Mac).\n"
-    "DIGITAR_TEXTO: digitar/colar texto no aplicativo em foco ('texto:<conteúdo>') ou acionar atalho do "
-    "Ditado Local no app focado ('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', "
-    "'atalho:ditar_traduzir').\n"
+    "'lock_screen' (bloquear tela), 'system_sleep' (suspender/dormir o Mac), "
+    "'system_restart' (reiniciar o Mac), 'system_shutdown' (desligar o Mac).\n"
+    "DIGITAR_TEXTO: digitar/colar texto no aplicativo em foco ('texto:<conteúdo>') ou num app nomeado "
+    "('app:TextEdit|texto:olá', 'app:Notes|texto:oi') ou acionar atalho do Ditado Local "
+    "('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir'). "
+    "Use o prefixo app: quando o usuário pedir para escrever/editar NUM aplicativo específico "
+    "(Editor de Texto=TextEdit, Bloco de Notas=Notes).\n"
     "DIGITAR_INSERIR: inserir texto no campo atual sem depender do prefixo 'texto:'. content = o texto.\n"
     "DIGITAR_SUBSTITUIR_SELECAO: substituir o texto selecionado atual. content = o texto novo.\n"
     "DIGITAR_ANEXAR: anexar texto ao final do campo atual. content = o texto a anexar.\n"
@@ -208,7 +215,7 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "ou só '<texto>' (nesse caso assume português).\n"
     "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir um ditado localmente sem "
     "injetar teclas ('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
-    "CONFIGURAR_VOZ: trocar a voz do próprio assistente ('voz:<nome de voz local instalada|Kokoro|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>').\n"
+    "CONFIGURAR_VOZ: trocar a voz do próprio assistente ('voz:<nome de voz local instalada|Kokoro|VoxCPM|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>').\n"
     "AUTO_CORRECAO: pedir para o próprio Orque (Rodrigo AI) inspecionar e corrigir algo no seu próprio código-fonte em worktree isolada ('<descrição da correção>').\n"
     "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum.\n"
     "Exemplos:\n"
@@ -240,7 +247,11 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "Esvazia a lixeira -> DESKTOP_CRITICO|empty_trash\n"
     "Bloqueia a tela do Mac -> DESKTOP_CRITICO|lock_screen\n"
     "Suspende o computador -> DESKTOP_CRITICO|system_sleep\n"
+    "Reinicia o Mac -> DESKTOP_CRITICO|system_restart\n"
+    "Desliga o computador -> DESKTOP_CRITICO|system_shutdown\n"
     "Digita aí: Olá, tudo bem com você? -> DIGITAR_TEXTO|texto:Olá, tudo bem com você?\n"
+    "Escreve no Editor de Texto: reunião às três -> DIGITAR_TEXTO|app:TextEdit|texto:reunião às três\n"
+    "Edita no Bloco de Notas: comprar pão -> DIGITAR_TEXTO|app:Notes|texto:comprar pão\n"
     "Escreve no campo atual: reunião confirmada -> DIGITAR_INSERIR|reunião confirmada\n"
     "Substitui a seleção por Rodrigo Sonsino -> DIGITAR_SUBSTITUIR_SELECAO|Rodrigo Sonsino\n"
     "Anexa no final: obrigado! -> DIGITAR_ANEXAR|obrigado!\n"
@@ -251,6 +262,7 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "Muda sua voz para Luciana -> CONFIGURAR_VOZ|voz:Luciana\n"
     "Muda sua voz para Fernanda -> CONFIGURAR_VOZ|voz:Fernanda\n"
     "Troca para a voz Charon do Gemini -> CONFIGURAR_VOZ|voz:Charon\n"
+    "Muda para a voz local VoxCPM -> CONFIGURAR_VOZ|voz:VoxCPM\n"
     "Corrige no seu próprio código o texto do botão de voz -> AUTO_CORRECAO|Corrigir o texto do botão de voz\n"
     "Vamos trocar de assunto agora -> NENHUMA\n"
     "Me avisa amanhã cedo que eu preciso levar o carro na oficina -> LEMBRETE_CRIAR|Levar o carro na oficina\n"
@@ -299,7 +311,7 @@ DETECT_CONFIRMATION_SYSTEM_PROMPT = (
 )
 
 
-INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA", "DELEGAR_CODIGO"}
+INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA", "DELEGAR_CODIGO", "AUTOMACAO_DESKTOP"}
 CLOUD_INTENT_MODEL = os.environ.get("RODRIGO_CLOUD_INTENT_MODEL", "gemini-3.5-flash-lite")  # fixado pelo nome (sem alias): ver docs/phase-11-addendum-cloud-intent.md §5.2
 CLOUD_INTENT_HTTP_TIMEOUT_MS = 10_000  # mínimo aceito pela API do Gemini
 CLOUD_INTENT_WAIT_S = 4.0  # espera real: passou disso => fallback local (a chamada HTTP segue em 2º plano)
@@ -337,9 +349,10 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "'media_play_pause', 'media_next', 'media_prev', 'open_app:<Nome>', 'dark_mode:on', 'dark_mode:off', "
     "'dark_mode:toggle', 'window_minimize', 'open_folder:downloads', 'open_folder:documentos', 'open_folder:desktop'.\n"
     "DESKTOP_CRITICO: comando destrutivo ou de bloqueio do macOS (exige confirmação). content = um de: "
-    "'app_quit:<Nome>', 'empty_trash', 'lock_screen', 'system_sleep'.\n"
-    "DIGITAR_TEXTO: digitar/colar texto no aplicativo focado ('texto:<conteúdo>') ou disparar atalho do "
-    "Ditado Local ('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir').\n"
+    "'app_quit:<Nome>', 'empty_trash', 'lock_screen', 'system_sleep', 'system_restart', 'system_shutdown'.\n"
+    "DIGITAR_TEXTO: digitar/colar texto no app focado ('texto:<conteúdo>'), num app nomeado "
+    "('app:TextEdit|texto:olá' — Editor de Texto=TextEdit, Bloco de Notas=Notes) ou atalho do Ditado Local "
+    "('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir').\n"
     "DIGITAR_INSERIR: inserir texto no campo atual. content = o texto.\n"
     "DIGITAR_SUBSTITUIR_SELECAO: substituir o texto selecionado atual. content = o texto novo.\n"
     "DIGITAR_ANEXAR: anexar texto ao final do campo atual. content = o texto a anexar.\n"
@@ -347,16 +360,27 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "DIGITAR_TRADUZIR_INSERIR: traduzir e inserir no campo atual. content = '<idioma>:<texto>' ou só '<texto>' para português.\n"
     "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir ditado localmente sem colar "
     "('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
-    "CONFIGURAR_VOZ: trocar a voz do próprio assistente. content = 'voz:<nome de voz local instalada|Kokoro|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>'.\n"
+    "CONFIGURAR_VOZ: trocar a voz do próprio assistente. content = 'voz:<nome de voz local instalada|Kokoro|VoxCPM|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>'.\n"
     "AUTO_CORRECAO: pedir para o próprio Orque (Rodrigo AI) corrigir ou ajustar algo em seu próprio código-fonte em branch isolada. content = a correção pedida.\n"
     "DELEGAR_CODIGO: pede ao assistente para acionar, conversar, delegar ou executar uma tarefa genérica no computador/sistema via Claude Code — "
     "abrir arquivo, criar pasta, buscar no projeto, rodar script, acessar Drive, falar ou mandar mensagem para o Claude. "
     "content = a tarefa ou pedido exato a executar (texto como pedido, preservando detalhes).\n"
+    "AUTOMACAO_DESKTOP: pede para o assistente controlar a interface gráfica do Mac de forma autônoma e multi-passo — "
+    "abrir apps, clicar, digitar, navegar menus, cumprir um objetivo na tela (ex.: 'abre o Safari e pesquisa X', "
+    "'abre o Editor de Texto e escreve Y', 'automatiza isso no desktop'). content = o objetivo completo, "
+    "preservando detalhes. NÃO use para um único comando imediato de volume/mídia (aí é DESKTOP_COMANDO) "
+    "nem para ações críticas empty_trash/lock/sleep/shutdown (DESKTOP_CRITICO) nem para só Claude Code em arquivos (DELEGAR_CODIGO).\n"
     "NENHUMA: todo o resto — conversa, perguntas de conhecimento, e qualquer menção a lembrar/anotar/"
     "apagar/nota/hora/dia que NÃO seja um pedido direto ('eu lembro que você disse', 'nota dez na prova', "
     "'apagar a luz', 'a hora da verdade', 'hora em Lisboa', preferências comuns 'prefiro café, não chá').\n"
     "Pedidos sem conteúdo utilizável ('guarda isso pra mim') => NENHUMA. Pedido de consulta sem termo "
     "de busca ('quais são meus lembretes') é válido com content vazio/omitido, não é NENHUMA.\n"
+    "Exemplos de content (JSON intent/content):\n"
+    "Reinicia o Mac -> DESKTOP_CRITICO / system_restart\n"
+    "Desliga o computador -> DESKTOP_CRITICO / system_shutdown\n"
+    "Escreve no Editor de Texto: reunião às três -> DIGITAR_TEXTO / app:TextEdit|texto:reunião às três\n"
+    "Edita no Bloco de Notas comprar pão -> DIGITAR_TEXTO / app:Notes|texto:comprar pão\n"
+    "Digita aí olá -> DIGITAR_TEXTO / texto:olá\n"
 )
 
 
@@ -410,9 +434,14 @@ def parse_intent_json(raw: str, text: str = ""):
         return (intent, content)
     if intent == "DIGITAR_TEXTO" and content.lower().startswith("atalho:"):
         return (intent, content)
-    grounding_target = PREFIXED_CONTENT_RE.sub("", content) if intent in ("DIGITAR_TEXTO", "DITADO_LOCAL") else content
-    if intent == "DIGITAR_TRADUZIR_INSERIR" and ":" in grounding_target:
-        grounding_target = grounding_target.split(":", 1)[1].strip()
+    grounding_target = content
+    if intent in ("DIGITAR_TEXTO", "DIGITAR_INSERIR", "DIGITAR_SUBSTITUIR_SELECAO", "DIGITAR_ANEXAR", "DIGITAR_LIMPAR_INSERIR", "DITADO_LOCAL"):
+        grounding_target = APP_TARGET_PREFIX_RE.sub("", grounding_target)
+        grounding_target = PREFIXED_CONTENT_RE.sub("", grounding_target)
+    if intent == "DIGITAR_TRADUZIR_INSERIR":
+        grounding_target = APP_TARGET_PREFIX_RE.sub("", grounding_target)
+        if ":" in grounding_target:
+            grounding_target = grounding_target.split(":", 1)[1].strip()
     if text and not content_grounded(grounding_target, text):
         return ("NENHUMA", None)  # conteúdo não ancorado na fala: não propõe mutação
     return (intent, content)

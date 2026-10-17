@@ -478,25 +478,37 @@ html, body {
 
 /* Fase V Fatia 5: caixa de digitação (fallback textual) */
 .voice-type-panel {
-  margin: 0.5rem 0 1rem;
-  padding: 0.75rem 1rem;
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-bg);
 }
+.voice-type-label {
+  display: block;
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
 .voice-type-row {
   display: flex;
   gap: 0.5rem;
+  align-items: flex-end;
 }
 .voice-type-input {
   flex: 1;
-  padding: 0.5rem 0.75rem;
+  min-height: 2.75rem;
+  max-height: 8rem;
+  padding: 0.55rem 0.75rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 1rem;
   font-family: inherit;
+  line-height: 1.35;
+  resize: vertical;
   background-color: var(--color-bg);
-  color: var(--color-text);
+  color: var(--color-text-main);
 }
 .voice-type-input:focus {
   outline: none;

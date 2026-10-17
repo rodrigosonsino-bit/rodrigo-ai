@@ -90,6 +90,16 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
     stays.push('O Claude Code está desligado porque a nuvem está desligada.');
   }
 
+  if (status.autoDesktop.enabled) {
+    stays.push(
+      'Automação desktop ligada (RODRIGO_AUTO_DESKTOP=1): o Orque pode abrir apps e manipular a interface localmente sem pedir SIM a cada passo. Diga "parar automação" para interromper. Texto e árvore de acessibilidade não saem da máquina, salvo pelos canais de geração ou visão já ligados acima.'
+    );
+  } else if (status.autoDesktop.reason === 'desktop-control-off') {
+    stays.push('Automação desktop pedida, mas o controle do desktop está desligado (RODRIGO_DESKTOP_CONTROL=0).');
+  } else {
+    stays.push('Automação desktop desligada (RODRIGO_AUTO_DESKTOP=0, padrão).');
+  }
+
   if (status.sends.visionImage) {
     goes.push(
       'A imagem da tela só vai ao Gemini quando você autoriza na própria fala, naquele pedido (canal RODRIGO_CLOUD_VISION ligado).'

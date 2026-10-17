@@ -407,11 +407,6 @@ const voiceController = new VoiceController(
       if (state === 'processando' || state === 'erro') {
         resetAgentIndicator();
       }
-      // Fase V Fatia 5: a digitação só faz sentido com sessão ativa. Se a sessão caiu (idle/erro
-      // após encerrar), fecha a caixa — o texto digitado não iria a lugar nenhum.
-      if (state === 'idle' || state === 'erro') {
-        if (typingOpen) setTyping(false);
-      }
       const effectiveState = muted ? 'mutado' : state;
       (window as any).webkit?.messageHandlers?.iconState?.postMessage(effectiveState);
     },
@@ -466,10 +461,7 @@ voiceEndBtn.addEventListener('click', () => {
 });
 
 voiceMuteBtn.addEventListener('click', () => {
-  muted = !muted;
-  voiceController.muteMicrophone(muted);
-  voiceMuteBtn.setAttribute('aria-pressed', String(muted));
-  voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+  setMutedUi(!muted);
 });
 
 voiceInterruptBtn.addEventListener('click', () => {
@@ -494,49 +486,44 @@ window.addEventListener('beforeunload', () => {
   void voiceController.stop();
 });
 
-// --- Fase V Fatia 5: caixa de digitação (fallback textual) ---
-// Alternável pelo botão "Digitar": o texto é enviado pelo MESMO pipeline que a voz
-// (/api/voice/session/text → SessionManager.submitText → processTranscript), então
-// intenção, mutação, classificação e geração são idênticos. A resposta sai por voz.
-const voiceTypeBtn = document.getElementById('voice-type-btn') as HTMLButtonElement;
-const voiceTypePanel = document.getElementById('voice-type-panel') as HTMLDivElement;
-const voiceTypeInput = document.getElementById('voice-type-input') as HTMLInputElement;
+// --- Entrada por texto (sempre visível) ---
+// Mesmo pipeline da voz: /api/voice/session/text → submitText → processTranscript.
+// Sem sessão: abre uma e silencia o microfone (você escreveu porque não queria falar).
+const voiceTypeInput = document.getElementById('voice-type-input') as HTMLTextAreaElement;
 const voiceTypeSend = document.getElementById('voice-type-send') as HTMLButtonElement;
 
-let typingOpen = false;
+function setMutedUi(next: boolean): void {
+  muted = next;
+  voiceController.muteMicrophone(muted);
+  voiceMuteBtn.setAttribute('aria-pressed', String(muted));
+  voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+}
 
-function setTyping(open: boolean): void {
-  typingOpen = open;
-  voiceTypePanel.hidden = !open;
-  voiceTypeBtn.setAttribute('aria-pressed', String(open));
-  voiceTypeBtn.textContent = open ? 'Fechar digitação' : 'Digitar';
-  if (open) {
-    voiceTypeInput.focus();
-  } else {
-    voiceTypeInput.value = '';
+async function ensureSessionForTyping(): Promise<boolean> {
+  const { sessionId } = voiceController.getVoiceSession();
+  if (sessionId) return true;
+  voiceStartBtn.disabled = true;
+  try {
+    await voiceController.start();
+    voiceEndBtn.disabled = false;
+    voiceMuteBtn.disabled = false;
+    voiceScreenBtn.disabled = false;
+    setMutedUi(true);
+    return true;
+  } catch (error) {
+    appendErrorEntry(formatPortugueseErrorMessage(error));
+    voiceStartBtn.disabled = false;
+    return false;
   }
 }
 
-voiceTypeBtn.addEventListener('click', () => {
-  // Só abre a digitação se houver sessão ativa; caso contrário, inicia a voz primeiro.
-  const { sessionId } = voiceController.getVoiceSession();
-  if (!sessionId) {
-    voiceStartBtn.click();
-    return;
-  }
-  setTyping(!typingOpen);
-});
-
 async function submitTextTurn(text: string): Promise<void> {
-  const { sessionId, token } = voiceController.getVoiceSession();
-  if (!sessionId || !token) {
-    appendErrorEntry('Inicie a conversa por voz antes de digitar (a sessão ainda não foi aberta).');
-    return;
-  }
-  const headers = voiceController.getVoiceHeaders();
   voiceTypeSend.disabled = true;
   voiceTypeInput.disabled = true;
   try {
+    const ready = await ensureSessionForTyping();
+    if (!ready) return;
+    const headers = voiceController.getVoiceHeaders();
     const res = await fetch('/api/voice/session/text', {
       method: 'POST',
       headers: {
@@ -552,14 +539,16 @@ async function submitTextTurn(text: string): Promise<void> {
     }
     const textTurn = (await res.json()) as { turnId: string };
     console.log('[digitação] turnId=', textTurn.turnId);
-    appendTranscriptEntry('Você', text);
+    // Liga o player ao turno — sem isso o áudio SSE é descartado (currentTurnId null).
+    voiceController.beginTextTurn(textTurn.turnId);
+    // O transcript "Você" vem pelo SSE (processTranscript); não duplicar aqui.
     voiceTypeInput.value = '';
   } catch (err) {
     appendErrorEntry(formatPortugueseErrorMessage(err));
   } finally {
     voiceTypeSend.disabled = false;
     voiceTypeInput.disabled = false;
-    if (typingOpen) voiceTypeInput.focus();
+    voiceTypeInput.focus();
   }
 }
 
@@ -574,10 +563,12 @@ voiceTypeInput.addEventListener('keydown', (ev: KeyboardEvent) => {
     const text = voiceTypeInput.value.trim();
     if (text) void submitTextTurn(text);
   }
-  if (ev.key === 'Escape') {
-    setTyping(false);
-  }
 });
+
+(window as any).__focusType = (): string => {
+  voiceTypeInput.focus();
+  return 'focused';
+};
 
 // Exposed for native Swift desktop app via callAsyncJavaScript
 (window as any).__startVoice = async (): Promise<string> => {

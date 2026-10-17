@@ -71,6 +71,14 @@ export interface PrivacyStatus {
     enabled: boolean;
     reason: 'master-off' | 'channel-off' | null;
   };
+  /**
+   * Automação desktop (computer-use): controla apps locais sem SIM por passo.
+   * Texto/AX não saem salvo pelos canais de geração/visão já configurados.
+   */
+  autoDesktop: {
+    enabled: boolean;
+    reason: 'flag-off' | 'desktop-control-off' | null;
+  };
   neverSends: readonly ['audio'];
   /** T1: modo do guarda que varre o TEXTO antes de sair (não varre imagem). */
   outboundGuard: OutboundGuardModeName;

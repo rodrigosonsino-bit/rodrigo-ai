@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  autoDesktopEffective,
   claudeCodeEffective,
   parsePrivacyConfig,
   ttsCloudEffective,
@@ -9,6 +10,7 @@ import {
 } from './privacy.js';
 import { validateHost, validatePort } from './config.js';
 import { SENSITIVE_LIST_APPROVED } from './fileAccessRegistry.js';
+import { parseDesktopControlFlag } from './tools/desktopControlTool.js';
 
 /**
  * T5a (docs/plans/openjarvis-voz-desktop-v2.md §3.5): diagnóstico de prontidão e de fronteira.
@@ -131,6 +133,49 @@ export function runDoctor(input: DoctorInput): DoctorReport {
       checks.push(check('desktop-control', 'Controle do computador (macOS)', 'ok', 'RODRIGO_DESKTOP_CONTROL=1 e bundle desktop presente (requer Acessibilidade e Automação no macOS).'));
     } else {
       checks.push(check('desktop-control', 'Controle do computador (macOS)', 'info', 'RODRIGO_DESKTOP_CONTROL=1; compile desktop/build.sh para gerar o bundle assinado com DitadoLocal Dev.'));
+    }
+  }
+
+  // 3d. Automação desktop (computer-use) + Accessibility TCC (declarado; trusted via helper se presente).
+  const rawAuto = env.RODRIGO_AUTO_DESKTOP;
+  if (rawAuto !== undefined && rawAuto !== '' && rawAuto !== '0' && rawAuto !== '1') {
+    checks.push(check('auto-desktop', 'Automação desktop', 'error', 'Valor inválido em RODRIGO_AUTO_DESKTOP. Use 0 ou 1.'));
+  } else {
+    let desktopOn = false;
+    try {
+      desktopOn = parseDesktopControlFlag(env);
+    } catch {
+      desktopOn = false;
+    }
+    const autoOn = cfg !== null && autoDesktopEffective(cfg, desktopOn);
+    if (autoOn) {
+      checks.push(
+        check(
+          'auto-desktop',
+          'Automação desktop',
+          'warn',
+          'RODRIGO_AUTO_DESKTOP=1: o Orque pode controlar apps locais sem SIM por passo. Requer Acessibilidade no macOS; diga "parar automação" para interromper. Campos de senha e ações críticas (lixeira, bloquear, repouso) ficam fora do loop livre.'
+        )
+      );
+      checks.push(
+        check(
+          'accessibility-tcc',
+          'Acessibilidade (TCC)',
+          'info',
+          'Com automação ligada, conceda Acessibilidade ao terminal/app que roda o Orque em Ajustes do Sistema → Privacidade e Segurança → Acessibilidade.'
+        )
+      );
+    } else if (rawAuto === '1' && !desktopOn) {
+      checks.push(
+        check(
+          'auto-desktop',
+          'Automação desktop',
+          'warn',
+          'RODRIGO_AUTO_DESKTOP=1 mas RODRIGO_DESKTOP_CONTROL=0: automação não fica efetiva.'
+        )
+      );
+    } else {
+      checks.push(check('auto-desktop', 'Automação desktop', 'ok', 'RODRIGO_AUTO_DESKTOP=0 (padrão): sem computer-use autônomo.'));
     }
   }
 

@@ -21,6 +21,8 @@ export const TOOL_NAMES = [
   'DITADO_LOCAL',
   'CONFIGURAR_VOZ',
   'DELEGAR_CODIGO',
+  /** Automação desktop multi-passo (computer-use); só executa com RODRIGO_AUTO_DESKTOP=1. */
+  'AUTOMACAO_DESKTOP',
   'NENHUMA'
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];

@@ -38,3 +38,40 @@ fi
 codesign --force --deep --sign "$SIGN_ID" "$APP"
 echo "ok: $PWD/$APP (assinado com '$SIGN_ID')"
 
+# Instala a cópia canônica em ~/Applications e garante login no reboot
+# (antes o Login Item do macOS apontava para um build antigo em Documents/Codex).
+INSTALL_DIR="${HOME}/Applications"
+INSTALL_APP="${INSTALL_DIR}/Rodrigo AI.app"
+mkdir -p "$INSTALL_DIR"
+rm -rf "$INSTALL_APP"
+ditto "$APP" "$INSTALL_APP"
+codesign --force --deep --sign "$SIGN_ID" "$INSTALL_APP"
+echo "ok: instalado em $INSTALL_APP"
+
+AGENT_LABEL="local.rodrigo-ai.desktop.login"
+AGENT_PLIST="${HOME}/Library/LaunchAgents/${AGENT_LABEL}.plist"
+mkdir -p "${HOME}/Library/LaunchAgents"
+cat > "$AGENT_PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-a</string>
+    <string>${INSTALL_APP}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+PL
+# Remove Login Item legado (System Settings) se ainda apontar para outro caminho
+osascript -e 'tell application "System Events" to delete login item "Rodrigo AI"' 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/${AGENT_LABEL}" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
+echo "ok: sobe no login via ${AGENT_PLIST}"
+

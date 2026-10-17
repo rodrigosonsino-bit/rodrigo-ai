@@ -26,7 +26,8 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       cloudVision: false,
       webSearch: false,
       outboundGuard: 'redact',
-      claudeCode: false
+      claudeCode: false,
+      autoDesktop: false
     });
   });
 
@@ -205,6 +206,7 @@ describe('effectivePrivacy (Fase 12)', () => {
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
       webSearch: { enabled: false, reason: 'channel-off' },
       claudeCode: { enabled: false, reason: 'channel-off' },
+      autoDesktop: { enabled: false, reason: 'flag-off' },
       neverSends: ['audio'],
       outboundGuard: 'redact'
     };

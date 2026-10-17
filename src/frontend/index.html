@@ -32,34 +32,32 @@
             <span id="voice-state-text">Parado — clique em "Iniciar conversa" para começar.</span>
           </div>
 
-<div class="actions voice-actions">
+          <!-- Entrada por texto: sempre visível. Mesmo pipeline da voz (intenção/mutação/geração);
+               a resposta ainda sai por áudio. Enter envia; sem sessão, abre uma com o microfone silenciado. -->
+          <div id="voice-type-panel" class="voice-type-panel">
+            <label for="voice-type-input" class="voice-type-label">Escrever (sem falar)</label>
+            <div class="voice-type-row">
+              <textarea id="voice-type-input" class="voice-type-input" rows="2"
+                        placeholder="Escreva aqui e aperte Enter para enviar…" autocomplete="off"></textarea>
+              <button id="voice-type-send" type="button" class="btn btn-primary">Enviar</button>
+            </div>
+            <p class="cost-note voice-type-note">
+              Vai pelo mesmo caminho da voz. A resposta ainda sai falada. Shift+Enter quebra linha.
+            </p>
+          </div>
+
+          <div class="actions voice-actions">
             <button id="voice-start-btn" type="button" class="btn btn-primary">Iniciar conversa</button>
             <button id="voice-end-btn" type="button" class="btn" disabled>Encerrar</button>
             <button id="voice-mute-btn" type="button" class="btn" disabled aria-pressed="false">Silenciar microfone</button>
             <button id="voice-interrupt-btn" type="button" class="btn" disabled>Interromper resposta</button>
             <button id="voice-screen-btn" type="button" class="btn" disabled aria-pressed="false">Compartilhar tela</button>
-            <button id="voice-type-btn" type="button" class="btn" aria-pressed="false" title="Abrir caixa de digitação (alternativa à voz)">Digitar</button>
           </div>
           <p id="voice-screen-note" class="cost-note" hidden>
             Compartilhando a tela: perguntas que citem "tela", "monitor" ou "janela" podem ver um quadro dela. Por
             padrão a imagem é lida só deste computador; ela só vai ao Gemini se você disser isso na própria pergunta
             (ex.: "com o Gemini").
           </p>
-
-          <!-- Fase V Fatia 5: caixa de digitação, alternável pelo botão "Digitar". Invisível por padrão;
-               quando aberta, o texto é enviado pelo mesmo pipeline que a voz (intenção, mutação, geração). -->
-          <div id="voice-type-panel" class="voice-type-panel" hidden>
-            <label for="voice-type-input" class="sr-only">Digite sua pergunta</label>
-            <div class="voice-type-row">
-              <input id="voice-type-input" type="text" class="voice-type-input"
-                     placeholder="Digite aqui (Enter envia)…" autocomplete="off" />
-              <button id="voice-type-send" type="button" class="btn btn-primary">Enviar</button>
-            </div>
-            <p class="cost-note voice-type-note">
-              Modo digitação: a pergunta é lida como se você tivesse falado. A resposta ainda sai por voz.
-              Use quando o microfone estiver com problema.
-            </p>
-          </div>
 
           <p id="voice-agent-indicator" class="voice-agent-indicator" role="status" aria-live="polite"></p>
 

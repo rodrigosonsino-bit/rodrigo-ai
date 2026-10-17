@@ -1,0 +1,95 @@
+## Veredito
+
+**Não está pronto para implementar o provider opcional como “fase fechada”.** O plano acerta o desenho grosso (Charon default, sem canal novo, VoxCPM via loopback, `prefersCoalescing`/markPlayed), mas deixa abertos gates que o próprio texto marca como obrigatórios (licença do checkpoint, H2 no **M5 16GB** sob carga real, protocolo de H1). A linha de status que autoriza “integração opcional se H2 passar antes da audição” **contradiz** §3.3 e é o principal risco de processo.
+
+Nota de contexto: o worktree já tem `VoxCpmVoiceProvider`, `CONFIGURAR_VOZ`, script de audição, README e `.env.example` — isso é **implementação à frente do plano**, não prova de que o plano está auditado/fechado.
+
+---
+
+## Achados
+
+### ALTA
+
+1. **Licença dos pesos ainda é TODO explícito**  
+   A tabela diz “Apache-2.0 **(confirmar card do checkpoint)**”. Código Apache do repo ≠ pesos HF; e `leoli-dev/tts-server-voxcpm` é conversão/servidor de terceiros — precisa do card do checkpoint **exato** que o servidor baixa (e de qualquer restrição NC/research). Sem isso, H3 (“não mentir”) e o filtro “licença permissiva” do §2 ficam sem base. **Bloqueia integração.**
+
+2. **Latência citada é do hardware errado + métrica incompleta**  
+   RTF ~0.30–0.55 em **M5 Max** 8-bit ≠ **M5 16GB**. RTF × duração do áudio ignora: cold start, residência do modelo, HTTP, e sobretudo **contenção unificada** com Whisper + geração (Gemini/local) no mesmo 16GB. O orçamento histórico do produto é ≤4 s **fim-de-fala → primeiro áudio** (mediana ~3,2 s já com TTS barato). Um TTS OSS de 2–4 s sozinho pode passar H2 e **quebrar** a experiência real. H2 não define: frase de referência, warm vs cold, mediana/p95, nem “com STT+turn ativos”.
+
+3. **Porta de vazamento no caminho de audição / env**  
+   O plano exige “só `127.0.0.1`”, mas não especifica: (a) rejeitar host não-loopback no **provider e no script**; (b) bind do servidor MLX em `127.0.0.1` (não `0.0.0.0`); (c) preferir IP literal — `localhost` via `/etc/hosts` pode apontar fora. O script `scripts/audicao-tts-oss.mjs` posta `input` (texto da fala) para `RODRIGO_VOXCPM_URL` **sem** o mesmo gate de loopback do provider. Uma URL mal setada = texto de frases reais saindo da máquina na audição.
+
+4. **Gate de status auto-contraditório**  
+   Status: integração opcional se H2 passar e Charon default. §3.3: integração **só do vencedor** após audição. Isso permite shipar `TTS_ENGINE=voxcpm` antes de H1 — exatamente o anti-padrão que o plano diz querer evitar (“gate obrigatório: audição”).
+
+### MÉDIA
+
+5. **Fallback silencioso vs `markPlayed` / T9**  
+   Arquitetura correta: contrato `synthesize` inalterado; VoxCPM com `prefersCoalescing = false` é o certo para `markPlayed` (igualdade exata). Lacuna do plano: não exige `onFallback` → `voice_notice` quando cair no `say` (Gemini faz). Usuário pede VoxCPM, ouve Felipe, card pode ainda sugerir “voz local VoxCPM” — falha de honestidade sob H3.
+
+6. **Timeout / fail-fast desalinhados com H2**  
+   Plano não define deadline de síntese alinhado a ≤4 s. Timeout longo (ex. 30 s) + fallback `say` passa “reserva em falha” mas falha o critério de latência na prática (usuário espera em silêncio).
+
+7. **`CONFIGURAR_VOZ` / preferência sem healthgate**  
+   Plano menciona healthcheck, mas não define se `switchVoice('voxcpm')` pode persistir preferência com servidor morto. Persistir `engine: voxcpm` + síntese sempre via `say` satisfaz H3 só no papel.
+
+8. **H1 incompleto na shortlist operacional**  
+   Candidatos: VoxCPM2 · Chatterbox **Turbo** · Kokoro · Charon. O script de audição cobre say/Kokoro/VoxCPM/Charon — **não Turbo**. “Se couber no M5 16GB” sem critério de memória (GB livres com runtime de voz carregado) torna Turbo decorativo.
+
+9. **Card de privacidade / `effectivePrivacy`**  
+   H3 pede card/README honestos. `effectivePrivacy` hoje modela `ttsText` como canal **Gemini** (`tts.cloud`), não o motor ativo (`TTS_ENGINE` / preferência). Com Charon default isso é ok; com `voxcpm` ativo o card pode omitir “texto vai a um processo MLX local” ou confundir “local-only” vs geração ainda em nuvem. Plano não especifica o texto exato nem teste de consistência.
+
+10. **Memória / OOM não estimados**  
+    Sem footprint do checkpoint 8-bit + servidor MLX no M5 16GB ao lado do stack atual. Risco: swap → latência >>4 s ou crash opcional “ativável”.
+
+### BAIXA
+
+11. **Inconsistência de env no plano**  
+    Plano: `RODRIGO_VOXCPM_VOICE`. Implementação/docs paralelos: `RODRIGO_VOXCPM_CONTROL` (+ `_STEPS`, `_TIMEOUT_MS`). Auditores/implementadores divergem.
+
+12. **Endpoint “OpenAI-style ou o que o servidor documentar”**  
+    Ambíguo demais para H4: contrato de body (`input`/`control`/`inference_timesteps`) precisa pinado à versão do servidor.
+
+13. **Doctor**  
+    Plano não pede check `voxcpm` em `npm run doctor` / `GET /api/doctor` (útil para H2/H3 operacionais).
+
+14. **Registro §8**  
+    Falta campos: hardware exato, warm/cold, p50/p95, se medido sob carga concorrente, hash/versão do checkpoint e URL do model card (licença).
+
+---
+
+## Integração DynamicVoiceProvider / CONFIGURAR_VOZ / markPlayed
+
+| Ponto | Avaliação do plano |
+|---|---|
+| Encaixe em `DynamicVoiceProvider` + `TTS_ENGINE` + preferência | Adequado em alto nível |
+| `synthesize(text, outputPath, signal)` | Correto; não mexer no contrato |
+| `prefersCoalescing` | Plano omite; **deve ser `false`** (mutações/confirmações / `markPlayed`) |
+| Reserva `say` | Citada; falta `onFallback`/aviso de sessão |
+| `TtsBudget` | Correto: VoxCPM não consome RPD Gemini |
+| Persistência | `VoicePreferenceRecord.engine` ∪ `'voxcpm'` ok; falta política se health falhar |
+
+---
+
+## O que falta para H1–H4
+
+| Id | Falta no plano |
+|---|---|
+| **H1** | Protocolo de escuta (critério: naturalidade vs latência); Chatterbox Turbo na geração cega **ou** remoção explícita; §8 preenchido; não olhar `key.json` antes; registrar versão do checkpoint |
+| **H2** | Medição no **M5 16GB** (não Max); frase(s) fixas; warm+cold; p50/p95; **sob carga** com sessão de voz típica; fail-fast ≤4 s; se passar TTS-isolado mas E2E >4 s, declarar dívida — não “H2 ok” |
+| **H3** | Copy do card + README; o que muda com `TTS_ENGINE=voxcpm` vs Charon; aviso de fallback; teste `privacyConsistency` se houver novas frases; licença confirmada por escrito |
+| **H4** | Testes HTTP fake (loopback reject incluso); smoke de latência **local** (não CI cego); pin do endpoint; opcional: doctor probe |
+
+---
+
+## Pronto para `TTS_ENGINE=voxcpm` opcional com Charon default até a audição?
+
+**Não, como plano fechado.** Condicionalmente **sim só depois de corrigir o v1** com, no mínimo:
+
+1. Licença do checkpoint **confirmada e citada** (URL + texto).  
+2. Gate de loopback **normativo** (provider + script + bind do servidor).  
+3. H2 reescrito para M5 16GB + protocolo de medição (+ tensão com orçamento E2E).  
+4. Status alinhado a §3.3: opcional permitido **somente** para audição/medição, default permanece Charon, **sem** tratar como shipped até H1.  
+5. `prefersCoalescing: false` + `onFallback` documentados.
+
+Até lá: pode gerar a audição e medir latência; **não** tratar o provider como aceite da fase.

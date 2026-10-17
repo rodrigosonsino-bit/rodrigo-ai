@@ -8,6 +8,7 @@ import { type PrivacyConfig, TTS_DEFAULT_MODEL, TTS_DEFAULT_VOICE, ttsCloudEffec
 import type { VoiceEngine } from './engine.js';
 import { DEFAULT_GEMINI_VOICE_CONFIG, GeminiVoiceProvider } from './geminiVoiceProvider.js';
 import { TtsBudget } from './ttsBudget.js';
+import { parseVoxCpmEnv, VoxCpmVoiceProvider } from './voxcpmVoiceProvider.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -118,6 +119,17 @@ export function selectVoiceProvider(env: NodeJS.ProcessEnv = process.env): IVoic
     if (kokoro.isAvailable()) return kokoro;
     console.error('[voice] TTS_ENGINE=kokoro solicitado, mas indisponível — usando "say" como padrão.');
   }
+  if (engine === 'voxcpm') {
+    try {
+      const cfg = parseVoxCpmEnv(env);
+      const local = new SayVoiceProvider();
+      return new VoxCpmVoiceProvider(cfg, local);
+    } catch (err) {
+      console.error(
+        `[voice] TTS_ENGINE=voxcpm inválido (${err instanceof Error ? err.message : String(err)}) — usando "say".`
+      );
+    }
+  }
   return new SayVoiceProvider();
 }
 
@@ -172,8 +184,10 @@ export interface VoiceProviderDeps {
 import type { SynthesizeOptions } from '../../shared/extensions/voice.js';
 import { ttsOffReason } from '../privacy.js';
 
+export type VoiceEngineId = 'gemini' | 'say' | 'kokoro' | 'voxcpm';
+
 export interface VoicePreferenceRecord {
-  engine: 'gemini' | 'say' | 'kokoro';
+  engine: VoiceEngineId;
   voice: string;
   updatedAt: string;
 }
@@ -346,7 +360,8 @@ export class DynamicVoiceProvider implements IVoiceProvider {
     if (!normalized) {
       return {
         ok: false,
-        speech: 'Não entendi qual voz você quer usar. Você pode escolher Kokoro, uma voz do Gemini como Charon, Puck e Aoede, ou qualquer voz local instalada do macOS.'
+        speech:
+          'Não entendi qual voz você quer usar. Você pode escolher Kokoro, VoxCPM, uma voz do Gemini como Charon, Puck e Aoede, ou qualquer voz local instalada do macOS.'
       };
     }
 
@@ -361,6 +376,34 @@ export class DynamicVoiceProvider implements IVoiceProvider {
       }
       this.setProvider(kokoro, { engine: 'kokoro', voice: 'pf_dora' });
       return { ok: true, speech: 'Pronto, mudei para a voz local Kokoro.', engine: 'kokoro', voice: 'pf_dora' };
+    }
+
+    // 1b. VoxCPM2 local (servidor MLX em loopback)
+    if (
+      normalized === 'voxcpm' ||
+      normalized === 'vox' ||
+      normalized === 'voxcpm2' ||
+      normalized.includes('voxcpm')
+    ) {
+      try {
+        const cfg = parseVoxCpmEnv(this.deps.env ?? process.env);
+        const vox = new VoxCpmVoiceProvider(cfg, new SayVoiceProvider());
+        // probe síncrono impossível aqui; synthesize cai no say se o servidor estiver fora.
+        // A disponibilidade real é verificada no 1º synthesize / doctor.
+        this.setProvider(vox, { engine: 'voxcpm', voice: 'voxcpm' });
+        return {
+          ok: true,
+          speech:
+            'Pronto, mudei para a voz local VoxCPM. Se o servidor MLX não estiver rodando em loopback, uso a voz do sistema.',
+          engine: 'voxcpm',
+          voice: 'voxcpm'
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          speech: `Não consegui ativar o VoxCPM: ${err instanceof Error ? err.message : String(err)}`
+        };
+      }
     }
 
     // 2. macOS say local (qualquer voz instalada no sistema)
@@ -434,17 +477,17 @@ export class DynamicVoiceProvider implements IVoiceProvider {
 
     return {
       ok: false,
-      speech: `Não reconheci a voz ${rawRequest}. Você pode pedir Kokoro, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr, ou dizer o nome de qualquer voz local instalada no macOS.`
+      speech: `Não reconheci a voz ${rawRequest}. Você pode pedir Kokoro, VoxCPM, Charon, Puck, Aoede, Fenrir, Kore ou Zephyr, ou dizer o nome de qualquer voz local instalada no macOS.`
     };
   }
 
-  private setProvider(next: IVoiceProvider, pref: { engine: 'gemini' | 'say' | 'kokoro'; voice: string }): void {
+  private setProvider(next: IVoiceProvider, pref: { engine: VoiceEngineId; voice: string }): void {
     this.bindFallback(next);
     this.currentProvider = next;
     this.savePreference(pref);
   }
 
-  private savePreference(pref: { engine: 'gemini' | 'say' | 'kokoro'; voice: string }): void {
+  private savePreference(pref: { engine: VoiceEngineId; voice: string }): void {
     try {
       const dir = path.dirname(this.preferencePath);
       fs.mkdirSync(dir, { recursive: true });
@@ -464,9 +507,10 @@ export class DynamicVoiceProvider implements IVoiceProvider {
 }
 
 /**
- * Fase 13a: escolhe a voz do app. TTS_ENGINE: `gemini` (padrão quando ausente) usa o TTS do Gemini com a voz do sistema de
- * reserva; `say`/`kokoro` forçam uma voz local. O Gemini só é escolhido se o canal estiver EFETIVAMENTE ligado (mestre +
- * RODRIGO_CLOUD_TTS + histórico enviado), houver chave e o motor suportar síntese; senão cai na voz local com um aviso.
+ * Fase 13a + TTS-OSS: escolhe a voz do app. TTS_ENGINE: `gemini` (padrão quando ausente) usa o TTS do Gemini com a voz do
+ * sistema de reserva; `say`/`kokoro`/`voxcpm` forçam uma voz local. O Gemini só é escolhido se o canal estiver EFETIVAMENTE
+ * ligado (mestre + RODRIGO_CLOUD_TTS + histórico enviado), houver chave e o motor suportar síntese; senão cai na voz local
+ * com um aviso.
  */
 export function createVoiceProvider(deps: VoiceProviderDeps): IVoiceProvider {
   const env = deps.env ?? process.env;

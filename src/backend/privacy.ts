@@ -42,6 +42,12 @@ export interface PrivacyConfig {
    * Só efetivo com RODRIGO_CLOUD=1 (mestre). Valor inválido aborta o boot.
    */
   readonly claudeCode: boolean;
+  /**
+   * Automação desktop (computer-use): RODRIGO_AUTO_DESKTOP.
+   * Padrão DESLIGADO. Com 1 + RODRIGO_DESKTOP_CONTROL=1, intenções AUTOMACAO_DESKTOP
+   * executam sem SIM por passo (kill switch por voz ainda vale). Valor inválido aborta o boot.
+   */
+  readonly autoDesktop: boolean;
 }
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
@@ -114,6 +120,28 @@ export function claudeCodeOffReason(cfg: PrivacyConfig): ClaudeCodeOffReason | n
   return null;
 }
 
+/**
+ * Automação desktop efetiva: RODRIGO_AUTO_DESKTOP=1 E controle de desktop ligado.
+ * Não envia áudio; AX/texto só saem pelos canais de geração/visão já configurados.
+ */
+export function autoDesktopEffective(
+  cfg: PrivacyConfig,
+  desktopControlOn: boolean
+): boolean {
+  return cfg.autoDesktop && desktopControlOn;
+}
+
+export type AutoDesktopOffReason = 'flag-off' | 'desktop-control-off';
+
+export function autoDesktopOffReason(
+  cfg: PrivacyConfig,
+  desktopControlOn: boolean
+): AutoDesktopOffReason | null {
+  if (!cfg.autoDesktop) return 'flag-off';
+  if (!desktopControlOn) return 'desktop-control-off';
+  return null;
+}
+
 type Env = Readonly<Record<string, string | undefined>>;
 
 function parseFlag(env: Env, name: string, defaultValue: boolean): boolean {
@@ -175,7 +203,8 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', false),
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
     outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact'),
-    claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false)
+    claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
+    autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false)
   };
 }
 
@@ -212,6 +241,15 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
   const ttsOn = ttsCloudEffective(cfg);
   const webOn = webSearchEffective(cfg);
   const claudeOn = claudeCodeEffective(cfg);
+  // Espelho de parseDesktopControlFlag (evita import circular com desktopControlTool).
+  let desktopOn = true;
+  const rawDesktop = env['RODRIGO_DESKTOP_CONTROL'];
+  if (rawDesktop !== undefined && rawDesktop.trim() !== '') {
+    const v = rawDesktop.trim();
+    if (v === '0') desktopOn = false;
+    else if (v !== '1') desktopOn = false; // valor inválido: cartão mostra off; o boot já falhou via parseDesktopControlFlag
+  }
+  const autoOn = autoDesktopEffective(cfg, desktopOn);
   return {
     mode: cfg.cloud ? 'cloud' : 'local-only',
     intent: intentOn ? 'gemini' : 'local',
@@ -235,6 +273,7 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
     tts: { cloud: ttsOn, reason: ttsOffReason(cfg), dictatedViaCloud: ttsDictatedViaCloud(cfg) },
     webSearch: { enabled: webOn, reason: webSearchOffReason(cfg) },
     claudeCode: { enabled: claudeOn, reason: claudeCodeOffReason(cfg) },
+    autoDesktop: { enabled: autoOn, reason: autoDesktopOffReason(cfg, desktopOn) },
     neverSends: ['audio'],
     outboundGuard: cfg.outboundGuard
   };

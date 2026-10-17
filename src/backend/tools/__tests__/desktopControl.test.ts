@@ -7,7 +7,8 @@ import {
   ToolPreviewRefusedError,
   DENIED_TYPING_BUNDLE_IDS,
   parseDesktopControlFlag,
-  resolveAppTarget
+  resolveAppTarget,
+  splitDigitarAppTarget
 } from '../desktopControlTool.js';
 import { QUERY_NAMES, MUTATION_NAMES } from '../../../shared/voiceProtocol.js';
 
@@ -187,6 +188,33 @@ describe('Pilar 1 — DesktopTool (DESKTOP_COMANDO & DESKTOP_CRITICO)', () => {
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].args, ['-suspend']);
   });
+
+  it('DESKTOP_CRITICO system_restart e system_shutdown pedem confirmação e agendam pós-fala', async () => {
+    const scheduled: Array<() => Promise<void>> = [];
+    const calls: Array<{ file: string; args: readonly string[] }> = [];
+    const tool = new DesktopTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      schedulePostSpeechAction: (action) => {
+        scheduled.push(action);
+      },
+      exec: async (file, args) => {
+        calls.push({ file, args });
+        return { stdout: '', stderr: '' };
+      }
+    });
+
+    assert.match(tool.preview('DESKTOP_CRITICO', 'system_restart'), /reiniciar/i);
+    assert.match(await tool.execute('DESKTOP_CRITICO', 'system_restart'), /Reiniciando/);
+    assert.equal(scheduled.length, 1);
+    await scheduled[0]();
+    assert.match(String(calls[0]?.args[1] ?? ''), /restart/i);
+
+    assert.match(tool.preview('DESKTOP_CRITICO', 'system_shutdown'), /desligar/i);
+    assert.match(await tool.execute('DESKTOP_CRITICO', 'system_shutdown'), /Desligando/);
+    assert.equal(scheduled.length, 2);
+    await scheduled[1]();
+    assert.match(String(calls[1]?.args[1] ?? ''), /shut down/i);
+  });
 });
 
 describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOCAL)', () => {
@@ -326,6 +354,41 @@ describe('Pilar 2 — DigitarTool (DIGITAR_TEXTO) vs DitadoLocalTool (DITADO_LOC
     });
     const preview = tool.preview('DIGITAR_TEXTO', 'texto:colar no editor');
     assert.match(preview, /Vou digitar em Visual Studio Code/);
+  });
+
+  it('splitDigitarAppTarget e DigitarTool abrem o Editor de Texto quando o pedido nomeia o app', async () => {
+    assert.deepEqual(splitDigitarAppTarget('app:TextEdit|texto:reunião às três'), {
+      appRaw: 'TextEdit',
+      rest: 'texto:reunião às três'
+    });
+
+    const calls: Array<{ file: string; args: readonly string[] }> = [];
+    let pasted = '';
+    const tool = new DigitarTool({
+      env: { RODRIGO_DESKTOP_CONTROL: '1' },
+      getFrontmostAppSync: () => ({ name: 'Safari', bundleId: 'com.apple.Safari' }),
+      getFrontmostApp: async () => ({ name: 'TextEdit', bundleId: 'com.apple.TextEdit' }),
+      exec: async (file, args) => {
+        calls.push({ file, args });
+        return { stdout: '', stderr: '' };
+      },
+      pasteViaHid: async (text) => {
+        pasted = text;
+      },
+      accessibility: {
+        inspectFocusedTarget: async () => editableTarget({ app: { name: 'TextEdit', bundleId: 'com.apple.TextEdit' } }),
+        insertText: async () => 'ax'
+      }
+    });
+
+    const preview = tool.preview('DIGITAR_TEXTO', 'app:TextEdit|texto:reunião às três');
+    assert.match(preview, /TextEdit/);
+    assert.match(preview, /reunião às três/);
+
+    const result = await tool.execute('DIGITAR_TEXTO', 'app:TextEdit|texto:reunião às três');
+    assert.match(result, /TextEdit/);
+    assert.equal(pasted, 'reunião às três');
+    assert.ok(calls.some((c) => c.file === '/usr/bin/open' && c.args.includes('com.apple.TextEdit')));
   });
 
   it('DigitarTool prioriza paste HID (CGEvent) na inserção — AX não é o caminho primário', async () => {
