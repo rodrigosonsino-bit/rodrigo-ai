@@ -1,8 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { claudeCodeEffective, parsePrivacyConfig, ttsCloudEffective, ttsDictatedViaCloud, webSearchEffective } from './privacy.js';
+import {
+  autoDesktopEffective,
+  claudeCodeEffective,
+  parsePrivacyConfig,
+  ttsCloudEffective,
+  ttsDictatedViaCloud,
+  webSearchEffective
+} from './privacy.js';
 import { validateHost, validatePort } from './config.js';
 import { SENSITIVE_LIST_APPROVED } from './fileAccessRegistry.js';
+import { parseDesktopControlFlag } from './tools/desktopControlTool.js';
 
 /**
  * T5a (docs/plans/openjarvis-voz-desktop-v2.md §3.5): diagnóstico de prontidão e de fronteira.
@@ -113,6 +121,74 @@ export function runDoctor(input: DoctorInput): DoctorReport {
     checks.push(check('file-policy', 'Política de arquivos sensíveis', 'ok', 'Lista de arquivos sensíveis aprovada e presente.'));
   }
 
+  // 3c. Controle de desktop e TCC (só variável declarada + existência do bundle compilado; nunca abre arquivos).
+  const rawDesktop = env.RODRIGO_DESKTOP_CONTROL;
+  if (rawDesktop !== undefined && rawDesktop !== '0' && rawDesktop !== '1') {
+    checks.push(check('desktop-control', 'Controle do computador (macOS)', 'error', 'Valor inválido em RODRIGO_DESKTOP_CONTROL. Use 0 ou 1.'));
+  } else if (rawDesktop === '0') {
+    checks.push(check('desktop-control', 'Controle do computador (macOS)', 'info', 'Controle de desktop desabilitado explicitamente (RODRIGO_DESKTOP_CONTROL=0).'));
+  } else {
+    const appPlist = path.join(rootDir, 'desktop', 'build', 'Rodrigo AI.app', 'Contents', 'Info.plist');
+    if (exists(appPlist)) {
+      checks.push(check('desktop-control', 'Controle do computador (macOS)', 'ok', 'RODRIGO_DESKTOP_CONTROL=1 e bundle desktop presente (requer Acessibilidade e Automação no macOS).'));
+    } else {
+      checks.push(check('desktop-control', 'Controle do computador (macOS)', 'info', 'RODRIGO_DESKTOP_CONTROL=1; compile desktop/build.sh para gerar o bundle assinado com DitadoLocal Dev.'));
+    }
+  }
+
+  // 3d. Automação desktop (computer-use) + Accessibility TCC (declarado; trusted via helper se presente).
+  const rawAuto = env.RODRIGO_AUTO_DESKTOP;
+  if (rawAuto !== undefined && rawAuto !== '' && rawAuto !== '0' && rawAuto !== '1') {
+    checks.push(check('auto-desktop', 'Automação desktop', 'error', 'Valor inválido em RODRIGO_AUTO_DESKTOP. Use 0 ou 1.'));
+  } else {
+    let desktopOn = false;
+    try {
+      desktopOn = parseDesktopControlFlag(env);
+    } catch {
+      desktopOn = false;
+    }
+    const autoOn = cfg !== null && autoDesktopEffective(cfg, desktopOn);
+    if (autoOn) {
+      checks.push(
+        check(
+          'auto-desktop',
+          'Automação desktop',
+          'warn',
+          'RODRIGO_AUTO_DESKTOP=1: o Orque pode controlar apps locais sem SIM por passo. Requer Acessibilidade no macOS; diga "parar automação" para interromper. Campos de senha e ações críticas (lixeira, bloquear, repouso) ficam fora do loop livre.'
+        )
+      );
+      checks.push(
+        check(
+          'accessibility-tcc',
+          'Acessibilidade (TCC)',
+          'info',
+          'Com automação ligada, conceda Acessibilidade ao terminal/app que roda o Orque em Ajustes do Sistema → Privacidade e Segurança → Acessibilidade.'
+        )
+      );
+    } else if (rawAuto === '1' && !desktopOn) {
+      checks.push(
+        check(
+          'auto-desktop',
+          'Automação desktop',
+          'warn',
+          'RODRIGO_AUTO_DESKTOP=1 mas RODRIGO_DESKTOP_CONTROL=0: automação não fica efetiva.'
+        )
+      );
+    } else {
+      checks.push(check('auto-desktop', 'Automação desktop', 'ok', 'RODRIGO_AUTO_DESKTOP=0 (padrão): sem computer-use autônomo.'));
+    }
+    if (desktopOn) {
+      checks.push(
+        check(
+          'screen-recording-tcc',
+          'Gravação de Tela (TCC)',
+          'info',
+          'Para o Orque descrever a tela sem o botão Compartilhar tela, conceda Gravação de Tela ao Rodrigo AI em Ajustes → Privacidade e Segurança → Gravação de Tela.'
+        )
+      );
+    }
+  }
+
   if (cfg !== null) {
     const keyPresent = typeof env.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim().length > 0;
 
@@ -136,7 +212,19 @@ export function runDoctor(input: DoctorInput): DoctorReport {
       if (cfg.cloudVision) on.push('visão');
       if (webSearchEffective(cfg)) on.push('busca web');
       if (claudeCodeEffective(cfg)) on.push('Claude Code');
+      if (cfg.ogra) on.push('Ogra');
       checks.push(check('cloud-channels', 'Canais declarados como ligados', 'info', on.length ? on.join(', ') : 'nenhum além da geração de texto'));
+    }
+
+    if (cfg.ogra) {
+      checks.push(
+        check(
+          'risk-ogra',
+          'Canal Ogra ligado',
+          'warn',
+          'RODRIGO_OGRA=1: o texto da fala vai ao webhook da Ogra. O 2xx só confirma o envio; a fala espera POST /api/ogra/reply até RODRIGO_OGRA_REPLY_TIMEOUT_MS (padrão 120000). Mutação local ainda exige SIM falado. Se o webhook falhar ou a resposta não chegar no prazo, RODRIGO_OGRA_FALLBACK=1 (padrão) continua o turno no caminho normal, sem chamar a Ogra de novo e sem colocá-la na reserva do Gemini. Desktop, cursor e WhatsApp não estão nesta fase.'
+        )
+      );
     }
 
     // 6. Combinações de risco (avisos com gravidade). O app não conhece o nível da chave do Google.
@@ -153,13 +241,14 @@ export function runDoctor(input: DoctorInput): DoctorReport {
       checks.push(check('risk-web-search', 'Busca web autônoma ligada', 'warn', 'RODRIGO_WEB_SEARCH=1: leitura externa na nuvem sem autorização por pedido.'));
     }
     if (claudeCodeEffective(cfg)) {
-      // Só existência de dois caminhos fixos (config das raízes e prova de isolamento); nunca o conteúdo.
-      const hasRoots = exists(path.join(rootDir, 'config', 'claude-code-roots.json'));
-      const hasProof = exists(path.join(rootDir, '.runtime', 'claude-code-selftest.json'));
-      checks.push(check('risk-claude-code', 'Delegação ao Claude Code ligada', 'warn', 'RODRIGO_CLAUDE_CODE=1: a ordem falada e os arquivos que o Claude ler vão à Anthropic.'));
-      if (!hasRoots || !hasProof) {
-        checks.push(check('claude-code-ready', 'Delegação ao Claude: prontidão', 'warn', `Ainda não utilizável: ${[!hasRoots ? 'falta config/claude-code-roots.json' : '', !hasProof ? 'falta a prova de isolamento (node scripts/claude-code-selftest.mjs)' : ''].filter(Boolean).join('; ')}. A ferramenta fica indisponível até lá.`));
-      }
+      checks.push(
+        check(
+          'risk-claude-code',
+          'Canal Claude Code ligado',
+          'warn',
+          'RODRIGO_CLAUDE_CODE=1: a ordem falada e os arquivos que o Claude ler podem ir à Anthropic sob o plano da assinatura. Toda chamada ainda exige confirmação por voz.'
+        )
+      );
     }
     if (ttsDictatedViaCloud(cfg)) {
       checks.push(check('risk-tts-dictated', 'Conteúdo ditado vai à voz em nuvem', 'warn', 'Confirmações que repetem conteúdo ditado são enviadas ao TTS em nuvem. Desligue com RODRIGO_TTS_DICTATED=0 ou RODRIGO_SEND_MEMORIES=0.'));

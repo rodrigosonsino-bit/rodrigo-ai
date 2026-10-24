@@ -31,3 +31,20 @@ export {
   CARDINAL_WORDS,
   type ParsedRelativeTime
 } from './relativeTimeParser.js';
+
+export {
+  DesktopTool,
+  DigitarTool,
+  DitadoLocalTool,
+  ConfigurarVozTool,
+  AutoCorrecaoTool,
+  ToolPreviewRefusedError,
+  ALLOWLIST_APPS,
+  CANONICAL_FOLDERS,
+  DENIED_TYPING_BUNDLE_IDS,
+  parseDesktopControlFlag,
+  cleanDictatedTextLocally,
+  createDesktopAndSelfTools,
+  type CreateDesktopAndSelfToolsDeps
+} from './desktopControlTool.js';
+

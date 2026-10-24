@@ -4,18 +4,26 @@ import type {
   AudioTurnResponse,
   OrchestratorLabel
 } from '../shared/voiceProtocol.ts';
+import {
+  aecStatusMessage,
+  parseSpeakerphoneFlag,
+  playbackDuckGain,
+  shouldClearSource,
+  speakingForVad,
+  SPEAKERPHONE_STORAGE_KEY,
+  vadThresholds
+} from '../shared/speakerphoneProfile.ts';
+import { micIgnoredWhileOutput, OUTPUT_TAIL_MS } from '../shared/ttsEcho.ts';
 
 // --- Parâmetros de VAD (Fase 2 v2 + adendo) ---
-const PRE_ROLL_MS = 200;
+const PRE_ROLL_MS = 400; // Preserva 400ms de áudio pré-início para garantir integridade do onset com tolerância
 // F13b (decisão do usuário, 2026-10-08: "1,0 s"): 700 ms cortava a pergunta em pausas naturais e cada pedaço virava um turno
 // com transcrição ruim. Custo: +0,3 s em toda resposta. A junção de fragmentos no servidor foi reprovada na auditoria
 // (docs/phase-13b-v1.md + docs/audits/f13b-plan-codex-2026-10-08.md).
 const SILENCE_THRESHOLD_MS = 1000;
 const MIN_VOICE_DURATION_MS = 220; // Achado v2-5: 200-250ms, não os 400ms originais (corta "Sim"/"Não"/"Oi")
 const MAX_SEGMENT_MS = 20_000;
-const BARGE_IN_HYSTERESIS_MS = 250; // sustentar fala acima do limiar por 250ms durante "falando"
-const RMS_THRESHOLD = 0.018;
-const RMS_THRESHOLD_WHILE_SPEAKING = 0.045; // limiar elevado durante playback (histerese)
+const ONSET_GRACE_MS = 60; // tolerância de micro-pausas/consoantes antes de resetar candidato a fala
 
 type VoiceState = 'idle' | 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | 'erro';
 
@@ -48,6 +56,7 @@ export class VoiceController {
   private sessionId: string | null = null;
   private token: string | null = null;
   private eventSource: EventSource | null = null;
+  private inFlightStart: Promise<void> | null = null;
 
   private audioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
@@ -66,17 +75,31 @@ export class VoiceController {
   private ringBuffer: Float32Array[] = [];
   private ringBufferMs = 0;
   private recording = false;
+  /** Silenciar o microfone. A track.enabled sozinha não zera o worklet no WKWebView. */
+  private micMuted = false;
   private recordedChunks: Float32Array[] = [];
   private recordedMs = 0;
   private continuousVoiceMs = 0;
   private continuousSilenceMs = 0;
+  private onsetGraceMs = 0;
+  private debugBlockCounter = 0;
   private bargeInCandidateMs = 0;
   private sampleRate = 16000;
+
+  /** Modo viva-voz (alto-falante). Padrão off. */
+  private speakerphone = false;
+  /** Último status AEC lido de getSettings (só informativo). */
+  private aecOk: boolean | undefined = undefined;
+  private onSpeakerphoneChange: ((on: boolean, aecMessage: string) => void) | null = null;
 
   // --- Playback ---
   private playbackQueue: QueuedChunk[] = [];
   private playbackActive = false;
+  /** Ignora o microfone até este instante, depois que a reprodução termina. */
+  private outputTailUntil = 0;
   private currentSource: AudioBufferSourceNode | null = null;
+  /** Gain único no caminho de TTS (duck do viva-voz). */
+  private playbackGain: GainNode | null = null;
   /**
    * Incrementado SINCRONAMENTE em triggerBargeIn(), antes de source.stop(). O evento
    * onended do Web Audio dispara de forma assíncrona — currentTurnId sozinho não muda
@@ -95,8 +118,122 @@ export class VoiceController {
     private readonly onError: (message: string) => void,
     private readonly onRouting: (turnId: string, label: OrchestratorLabel, handled: boolean) => void,
     private readonly onScreenSharingChange: (sharing: boolean) => void = () => {},
-    private readonly onNotice: (message: string) => void = () => {}
-  ) {}
+    private readonly onNotice: (message: string) => void = () => {},
+    private readonly onOgraWaiting: (waiting: boolean, turnId?: string) => void = () => {}
+  ) {
+    this.speakerphone = this.loadSpeakerphonePreference();
+  }
+
+  getState(): VoiceState {
+    return this.state;
+  }
+
+  /** Fase V Fatia 5: a caixa de digitação precisa dos mesmos headers que o áudio. */
+  getVoiceHeaders(): Record<string, string> {
+    return this.headers();
+  }
+
+  /** Fase V Fatia 5: expõe a sessão ativa pra caixa de digitação (só válida enquanto start() rodou). */
+  getVoiceSession(): { sessionId: string | null; token: string | null } {
+    return { sessionId: this.sessionId, token: this.token };
+  }
+
+  /**
+   * Entrada por texto: o servidor devolve turnId no POST /session/text, mas o player
+   * só aceita áudio cujo turnId === currentTurnId (definido no fluxo de voz em
+   * finishRecording). Sem isso, sentence_audio_ready chega e é descartado — a resposta
+   * gera no worker e nunca toca nem aparece no log.
+   */
+  beginTextTurn(turnId: string): void {
+    this.stopPlaybackImmediately();
+    this.playbackGeneration++;
+    this.playbackQueue = [];
+    this.currentTurnId = turnId;
+    this.setState('processando');
+  }
+
+  isSpeakerphone(): boolean {
+    return this.speakerphone;
+  }
+
+  getAecStatusMessage(): string {
+    return aecStatusMessage(this.aecOk);
+  }
+
+  setSpeakerphoneChangeHandler(handler: (on: boolean, aecMessage: string) => void): void {
+    this.onSpeakerphoneChange = handler;
+  }
+
+  /**
+   * Liga/desliga viva-voz. Persiste via bridge Swift (painel) ou localStorage (browser).
+   */
+  async setSpeakerphone(on: boolean): Promise<void> {
+    this.speakerphone = on;
+    this.persistSpeakerphone(on);
+    this.applyPlaybackDuck();
+    if (this.mediaStream) {
+      await this.reinforceCaptureConstraints();
+    }
+    this.onSpeakerphoneChange?.(on, this.getAecStatusMessage());
+  }
+
+  private persistSpeakerphone(on: boolean): void {
+    const value = on ? '1' : '0';
+    // Mantém o espelho em memória: start() relê __speakerphoneInitial no painel (UserDefaults
+    // não é síncrono no JS; nonPersistent apaga localStorage a cada reload).
+    (window as unknown as { __speakerphoneInitial?: string }).__speakerphoneInitial = value;
+    const bridge = (window as unknown as { webkit?: { messageHandlers?: Record<string, { postMessage: (v: unknown) => void }> } })
+      .webkit?.messageHandlers?.speakerphoneSet;
+    if (bridge) {
+      bridge.postMessage({ value });
+      return;
+    }
+    try {
+      localStorage.setItem(SPEAKERPHONE_STORAGE_KEY, value);
+    } catch {
+      /* private mode */
+    }
+  }
+
+  private loadSpeakerphonePreference(): boolean {
+    const win = window as unknown as { __speakerphoneInitial?: unknown; webkit?: { messageHandlers?: Record<string, unknown> } };
+    // Painel: Swift injeta __speakerphoneInitial (UserDefaults). Bridge presente ⇒ não usar localStorage
+    // (WKWebsiteDataStore.nonPersistent apaga a cada reload).
+    if (win.webkit?.messageHandlers?.speakerphoneGet || win.webkit?.messageHandlers?.speakerphoneSet) {
+      return parseSpeakerphoneFlag(win.__speakerphoneInitial);
+    }
+    if (typeof win.__speakerphoneInitial !== 'undefined') {
+      return parseSpeakerphoneFlag(win.__speakerphoneInitial);
+    }
+    try {
+      return parseSpeakerphoneFlag(localStorage.getItem(SPEAKERPHONE_STORAGE_KEY));
+    } catch {
+      return false;
+    }
+  }
+
+  private applyPlaybackDuck(): void {
+    if (this.playbackGain) {
+      this.playbackGain.gain.value = playbackDuckGain(this.speakerphone);
+    }
+  }
+
+  private async reinforceCaptureConstraints(): Promise<void> {
+    const track = this.mediaStream?.getAudioTracks()[0];
+    if (!track) return;
+    try {
+      // AGC off no viva-voz: AGC pode amplificar eco (ressalva da auditoria v3-min).
+      await track.applyConstraints({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: !this.speakerphone
+      });
+    } catch (err) {
+      console.warn('[viva-voz] applyConstraints falhou:', err);
+    }
+    const settings = track.getSettings() as MediaTrackSettings & { echoCancellation?: boolean };
+    this.aecOk = settings.echoCancellation;
+  }
 
   private setState(state: VoiceState): void {
     this.state = state;
@@ -111,18 +248,35 @@ export class VoiceController {
   }
 
   async start(): Promise<void> {
-    const res = await fetch('/api/voice/session', { method: 'POST', headers: this.headers() });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: 'Erro desconhecido.' }));
-      throw new Error(body.error || 'Não foi possível iniciar a sessão de voz.');
-    }
-    const data = (await res.json()) as CreateSessionResponse;
-    this.sessionId = data.sessionId;
-    this.token = data.token;
+    if (this.inFlightStart) return this.inFlightStart;
+    if (this.sessionId) return; // já ativo
 
-    this.connectEvents();
-    await this.startCapture();
-    this.setState('ouvindo');
+    this.inFlightStart = (async () => {
+      const res = await fetch('/api/voice/session', { method: 'POST', headers: this.headers() });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: 'Erro desconhecido.' }));
+        throw new Error(body.error || 'Não foi possível iniciar a sessão de voz.');
+      }
+      const data = (await res.json()) as CreateSessionResponse;
+      this.sessionId = data.sessionId;
+      this.token = data.token;
+
+      try {
+        this.speakerphone = this.loadSpeakerphonePreference();
+        this.connectEvents();
+        await this.startCapture();
+        this.applyPlaybackDuck();
+        this.onSpeakerphoneChange?.(this.speakerphone, this.getAecStatusMessage());
+        this.setState('ouvindo');
+      } catch (err) {
+        this.teardown();
+        throw err;
+      }
+    })().finally(() => {
+      this.inFlightStart = null;
+    });
+
+    return this.inFlightStart;
   }
 
   private connectEvents(): void {
@@ -185,25 +339,55 @@ export class VoiceController {
       case 'error':
         this.onError(event.message);
         break;
+      case 'ogra_waiting':
+        this.onOgraWaiting(event.phase === 'start', event.turnId);
+        break;
     }
   }
 
   // --- Captura de microfone + VAD ---
 
   private async startCapture(): Promise<void> {
+    console.log('[capture:1] getUserMedia...');
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: !this.speakerphone,
+        channelCount: 1
+      }
     });
+    console.log('[capture:2] stream ok, tracks=' + this.mediaStream.getAudioTracks().length);
+    await this.reinforceCaptureConstraints();
 
     this.audioContext = new AudioContext({ sampleRate: 16000 });
+    this.playbackGain = this.audioContext.createGain();
+    this.playbackGain.gain.value = playbackDuckGain(this.speakerphone);
+    this.playbackGain.connect(this.audioContext.destination);
+    console.log('[capture:3] audioCtx state=' + this.audioContext.state);
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+      console.log('[capture:4] resumido, state=' + this.audioContext.state);
+    }
     this.sampleRate = this.audioContext.sampleRate;
+    console.log('[capture:5] sampleRate=' + this.sampleRate);
 
     const workletUrl = new URL('./vad-processor.js', import.meta.url);
+    console.log('[capture:6] workletUrl=' + workletUrl.toString().slice(0, 80));
     await this.audioContext.audioWorklet.addModule(workletUrl);
+    console.log('[capture:7] worklet carregado');
 
     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
     this.workletNode = new AudioWorkletNode(this.audioContext, 'vad-meter-processor');
     source.connect(this.workletNode);
+
+    // No WebKit (Safari/WKWebView), o pipeline de WebAudio é pull-based.
+    // Sem um destino ativo conectado downstream, o AudioWorkletNode é otimizado e
+    // os buffers de microfone param de ser requisitados pelo motor de áudio.
+    const silentGain = this.audioContext.createGain();
+    silentGain.gain.value = 0;
+    this.workletNode.connect(silentGain);
+    silentGain.connect(this.audioContext.destination);
 
     this.workletNode.port.onmessage = (ev: MessageEvent<{ rms: number; samples: Float32Array }>) => {
       this.processAudioBlock(ev.data.rms, ev.data.samples);
@@ -223,19 +407,59 @@ export class VoiceController {
     }
   }
 
+  private outputGuardsMic(): boolean {
+    return micIgnoredWhileOutput({
+      playbackActive: this.playbackActive,
+      sseSpeaking: this.state === 'falando',
+      tailUntil: this.outputTailUntil,
+      now: Date.now()
+    });
+  }
+
+  private armOutputTail(): void {
+    this.outputTailUntil = Date.now() + OUTPUT_TAIL_MS;
+  }
+
+  /** Descarta gravação e pré-roll. O áudio do próprio Ork não pode virar turno. */
+  private discardOpenCapture(): void {
+    this.recording = false;
+    this.recordedChunks = [];
+    this.recordedMs = 0;
+    this.continuousSilenceMs = 0;
+    this.continuousVoiceMs = 0;
+    this.onsetGraceMs = 0;
+    this.bargeInCandidateMs = 0;
+    this.ringBuffer = [];
+    this.ringBufferMs = 0;
+  }
+
   private processAudioBlock(rms: number, samples: Float32Array): void {
+    if (this.micMuted) return;
+    // Surdo enquanto o Ork fala ou toca o sinal, e por um rabo curto. O viva-voz
+    // desligado não trata playback como "falando" (speakingForVad); sem isto o
+    // microfone transcreve o próprio TTS e reabre o turno.
+    if (this.outputGuardsMic()) {
+      this.discardOpenCapture();
+      return;
+    }
     const durationMs = this.blockDurationMs(samples);
-    const speaking = this.state === 'falando';
-    const threshold = speaking ? RMS_THRESHOLD_WHILE_SPEAKING : RMS_THRESHOLD;
+    const profile = vadThresholds(this.speakerphone);
+    const speaking = speakingForVad(this.speakerphone, this.playbackActive, this.state === 'falando');
+    const threshold = speaking ? profile.rmsWhileOutput : profile.rmsListen;
     const isVoice = rms >= threshold;
 
+    if (this.debugBlockCounter++ % 50 === 0) {
+      console.log(
+        `[vad:meter] rms=${rms.toFixed(4)} thr=${threshold.toFixed(4)} isVoice=${isVoice} rec=${this.recording} st=${this.state} spk=${this.speakerphone} pb=${this.playbackActive}`
+      );
+    }
+
     if (speaking) {
-      // Barge-in: exige fala sustentada acima do limiar elevado por BARGE_IN_HYSTERESIS_MS
-      // antes de interromper — evita que o vazamento acústico do próprio TTS no
-      // alto-falante dispare autointerrupção (Achado v2-9 + Refinamento do adendo).
+      // Barge-in: exige fala sustentada acima do limiar elevado antes de interromper —
+      // evita que o vazamento acústico do próprio TTS no alto-falante dispare autointerrupção.
       if (isVoice) {
         this.bargeInCandidateMs += durationMs;
-        if (this.bargeInCandidateMs >= BARGE_IN_HYSTERESIS_MS) {
+        if (this.bargeInCandidateMs >= profile.bargeInHysteresisMs) {
           this.triggerBargeIn();
         }
       } else {
@@ -249,11 +473,19 @@ export class VoiceController {
 
       if (isVoice) {
         this.continuousVoiceMs += durationMs;
+        this.onsetGraceMs = 0;
         if (this.continuousVoiceMs >= MIN_VOICE_DURATION_MS) {
           this.beginRecording();
         }
       } else {
-        this.continuousVoiceMs = 0;
+        // Tolerância (JEV Grace Period) para quedas transitórias de consoantes/micro-pausas
+        if (this.continuousVoiceMs > 0) {
+          this.onsetGraceMs += durationMs;
+          if (this.onsetGraceMs > ONSET_GRACE_MS) {
+            this.continuousVoiceMs = 0;
+            this.onsetGraceMs = 0;
+          }
+        }
       }
       return;
     }
@@ -274,24 +506,29 @@ export class VoiceController {
   }
 
   private beginRecording(): void {
+    console.log(`[vad:begin] voz detectada (continuousVoiceMs=${this.continuousVoiceMs.toFixed(0)}ms >= ${MIN_VOICE_DURATION_MS}ms). Gravando turno.`);
     this.recording = true;
     this.recordedChunks = [...this.ringBuffer];
     this.recordedMs = this.ringBufferMs;
     this.continuousSilenceMs = 0;
     this.continuousVoiceMs = 0;
+    this.onsetGraceMs = 0;
     this.ringBuffer = [];
     this.ringBufferMs = 0;
   }
 
   private async finishRecording(): Promise<void> {
+    console.log(`[vad:finish] silêncio detectado (${this.continuousSilenceMs.toFixed(0)}ms). Finalizando gravação (${this.recordedChunks.length} blocos, ${(this.recordedMs/1000).toFixed(2)}s).`);
     this.recording = false;
     const chunks = this.recordedChunks;
     this.recordedChunks = [];
     this.recordedMs = 0;
     this.continuousSilenceMs = 0;
+    this.onsetGraceMs = 0;
 
+    if (this.micMuted) return;
     const wavBuffer = encodeWavPcm16(chunks, this.sampleRate);
-    if (wavBuffer.byteLength === 0) return;
+    if (wavBuffer.byteLength === 0 || this.micMuted) return;
 
     this.setState('processando');
 
@@ -443,6 +680,7 @@ export class VoiceController {
     }
 
     this.playbackActive = false;
+    if (generation === this.playbackGeneration) this.armOutputTail();
   }
 
   private async playChunk(chunk: QueuedChunk): Promise<void> {
@@ -453,6 +691,9 @@ export class VoiceController {
     const arrayBuffer = await res.arrayBuffer();
 
     if (!this.audioContext) return;
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume().catch(() => {});
+    }
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
     // chunk.turnId !== currentTurnId cobre um turno NOVO já ter começado; generation
@@ -460,14 +701,25 @@ export class VoiceController {
     // playbackGeneration acima) — as duas checagens são necessárias, nenhuma sozinha basta.
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // cancelado enquanto decodificava
 
+    const wordless = chunk.text.trim() === '';
+    if (wordless) {
+      console.log(`[playback:start] sinal sem fala turnId=${chunk.turnId}`);
+    } else {
+      console.log(`[playback:start] reproduzindo turnId=${chunk.turnId} frase=${chunk.sentenceIndex}: "${chunk.text}"`);
+    }
+
     await new Promise<void>((resolve) => {
       const source = this.audioContext!.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(this.audioContext!.destination);
+      const dest = this.playbackGain ?? this.audioContext!.destination;
+      source.connect(dest);
       this.currentSource = source;
 
       source.onended = () => {
-        this.currentSource = null;
+        // Corrida: um onended atrasado não pode apagar um source mais novo.
+        if (shouldClearSource(source, this.currentSource)) {
+          this.currentSource = null;
+        }
         resolve();
       };
 
@@ -476,6 +728,11 @@ export class VoiceController {
 
     if (chunk.turnId !== this.currentTurnId || generation !== this.playbackGeneration) return; // barge-in ocorreu durante a reprodução
 
+    // Toque da Ogra: texto vazio. Toca e não vira linha de conversa nem /played
+    // (não há frase para o histórico confirmar).
+    if (wordless) return;
+
+    console.log(`[playback:done] turnId=${chunk.turnId} frase=${chunk.sentenceIndex}`);
     this.onAssistantText(chunk.text);
     void fetch('/api/voice/session/played', {
       method: 'POST',
@@ -502,27 +759,53 @@ export class VoiceController {
   }
 
   muteMicrophone(muted: boolean): void {
+    this.micMuted = muted;
     this.mediaStream?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
     });
+    if (muted) {
+      this.recording = false;
+      this.recordedChunks = [];
+      this.recordedMs = 0;
+      this.continuousVoiceMs = 0;
+      this.continuousSilenceMs = 0;
+      this.onsetGraceMs = 0;
+      this.bargeInCandidateMs = 0;
+      this.ringBuffer = [];
+      this.ringBufferMs = 0;
+    }
+    this.publishMicMuted(muted);
+  }
+
+  private publishMicMuted(muted: boolean): void {
+    if (!this.sessionId || !this.token) return;
+    void fetch('/api/voice/session/mute', {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ muted })
+    }).catch(() => {});
   }
 
   private teardown(): void {
     this.stopSharingScreen();
     this.playbackGeneration++;
     this.stopPlaybackImmediately();
+    this.outputTailUntil = 0;
     this.eventSource?.close();
     this.eventSource = null;
     this.workletNode?.port.close();
     this.workletNode = null;
     this.mediaStream?.getTracks().forEach((t) => t.stop());
     this.mediaStream = null;
+    this.playbackGain = null;
     void this.audioContext?.close();
     this.audioContext = null;
     this.sessionId = null;
     this.token = null;
     this.currentTurnId = null;
     this.recording = false;
+    this.micMuted = false;
+    this.onOgraWaiting(false);
     this.setState('idle');
   }
 
@@ -543,10 +826,15 @@ export class VoiceController {
   }
 
   async stop(): Promise<void> {
-    if (this.sessionId && this.token) {
-      await fetch('/api/voice/session/end', { method: 'POST', headers: this.headers() }).catch(() => {});
-    }
+    const sId = this.sessionId;
+    const tok = this.token;
     this.teardown();
+    if (sId && tok) {
+      void fetch('/api/voice/session/end', {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sId, 'X-Rodrigo-Token': tok }
+      }).catch(() => {});
+    }
   }
 }
 

@@ -3,17 +3,21 @@ import { createLineSink } from './lineSink.js';
 import { redact } from '../redact.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline';
 import type { ConversationMessage, IntentDetection, IntentName, OrchestratorLabel, ToolName } from '../../shared/voiceProtocol.js';
 import { isMutationName, isToolName, VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import type { GenerateCallbacks, SynthesizeFailureKind, SynthesizeRequest, SynthesizeResult, VoiceEngine } from './engine.js';
 import { VoiceEngineError } from './engine.js';
+import type { UsageLedger, UsageSource } from './usageLedger.js';
 
 export interface MlxWorkerEngineOptions {
   pythonBin: string;
   workerScript: string;
   hfCacheDir: string;
   env?: NodeJS.ProcessEnv;
+  /** Livro-caixa do gasto próprio (GET /api/usage). Ausente => voz funciona sem registrar. */
+  usageLedger?: UsageLedger;
 }
 
 const CLASSIFICATION_LABELS = new Set<OrchestratorLabel>(['GERAL', 'TEOLOGIA', 'VIRTOLOGIA', 'NEUROCIENCIA', 'AMBIGUO']);
@@ -110,11 +114,44 @@ interface PendingFile {
 interface PendingSynthesize {
   kind: 'synthesize';
   turnId: string;
+  model?: string;
+  chars?: number;
   /** Nunca rejeita: falha do serviço é um resultado { ok: false, ... } (o provedor decide o fallback). */
   resolve: (res: SynthesizeResult) => void;
   reject: (err: Error) => void;
   timeout: NodeJS.Timeout;
   spawnGeneration: number;
+}
+
+/** Uso vindo do worker (só números; ver usage_dict em worker.py). Nulo => não registra. */
+function parseWorkerUsage(msg: Record<string, unknown>): {
+  model: string;
+  in: number | null;
+  out: number | null;
+  reasoning?: number | null;
+  chars?: number | null;
+  image?: number | null;
+} | null {
+  const u = msg.usage as Record<string, unknown> | undefined;
+  if (!u || typeof u !== 'object') return null;
+  if (typeof u.model !== 'string' || u.model.length === 0) return null;
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+  const out: {
+    model: string;
+    in: number | null;
+    out: number | null;
+    reasoning?: number | null;
+    chars?: number | null;
+    image?: number | null;
+  } = { model: u.model.slice(0, 120), in: num(u.in), out: num(u.out) };
+  const reasoning = num(u.reasoning);
+  if (reasoning !== null) out.reasoning = reasoning;
+  const chars = num(u.chars);
+  if (chars !== null) out.chars = chars;
+  const image = num(u.image);
+  if (image !== null) out.image = image;
+  return out;
 }
 
 const SYNTH_FAILURE_KINDS = new Set<SynthesizeFailureKind>([
@@ -206,12 +243,21 @@ export class MlxWorkerEngine implements VoiceEngine {
     this.spawnGeneration += 1;
     fs.mkdirSync(this.options.hfCacheDir, { recursive: true });
 
+    // Defesa: app desktop macOS pode nascer sem /opt/homebrew/bin no PATH → whisper/ffmpeg falham.
+    const pathParts = String(process.env.PATH ?? '')
+      .split(path.delimiter)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    for (const brew of ['/opt/homebrew/bin', '/usr/local/bin']) {
+      if (!pathParts.includes(brew)) pathParts.unshift(brew);
+    }
     const child = spawn(this.options.pythonBin, [this.options.workerScript], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       env: {
         ...process.env,
         ...this.options.env,
+        PATH: pathParts.join(path.delimiter),
         HF_HOME: this.options.hfCacheDir,
         HF_HUB_OFFLINE: '1',
         TRANSFORMERS_OFFLINE: '1'
@@ -278,6 +324,24 @@ export class MlxWorkerEngine implements VoiceEngine {
     this.pending.clear();
   }
 
+  private recordUsage(
+    source: UsageSource,
+    usage: { model: string; in: number | null; out: number | null; reasoning?: number | null; chars?: number | null; image?: number | null } | null
+  ): void {
+    const ledger = this.options.usageLedger;
+    if (!ledger || !usage) return;
+    ledger.record({
+      source,
+      model: usage.model,
+      req: 1,
+      in: usage.in,
+      out: usage.out,
+      reasoning: usage.reasoning ?? undefined,
+      chars: usage.chars ?? undefined,
+      image: usage.image ?? undefined
+    });
+  }
+
   private handleLine(line: string): void {
     let msg: Record<string, unknown>;
     try {
@@ -336,6 +400,7 @@ export class MlxWorkerEngine implements VoiceEngine {
     if (event === 'done' && pending.kind === 'generate') {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
+      this.recordUsage('geracao', parseWorkerUsage(msg));
       pending.resolve();
       return;
     }
@@ -360,6 +425,8 @@ export class MlxWorkerEngine implements VoiceEngine {
     if (event === 'screen_description' && pending.kind === 'describe_screen') {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
+      // Caminho local não traz `usage` (sem chamada, sem custo) => nada a registrar.
+      this.recordUsage('visao', parseWorkerUsage(msg));
       if (msg.kind) {
         pending.resolve({ kind: String(msg.kind), error: String(msg.error || '') });
       } else {
@@ -375,6 +442,7 @@ export class MlxWorkerEngine implements VoiceEngine {
         pending.resolve(null);
         return;
       }
+      this.recordUsage('intencao', parseWorkerUsage(msg));
       const intent = msg.intent;
       if (!(isMutationName(intent) || isToolName(intent))) {
         pending.resolve(null);
@@ -406,7 +474,22 @@ export class MlxWorkerEngine implements VoiceEngine {
     if (event === 'synth_result' && pending.kind === 'synthesize') {
       this.pending.delete(reqId);
       clearTimeout(pending.timeout);
-      pending.resolve(parseSynthResult(msg));
+      const parsed = parseSynthResult(msg);
+      if (parsed.ok) {
+        // O worker ecoa o modelo efetivo; o pedido pode não trazer modelo (padrão no worker).
+        const model =
+          typeof msg.model === 'string' && msg.model.length > 0 ? msg.model : pending.model;
+        if (typeof model === 'string' && model.length > 0) {
+          this.recordUsage('tts', {
+            model,
+            in: parsed.tokensIn,
+            out: parsed.tokensOut,
+            chars: typeof pending.chars === 'number' ? pending.chars : null,
+            image: null
+          });
+        }
+      }
+      pending.resolve(parsed);
       return;
     }
 
@@ -649,6 +732,9 @@ export class MlxWorkerEngine implements VoiceEngine {
       this.pending.set(reqId, {
         kind: 'synthesize',
         turnId: request.turnId,
+        model: request.model,
+        /** Só o TAMANHO do texto (o TTS cobra por caractere); o conteúdo nunca entra no livro-caixa. */
+        chars: request.text.length,
         resolve: finish,
         reject: () => finish({ ok: false, kind: 'error' }),
         timeout,

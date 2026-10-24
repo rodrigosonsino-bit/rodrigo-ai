@@ -20,22 +20,28 @@ import { prepareProcessTmpDir } from './tmpSweeper.js';
 import { DecisionLog, unavailableAuditFs } from '../audit/decisionLog.js';
 import path from 'node:path';
 import type { TtsStatus } from '../../shared/types.js';
+import type { UsageStatus } from '../../shared/types.js';
 import { ExtensionRegistry } from '../../shared/extensions/registry.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { AudioStore } from './audioStore.js';
 import { MlxWorkerEngine } from './mlxWorkerEngine.js';
-import { SessionManager } from './sessionManager.js';
-import { createVoiceProvider } from './ttsProviders.js';
+import { UsageLedger, parseUsageCaps } from './usageLedger.js';
+import { SessionManager, parseAutoConfirm } from './sessionManager.js';
+import { createDefaultPlayOgraCue } from './ograCue.js';
+import { createDynamicVoiceProvider } from './ttsProviders.js';
 import { GeminiVoiceProvider } from './geminiVoiceProvider.js';
 import { loadKnowledgeCorpus, KnowledgeRetriever } from '../knowledge/index.js';
 import { createSystemTools } from '../tools/systemTools.js';
 import { createMutatingTools } from '../tools/mutatingTools.js';
+import { createDesktopAndSelfTools } from '../tools/desktopControlTool.js';
 import { ReminderScheduler } from '../tools/reminderScheduler.js';
 import { VOICE_LIMITS } from '../../shared/voiceProtocol.js';
 import { SubAgentCoordinator } from '../agents/subAgent.js';
 import { registerWiredOpenClawAgents } from '../agents/openClawSubAgent.js';
 import { makeOpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import { PendingAsyncTaskStore, parseAsyncTaskTtlHours } from '../agents/pendingAsyncStore.js';
+import { registerClaudeCodeAgent } from '../agents/claudeCodeSubAgent.js';
+import { capabilitiesFromRegistry, registerOgraAgent } from '../agents/ograSubAgent.js';
 
 export type TtsStatusResponse = TtsStatus;
 
@@ -47,6 +53,8 @@ export interface VoiceRuntime {
   scheduler?: ReminderScheduler;
   /** Fase 13a: estado da voz (qual motor, orçamento do dia). Nunca contém texto de frase. */
   ttsStatus?: () => TtsStatusResponse;
+  /** Gasto próprio com o Gemini (GET /api/usage). Só números; nenhum texto de conversa. */
+  usageSummary?: () => UsageStatus;
   shutdown: () => Promise<void>;
 }
 
@@ -97,13 +105,36 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // Fase 12: a mesma configuração de privacidade governa o Node e o worker. Valor inválido lança
   // aqui (falhar alto em privacidade), e o mestre RODRIGO_CLOUD chega ao worker como defesa em profundidade.
   const privacy = parsePrivacyConfig(process.env);
+  // Livro-caixa do gasto próprio (GET /api/usage): teto inválido também derruba o startup, mesma regra.
+  const usageCaps = parseUsageCaps(process.env);
+  const usageLedger = new UsageLedger({
+    filePath: path.join(rootDir, '.runtime', 'usage-ledger.jsonl'),
+    rpd: usageCaps.rpd,
+    rpdTts: usageCaps.rpdTts
+  });
+  // Fase 12 (§2.4): cada processo usa .runtime/tmp/<pid>-<startEpochMs>/. Antes de aceitar sessões, varre os
+  // subdiretórios de processos mortos/reciclados; os de instâncias vivas ficam intactos (nada de rm -rf da base).
+  const tmpRoot = path.join(rootDir, '.runtime', 'tmp');
+  const tmp = prepareProcessTmpDir(tmpRoot, (m) => console.warn(m));
+  const workerFileRoots = new Set(
+    (process.env.RODRIGO_FILE_ROOTS ?? '')
+      .split(path.delimiter)
+      .map((v) => v.trim())
+      .filter(Boolean)
+  );
+  workerFileRoots.add(tmp.dir);
   const engine = new MlxWorkerEngine({
     pythonBin: venvPython,
     workerScript,
     hfCacheDir,
-    env: { ...workerPrivacyEnv(privacy), ...workerGeminiEnv(process.env, (m) => console.warn(m)) }
+    env: {
+      ...workerPrivacyEnv(privacy),
+      ...workerGeminiEnv(process.env, (m) => console.warn(m)),
+      RODRIGO_FILE_ROOTS: Array.from(workerFileRoots).join(path.delimiter)
+    },
+    usageLedger
   });
-  const ttsProvider = createVoiceProvider({ engine, privacy, rootDir });
+  const ttsProvider = createDynamicVoiceProvider({ engine, privacy, rootDir });
   console.log(`[Rodrigo AI] Voz das respostas: ${ttsProvider.name}`);
   ExtensionRegistry.getInstance().registerVoiceProvider(ttsProvider);
 
@@ -133,7 +164,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     ? path.resolve(process.env.RODRIGO_DATA_DIR)
     : path.join(rootDir, 'data');
   // Factory retorna as ferramentas, a instância única do agendador e o store de memórias
-  const { tools: mutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
+  const { tools: baseMutatingTools, scheduler: reminderScheduler, memoriaStore } = createMutatingTools(dataDir);
+  const { desktopTool, allTools: desktopAndSelfTools } = createDesktopAndSelfTools({
+    rootDir,
+    privacy,
+    voiceProvider: ttsProvider
+  });
+  const mutatingTools = [...baseMutatingTools, ...desktopAndSelfTools];
 
   // Fase 17: delegação ao Claude Code. A ferramenta SEMPRE existe no registro (para o app saber nomear o que está desligado),
   // mas só fica disponível com o canal RODRIGO_CLAUDE_CODE=1, raiz válida, binário e a prova de isolamento (selftest).
@@ -162,18 +199,19 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // Inicializa o agendador carregando lembretes persistidos
   reminderScheduler.bootstrap();
 
-  // Fase 12 (§2.4): cada processo usa .runtime/tmp/<pid>-<startEpochMs>/. Antes de aceitar sessões, varre os
-  // subdiretórios de processos mortos/reciclados; os de instâncias vivas ficam intactos (nada de rm -rf da base).
-  const tmpRoot = path.join(rootDir, '.runtime', 'tmp');
-  const tmp = prepareProcessTmpDir(tmpRoot, (m) => console.warn(m));
   if (tmp.removed.length > 0) {
     console.log(`[Rodrigo AI] Limpeza de resíduos de áudio: ${tmp.removed.length} diretório(s) órfão(s) removido(s).`);
   }
   const audioStore = new AudioStore(tmp.dir);
   const coordinator = new SubAgentCoordinator();
   const openClawClient = makeOpenClawHttpClient();
-  registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
   const pendingAsyncStore = new PendingAsyncTaskStore(dataDir);
+  // Autonomia direta (RODRIGO_AUTO_CONFIRM=1): mutações executam sem pergunta falada.
+  // Valor inválido derruba o startup, mesma regra fail-high da privacidade.
+  const autoConfirm = parseAutoConfirm(process.env);
+  if (autoConfirm) {
+    console.log('[Rodrigo AI] Autonomia direta ativa (RODRIGO_AUTO_CONFIRM=1): mutações executam sem pergunta (exceto críticas).');
+  }
   const sessionManager = new SessionManager(
     engine,
     ttsProvider,
@@ -184,10 +222,23 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     mutatingTools,
     memoriaStore,
     privacy,
-    {},
+    { autoConfirm, playOgraCue: createDefaultPlayOgraCue(process.env) },
     pendingAsyncStore,
     coordinator
   );
+  desktopTool.setPostSpeechScheduler((action) => sessionManager.schedulePostSpeechAction(action));
+  registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
+  registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
+    sessionManager.consumeMutationToken(turnId, token)
+  );
+  // Camada Ogra: só entra no coordenador com RODRIGO_OGRA=1. Com 0, este bloco não roda.
+  // TODO (fases seguintes): não registrar daqui coordenação de cursor, WhatsApp ou outros apps.
+  if (privacy.ogra) {
+    registerOgraAgent(coordinator, privacy, {
+      verifyMutationToken: (turnId, token) => sessionManager.consumeMutationToken(turnId, token),
+      catalog: () => capabilitiesFromRegistry(ExtensionRegistry.getInstance())
+    });
+  }
 
   // T4: registro de decisões das mutações (duas fases, cadeia de hashes). Se não puder abrir, fica INDISPONÍVEL e as
   // mutações são recusadas (falha fechada); nunca segue sem registro em silêncio.
@@ -225,13 +276,15 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     sessionManager,
     audioStore,
     scheduler: reminderScheduler,
+    usageSummary: () => usageLedger.summary(),
     ttsStatus: () => {
-      if (ttsProvider instanceof GeminiVoiceProvider) {
-        const b = ttsProvider.budgetStatus();
-        const c = ttsProvider.counters;
+      const active = ttsProvider.getActiveProvider();
+      if (active instanceof GeminiVoiceProvider) {
+        const b = active.budgetStatus();
+        const c = active.counters;
         return {
-          engine: ttsProvider.id,
-          name: ttsProvider.name,
+          engine: active.id,
+          name: active.name,
           budget: { used: b.used, limit: b.limit, minuteUsed: b.minuteUsed, rpm: b.rpm, exhausted: b.exhausted, blockedForMs: b.blockedForMs },
           counters: { gemini: c.gemini, fallback: c.fallback, failures: c.failures }
         };

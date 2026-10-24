@@ -25,17 +25,27 @@ export type PendingActionGroup = 'CREATE' | 'DELETE' | 'EDIT';
 
 export function actionGroupOf(kind: string): PendingActionGroup | null {
   const k = kind.toUpperCase();
-  if (k.endsWith('_CRIAR') || k === 'MEMORIA_GUARDAR') return 'CREATE';
-  if (k.endsWith('_APAGAR') || k === 'MEMORIA_ESQUECER') return 'DELETE';
-  if (k.endsWith('_EDITAR')) return 'EDIT';
+  if (
+    k.endsWith('_CRIAR') ||
+    k === 'MEMORIA_GUARDAR' ||
+    k === 'DIGITAR_TEXTO' ||
+    k === 'DIGITAR_INSERIR' ||
+    k === 'DIGITAR_ANEXAR' ||
+    k === 'DIGITAR_LIMPAR_INSERIR' ||
+    k === 'DIGITAR_TRADUZIR_INSERIR'
+  ) {
+    return 'CREATE';
+  }
+  if (k.endsWith('_APAGAR') || k === 'MEMORIA_ESQUECER' || k === 'DESKTOP_CRITICO') return 'DELETE';
+  if (k.endsWith('_EDITAR') || k === 'AUTO_CORRECAO' || k === 'DIGITAR_SUBSTITUIR_SELECAO') return 'EDIT';
   return null;
 }
 
 const VERB_GROUP: Record<string, PendingActionGroup> = {};
 for (const v of ['cria', 'crie', 'criar', 'salva', 'salve', 'salvar', 'guarda', 'guarde', 'guardar',
   'anota', 'anote', 'anotar', 'marca', 'marque', 'marcar', 'grava', 'grave', 'gravar',
-  'registra', 'registre', 'registrar']) VERB_GROUP[v] = 'CREATE';
-for (const v of ['apaga', 'apague', 'apagar']) VERB_GROUP[v] = 'DELETE';
+  'registra', 'registre', 'registrar', 'digita', 'digite', 'digitar', 'cola', 'cole', 'colar']) VERB_GROUP[v] = 'CREATE';
+for (const v of ['apaga', 'apague', 'apagar', 'esvazia', 'esvazie', 'esvaziar']) VERB_GROUP[v] = 'DELETE';
 for (const v of ['troca', 'troque', 'trocar', 'edita', 'edite', 'editar', 'corrige', 'corrija',
   'corrigir', 'muda', 'mude', 'mudar', 'atualiza', 'atualize', 'atualizar']) VERB_GROUP[v] = 'EDIT';
 

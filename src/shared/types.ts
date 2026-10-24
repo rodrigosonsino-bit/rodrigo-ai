@@ -51,8 +51,10 @@ export interface PrivacyStatus {
     visionImage: boolean;
     /** Fase 15: busca web autônoma via OpenClaw (mestre + RODRIGO_WEB_SEARCH). */
     webSearch: boolean;
-    /** Fase 17: ordem falada e arquivos lidos pelo Claude Code vão à Anthropic (RODRIGO_CLAUDE_CODE). */
-    claudeCode: boolean;
+    /** Fase 17: ordem (e arquivos lidos pelo claude -p) podem ir à Anthropic. */
+    claudeCodeOrder: boolean;
+    /** Camada Ogra: o texto da fala vai ao webhook quando RODRIGO_OGRA=1. O áudio não. */
+    ograUtterance: boolean;
   };
   models: { generation: string | null; intent: string | null; tts: string | null };
   /** Fase 13a: estado EFETIVO do TTS em nuvem (a flag sozinha não basta; ver ttsCloudEffective). */
@@ -66,10 +68,22 @@ export interface PrivacyStatus {
     enabled: boolean;
     reason: 'master-off' | 'channel-off' | null;
   };
-  /** Fase 17: estado EFETIVO da delegação ao Claude Code (mestre + canal). */
+  /** Fase 17: estado EFETIVO do Claude Code (mestre + RODRIGO_CLAUDE_CODE). */
   claudeCode: {
     enabled: boolean;
     reason: 'master-off' | 'channel-off' | null;
+  };
+  /**
+   * Automação desktop (computer-use): controla apps locais sem SIM por passo.
+   * Texto/AX não saem salvo pelos canais de geração/visão já configurados.
+   */
+  autoDesktop: {
+    enabled: boolean;
+    reason: 'flag-off' | 'desktop-control-off' | null;
+  };
+  /** Camada Ogra. Padrão desligado. Não depende do mestre Gemini. */
+  ogra: {
+    enabled: boolean;
   };
   neverSends: readonly ['audio'];
   /** T1: modo do guarda que varre o TEXTO antes de sair (não varre imagem). */
@@ -88,4 +102,27 @@ export interface TtsStatus {
   /** null quando a voz é a do sistema (não há orçamento a mostrar). */
   budget: { used: number; limit: number; minuteUsed: number; rpm: number; exhausted: boolean; blockedForMs: number } | null;
   counters: { gemini: number; fallback: number; failures: number } | null;
+}
+
+/**
+ * GET /api/usage: gasto PRÓPRIO com o Gemini no dia (livro-caixa local, UsageLedger).
+ * Só números agregados por (fonte, modelo); nenhum texto de conversa, transcrição ou frase.
+ * É "o que o app consumiu", não a conta da chave (outras ferramentas com a mesma chave não entram).
+ */
+export type UsageSourceName = 'geracao' | 'intencao' | 'visao' | 'tts';
+
+export interface UsageModelRow {
+  source: UsageSourceName;
+  model: string;
+  req: number;
+  inTokens: number;
+  outTokens: number;
+  cap: number;
+  pct: number;
+}
+
+export interface UsageStatus {
+  day: string;
+  resetInMs: number;
+  models: UsageModelRow[];
 }

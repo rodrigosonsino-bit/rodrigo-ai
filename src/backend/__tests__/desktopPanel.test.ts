@@ -11,8 +11,12 @@ const src = fs.readFileSync(path.join(process.cwd(), 'desktop', 'main.swift'), '
 const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
 describe('painel desktop (T6): fronteiras declaradas', () => {
-  it('não usa a área de transferência (nem leitura nem escrita)', () => {
-    assert.doesNotMatch(code, /NSPasteboard|UIPasteboard|\.pasteboard|setString\(.*forType/);
+  it('só usa a área de transferência no NativeClipboardPaster (ponte de ditado), nunca na UI do painel', () => {
+    // DigitarTool / automação colam via CGEvent + NSPasteboard no bridge nativo (c16a473).
+    // Fora desse enum, o painel ainda não pode ler/escrever a área de transferência.
+    assert.match(code, /enum NativeClipboardPaster/);
+    const withoutPaster = code.replace(/enum NativeClipboardPaster[\s\S]*?\n\}\n/, '');
+    assert.doesNotMatch(withoutPaster, /NSPasteboard|UIPasteboard|\.pasteboard|setString\(.*forType/);
   });
   it('não ativa ferramentas de depuração e mantém o inspetor desligado', () => {
     assert.doesNotMatch(code, /developerExtrasEnabled|isInspectable\s*=\s*true/);

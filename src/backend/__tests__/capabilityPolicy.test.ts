@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { IVoiceProvider } from '../../shared/extensions/voice.js';
 import { CAPABILITIES, CapabilityPolicy, DEFAULT_CAPABILITY_POLICY, EFFECTIVE_GRANTS, type Capability } from '../agents/capabilityPolicy.js';
+import { OgraSubAgent } from '../agents/ograSubAgent.js';
 import { ToolSubAgent, SpecialistSubAgent } from '../agents/adapters.js';
 import { OPENCLAW_CAPABILITIES } from '../agents/openClawCapabilities.js';
 import { OpenClawSubAgent } from '../agents/openClawSubAgent.js';
@@ -115,6 +116,7 @@ describe('T3: capacidades tipadas, negar por padrão', () => {
       out.push(new ToolSubAgent({ name: 'HoraAtualTool' } as never));
       const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 't3-tools-')); dirs.push(dataDir);
       for (const t of createMutatingTools(dataDir).tools) out.push(new ToolSubAgent(t)); // LEMBRETE, NOTA, MEMORIA
+      out.push(new OgraSubAgent({ webhook: { url: 'https://ogra.example/hook', key: 'k' }, catalog: () => [] }));
       return out;
     };
 

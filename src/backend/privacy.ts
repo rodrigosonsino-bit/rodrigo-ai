@@ -15,8 +15,10 @@ export interface PrivacyConfig {
   readonly cloudIntent: boolean;
   /** RODRIGO_SEND_HISTORY — 0 => só a fala do turno atual vai à geração. */
   readonly sendHistory: boolean;
-  /** RODRIGO_HISTORY_TURNS — janela do histórico enviado (turnos; 1..MAX_CONTEXT_TURNS). */
+  /** RODRIGO_HISTORY_TURNS — janela do histórico enviado (turnos; 1..MAX_CONTEXT_TURNS; padrão DEFAULT_CONTEXT_TURNS). */
   readonly historyTurns: number;
+  /** RODRIGO_IDLE_TIMEOUT_MINUTES — timeout de inatividade em minutos (1..1440; padrão 60). */
+  readonly idleTimeoutMinutes: number;
   /** RODRIGO_SEND_MEMORIES — bloco de memórias armazenadas no prompt. */
   readonly sendMemories: boolean;
   /** RODRIGO_SEND_KNOWLEDGE — trecho de docs/research/ no prompt (decisão D1: padrão 0). */
@@ -32,14 +34,46 @@ export interface PrivacyConfig {
    * Padrão 0 — nunca autônoma sem ligar o canal explicitamente (docs/phase-15-v3.md §5).
    */
   readonly webSearch: boolean;
-  /**
-   * Fase 17 — RODRIGO_CLAUDE_CODE (padrão DESLIGADO, como todo canal de nuvem novo): a ordem falada e os arquivos que o
-   * Claude Code ler vão à Anthropic. Só vale com o mestre ligado (ver claudeCodeEffective).
-   */
-  readonly claudeCode: boolean;
   /** T1 — RODRIGO_OUTBOUND_GUARD: off | warn | redact | block (padrão redact). Varre o TEXTO que sai para a nuvem. */
   readonly outboundGuard: OutboundGuardMode;
+  /**
+   * Fase 17 — RODRIGO_CLAUDE_CODE: habilita o ClaudeCodeSubAgent (spawna `claude -p`).
+   * Padrão DESLIGADO. Ordem + arquivos lidos vão à Anthropic sob o plano da assinatura.
+   * Só efetivo com RODRIGO_CLOUD=1 (mestre). Valor inválido aborta o boot.
+   */
+  readonly claudeCode: boolean;
+  /**
+   * Automação desktop (computer-use): RODRIGO_AUTO_DESKTOP.
+   * Padrão DESLIGADO. Com 1 + RODRIGO_DESKTOP_CONTROL=1, intenções AUTOMACAO_DESKTOP
+   * executam sem SIM por passo (kill switch por voz ainda vale). Valor inválido aborta o boot.
+   */
+  readonly autoDesktop: boolean;
+  /**
+   * Camada Ogra (fase 1): RODRIGO_OGRA. Padrão DESLIGADO. Com 1, a fala vai ao webhook
+   * da Ogra e a resposta volta em POST /api/ogra/reply. Independente do mestre Gemini.
+   * Valor inválido aborta o boot. Com 0, o caminho de voz não muda.
+   */
+  readonly ogra: boolean;
+  /**
+   * RODRIGO_OGRA_FALLBACK. Padrão LIGADO. Com 1, falha de transporte da Ogra (HTTP fora de 2xx,
+   * prazo do webhook, rede, webhook ausente) e o silêncio depois do 2xx (sem POST /api/ogra/reply
+   * dentro de ograReplyTimeoutMs) seguem o mesmo turno pelo caminho de RODRIGO_OGRA=0.
+   * Com 0, esses casos encerram o turno. A Ogra não entra na cadeia de reserva do Gemini.
+   * Valor inválido aborta o boot.
+   */
+  readonly ograFallback: boolean;
+  /**
+   * RODRIGO_OGRA_REPLY_TIMEOUT_MS. Prazo, em milissegundos, entre o 2xx do webhook e o
+   * POST /api/ogra/reply. Padrão 120000. Inteiro entre 1000 e 600000. Vazio = padrão.
+   * Valor inválido aborta o boot.
+   */
+  readonly ograReplyTimeoutMs: number;
 }
+
+/** Prazo padrão da resposta assíncrona da Ogra (RODRIGO_OGRA_REPLY_TIMEOUT_MS). */
+export const OGRA_REPLY_TIMEOUT_DEFAULT_MS = 120_000;
+export const OGRA_REPLY_TIMEOUT_MIN_MS = 1_000;
+export const OGRA_REPLY_TIMEOUT_MAX_MS = 600_000;
 
 /** Fase 13a: modelo e voz padrão do TTS (docs/phase-13a-v3.md §4.1); configuráveis por RODRIGO_TTS_MODEL / RODRIGO_TTS_VOICE. */
 export const TTS_DEFAULT_MODEL = 'gemini-3.8-flash-lite-tts';
@@ -95,7 +129,10 @@ export function webSearchOffReason(cfg: PrivacyConfig): WebSearchOffReason | nul
   return null;
 }
 
-/** Fase 17: delegação ao Claude Code só com o mestre ligado E o canal RODRIGO_CLAUDE_CODE=1. */
+/**
+ * Fase 17: Claude Code só com o mestre ligado E RODRIGO_CLAUDE_CODE=1.
+ * Ordem + arquivos lidos vão à Anthropic; canal opt-in, padrão desligado.
+ */
 export function claudeCodeEffective(cfg: PrivacyConfig): boolean {
   return cfg.cloud && cfg.claudeCode;
 }
@@ -111,6 +148,32 @@ export function claudeCodeOffReason(cfg: PrivacyConfig): ClaudeCodeOffReason | n
 /** Fase 17: fala honesta quando o canal está desligado (mesmo padrão de WEB_SEARCH_DISABLED_TEXT). */
 export const CLAUDE_CODE_DISABLED_TEXT =
   'A delegação ao Claude está desligada. Para ligar, é preciso ativar RODRIGO_CLAUDE_CODE e configurar uma pasta de leitura.';
+/**
+ * Automação desktop efetiva: RODRIGO_AUTO_DESKTOP=1 E controle de desktop ligado.
+ * Não envia áudio; AX/texto só saem pelos canais de geração/visão já configurados.
+ */
+export function autoDesktopEffective(
+  cfg: PrivacyConfig,
+  desktopControlOn: boolean
+): boolean {
+  return cfg.autoDesktop && desktopControlOn;
+}
+
+export type AutoDesktopOffReason = 'flag-off' | 'desktop-control-off';
+
+export function autoDesktopOffReason(
+  cfg: PrivacyConfig,
+  desktopControlOn: boolean
+): AutoDesktopOffReason | null {
+  if (!cfg.autoDesktop) return 'flag-off';
+  if (!desktopControlOn) return 'desktop-control-off';
+  return null;
+}
+
+/** Ogra efetiva: só RODRIGO_OGRA=1. Não depende do mestre Gemini (é outro destino). */
+export function ograEffective(cfg: PrivacyConfig): boolean {
+  return cfg.ogra;
+}
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -131,16 +194,50 @@ function parseGuardMode(env: Env, name: string, defaultValue: OutboundGuardMode)
   throw new Error(`Configuração inválida: ${name} deve ser exatamente "off", "warn", "redact" ou "block". Valor recebido: "${raw}"`);
 }
 
-function parseTurns(env: Env, name: string, max: number): number {
+export function parseTurns(env: Env, name: string, defaultValue: number, max: number): number {
   const raw = env[name];
-  if (raw === undefined || raw.trim() === '') return max;
+  if (raw === undefined || raw.trim() === '') return defaultValue;
   const v = raw.trim();
   if (!/^[1-9][0-9]{0,2}$/.test(v)) {
     throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre 1 e ${max}. Valor recebido: "${raw}"`);
   }
   const n = parseInt(v, 10);
-  if (n > max) {
+  if (n < 1 || n > max) {
     throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre 1 e ${max}. Valor recebido: "${raw}"`);
+  }
+  return n;
+}
+
+export function parseOgraReplyTimeoutMs(
+  env: Env,
+  name = 'RODRIGO_OGRA_REPLY_TIMEOUT_MS',
+  defaultValue = OGRA_REPLY_TIMEOUT_DEFAULT_MS,
+  min = OGRA_REPLY_TIMEOUT_MIN_MS,
+  max = OGRA_REPLY_TIMEOUT_MAX_MS
+): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const v = raw.trim();
+  if (!/^[1-9][0-9]{0,6}$/.test(v)) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
+  }
+  const n = parseInt(v, 10);
+  if (n < min || n > max) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
+  }
+  return n;
+}
+
+export function parseIdleMinutes(env: Env, name = 'RODRIGO_IDLE_TIMEOUT_MINUTES', defaultValue = 60, min = 1, max = 1440): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const v = raw.trim();
+  if (!/^[1-9][0-9]{0,3}$/.test(v)) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
+  }
+  const n = parseInt(v, 10);
+  if (n < min || n > max) {
+    throw new Error(`Configuração inválida: ${name} deve ser um inteiro entre ${min} e ${max}. Valor recebido: "${raw}"`);
   }
   return n;
 }
@@ -150,15 +247,20 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     cloud: parseFlag(env, 'RODRIGO_CLOUD', true),
     cloudIntent: parseFlag(env, 'RODRIGO_CLOUD_INTENT', true),
     sendHistory: parseFlag(env, 'RODRIGO_SEND_HISTORY', true),
-    historyTurns: parseTurns(env, 'RODRIGO_HISTORY_TURNS', VOICE_LIMITS.MAX_CONTEXT_TURNS),
+    historyTurns: parseTurns(env, 'RODRIGO_HISTORY_TURNS', VOICE_LIMITS.DEFAULT_CONTEXT_TURNS, VOICE_LIMITS.MAX_CONTEXT_TURNS),
+    idleTimeoutMinutes: parseIdleMinutes(env, 'RODRIGO_IDLE_TIMEOUT_MINUTES', 60, 1, 1440),
     sendMemories: parseFlag(env, 'RODRIGO_SEND_MEMORIES', true),
     sendKnowledge: parseFlag(env, 'RODRIGO_SEND_KNOWLEDGE', false),
     cloudTts: parseFlag(env, 'RODRIGO_CLOUD_TTS', true),
     ttsDictated: parseFlag(env, 'RODRIGO_TTS_DICTATED', true),
     cloudVision: parseFlag(env, 'RODRIGO_CLOUD_VISION', false),
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
+    outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact'),
     claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
-    outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact')
+    autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false),
+    ogra: parseFlag(env, 'RODRIGO_OGRA', false),
+    ograFallback: parseFlag(env, 'RODRIGO_OGRA_FALLBACK', true),
+    ograReplyTimeoutMs: parseOgraReplyTimeoutMs(env)
   };
 }
 
@@ -195,6 +297,15 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
   const ttsOn = ttsCloudEffective(cfg);
   const webOn = webSearchEffective(cfg);
   const claudeOn = claudeCodeEffective(cfg);
+  // Espelho de parseDesktopControlFlag (evita import circular com desktopControlTool).
+  let desktopOn = true;
+  const rawDesktop = env['RODRIGO_DESKTOP_CONTROL'];
+  if (rawDesktop !== undefined && rawDesktop.trim() !== '') {
+    const v = rawDesktop.trim();
+    if (v === '0') desktopOn = false;
+    else if (v !== '1') desktopOn = false; // valor inválido: cartão mostra off; o boot já falhou via parseDesktopControlFlag
+  }
+  const autoOn = autoDesktopEffective(cfg, desktopOn);
   return {
     mode: cfg.cloud ? 'cloud' : 'local-only',
     intent: intentOn ? 'gemini' : 'local',
@@ -208,7 +319,8 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
       ttsText: ttsOn,
       visionImage: cfg.cloud && cfg.cloudVision,
       webSearch: webOn,
-      claudeCode: claudeOn
+      claudeCodeOrder: claudeOn,
+      ograUtterance: cfg.ogra
     },
     models: {
       generation: cfg.cloud ? 'gemini-flash-latest' : null,
@@ -218,6 +330,8 @@ export function effectivePrivacy(env: Env): PrivacyStatus {
     tts: { cloud: ttsOn, reason: ttsOffReason(cfg), dictatedViaCloud: ttsDictatedViaCloud(cfg) },
     webSearch: { enabled: webOn, reason: webSearchOffReason(cfg) },
     claudeCode: { enabled: claudeOn, reason: claudeCodeOffReason(cfg) },
+    autoDesktop: { enabled: autoOn, reason: autoDesktopOffReason(cfg, desktopOn) },
+    ogra: { enabled: cfg.ogra },
     neverSends: ['audio'],
     outboundGuard: cfg.outboundGuard
   };

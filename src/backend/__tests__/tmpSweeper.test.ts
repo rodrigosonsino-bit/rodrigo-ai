@@ -299,10 +299,22 @@ describe('prepareProcessTmpDir e a ligação no voiceRuntime (Fase 12)', () => {
     assert.ok(!fs.existsSync(r.dir));
   });
 
+  it('quando a base temporária é symlink, devolve o caminho REAL do processo', () => {
+    const base = mkRoot();
+    const realRoot = path.join(base, 'real-tmp');
+    const linkRoot = path.join(base, 'linked-tmp');
+    fs.mkdirSync(realRoot, { recursive: true });
+    fs.symlinkSync(realRoot, linkRoot);
+    const r = prepareProcessTmpDir(linkRoot);
+    assert.equal(path.dirname(r.dir), fs.realpathSync.native(realRoot));
+    assert.equal(path.basename(r.dir), r.selfDirName);
+  });
+
   it('o voiceRuntime realmente usa a varredura e o dispose (guarda estrutural: a ligação não tem teste de integração sem os modelos)', () => {
     const src = fs.readFileSync(path.join(process.cwd(), 'src', 'backend', 'voice', 'voiceRuntime.ts'), 'utf-8');
     assert.match(src, /prepareProcessTmpDir\(tmpRoot/);
     assert.match(src, /new AudioStore\(tmp\.dir\)/);
+    assert.match(src, /RODRIGO_FILE_ROOTS:/);
     assert.match(src, /await audioStore\.dispose\(\)/);
     assert.ok(!/new AudioStore\(path\.join\(rootDir, '\.runtime', 'tmp'\)\)/.test(src), 'o AudioStore não pode voltar a usar a base compartilhada');
     assert.ok(!/cleanupAll\(\)/.test(src), 'nenhum rm -rf cego da base');

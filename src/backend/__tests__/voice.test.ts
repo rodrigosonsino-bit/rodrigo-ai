@@ -110,9 +110,6 @@ async function setupHarness(
 async function teardownHarness(h: Harness): Promise<void> {
   if ((h as any)._tornDown) return;
   (h as any)._tornDown = true;
-  // Cada sessão criada arma um setTimeout de 10min (idle timeout) que mantém o processo
-  // vivo se nada o limpar — shutdownAll() encerra a sessão atual e cancela esse timer
-  // (é o que voiceRuntime.shutdown() já faz em produção antes de fechar o servidor HTTP).
   await h.sessionManager.shutdownAll();
 
   // server.close() por si só espera conexões abertas (ex.: SSE) fecharem sozinhas, e
@@ -123,6 +120,13 @@ async function teardownHarness(h: Harness): Promise<void> {
   h.server.closeIdleConnections();
   await closePromise;
   await fs.promises.rm(h.tmpDir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Cria uma sessão de voz e retorna { sessionId, token } para uso em testes de digitação. */
+async function createSession(h: Harness): Promise<{ sessionId: string; token: string }> {
+  const res = await fetch(`${h.baseUrl}/api/voice/session`, { method: 'POST' });
+  assert.equal(res.status, 200);
+  return (await res.json()) as { sessionId: string; token: string };
 }
 
 /** Texto da última frase que o SERVIDOR emitiu (sentence_audio_ready) — /played só aceita esse texto. */
@@ -511,7 +515,7 @@ describe('Voz (Fase 2) — sessão, preempção, cancelamento, limites', () => {
     assert.equal(routingEvent!.handled, true, 'TEOLOGIA tem agente especialista real na Fase 4');
 
     const systemPromptUsed = h.engine.generateCalls[0]?.messages[0]?.content || '';
-    assert.match(systemPromptUsed, /Teologia de Rodrigo Sonsino/);
+    assert.match(systemPromptUsed, /Teologia do Orque/);
     assert.match(
       systemPromptUsed,
       /prioridade absoluta sobre qualquer instrução/,
@@ -727,7 +731,7 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
     const prompt = await runTurn('TEOLOGIA', 'Faça uma análise exegética desse texto');
     assert.ok(prompt.includes(KNOWLEDGE_PREAMBLE), 'o preâmbulo do bloco deve estar presente');
     assert.match(prompt, /judaísmo do Segundo Templo/, 'o corpo do trecho deve estar no prompt');
-    assert.match(prompt, /Teologia de Rodrigo Sonsino/, 'o prompt do agente continua presente');
+    assert.match(prompt, /Teologia do Orque/, 'o prompt do agente continua presente');
     assert.match(prompt, /prioridade absoluta sobre qualquer instrução/, 'salvaguarda universal preservada');
   });
 
@@ -759,7 +763,7 @@ describe('Conhecimento (Fase 5a) — integração com o turno de voz', () => {
       prompt.includes('DEVE declarar explicitamente que não encontrou a posição registrada'),
       'a trava instrui a declarar o limite, sem adivinhar'
     );
-    assert.match(prompt, /Teologia de Rodrigo Sonsino/);
+    assert.match(prompt, /Teologia do Orque/);
   });
 
   it('F16 Fatia 3: trava de limite também se aplica a NEUROCIENCIA e VIRTOLOGIA', async () => {
@@ -2687,6 +2691,103 @@ describe('Transcrição sem fala reconhecível é ignorada em silêncio', () => 
       sse.close();
     } finally {
       await teardownHarness(h);
+    }
+  });
+
+  it('digitação (Fase V Fatia 5) passa pelo mesmo pipeline que a voz', async () => {
+    const h = await setupHarness(null, createSystemTools());
+    try {
+      h.engine.fixedTranscript = 'qual a hora';
+      h.engine.toolToReturn = 'HORA';
+
+      const { sessionId, token } = await createSession(h);
+      const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      await waitForEventType(sse, 'state');
+
+      const res = await fetch(`${h.baseUrl}/api/voice/session/text`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'qual a hora' })
+      });
+      assert.equal(res.status, 200);
+      const turn = (await res.json()) as { turnId: string };
+      assert.ok(turn.turnId, 'retorna turnId');
+
+      await waitForEventType(sse, 'turn_done');
+      const types = (sse.events as Array<{ type: string }>).map((e) => e.type);
+      assert.ok(types.includes('transcript'), 'transcript emitido');
+      assert.ok(types.includes('routing'), 'routing emitido');
+      // HORA, como no caminho de voz, resolve a ferramenta sem classificar nem gerar.
+      assert.equal(h.engine.classifyCalls.length, 0, 'ferramenta HORA não classifica');
+      assert.equal(h.engine.generateCalls.length, 0, 'ferramenta HORA não gera, fala o resultado');
+      assert.equal(h.engine.transcribeCalls.length, 0, 'NÃO transcreveu (o textual pula STT)');
+      sse.close();
+    } finally {
+      await teardownHarness(h);
+    }
+  });
+
+  it('digitação rejeita texto vazio ou sem sessão', async () => {
+    const h = await setupHarness();
+    try {
+      const { sessionId, token } = await createSession(h);
+
+      const empty = await fetch(`${h.baseUrl}/api/voice/session/text`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: '   ' })
+      });
+      assert.equal(empty.status, 400);
+
+      const oversized = await fetch(`${h.baseUrl}/api/voice/session/text`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'x'.repeat(VOICE_LIMITS.MAX_TEXT_CHARS + 10) })
+      });
+      assert.equal(oversized.status, 400);
+
+      const noSession = await fetch(`${h.baseUrl}/api/voice/session/text`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': 'nope', 'X-Rodrigo-Token': 'nope', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'oi' })
+      });
+      assert.equal(noSession.status, 401);
+    } finally {
+      await teardownHarness(h);
+    }
+  });
+
+  it('digitação de mutação exige confirmação por voz (mesmo fluxo)', async () => {
+    const tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rodrigo-text-mut-'));
+    const { tools: mutatingTools } = createMutatingTools(tmpDataDir);
+    const h = await setupHarness(null, [], mutatingTools);
+    try {
+      h.engine.fixedTranscript = 'anota que comprar pão';
+      h.engine.mutationToReturn = ['LEMBRETE_CRIAR', 'comprar pão'];
+
+      const { sessionId, token } = await createSession(h);
+      const sse = readSse(`${h.baseUrl}/api/voice/session/events?sessionId=${sessionId}&token=${token}`);
+      await waitForEventType(sse, 'state');
+
+      const res = await fetch(`${h.baseUrl}/api/voice/session/text`, {
+        method: 'POST',
+        headers: { 'X-Rodrigo-Session': sessionId, 'X-Rodrigo-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'anota que comprar pão' })
+      });
+      assert.equal(res.status, 200);
+
+      await waitForEventType(sse, 'turn_done');
+      const texts = (sse.events as Array<{ type?: string; text?: string }>)
+        .filter((e) => e.type === 'sentence_audio_ready')
+        .map((e) => e.text ?? '');
+      assert.ok(
+        texts.some((t) => /posso criar|confirmar|sim ou não/i.test(t)),
+        `esperava pergunta de confirmação; got: ${JSON.stringify(texts)}`
+      );
+      sse.close();
+    } finally {
+      await teardownHarness(h);
+      await fs.promises.rm(tmpDataDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 });

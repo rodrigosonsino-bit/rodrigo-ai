@@ -14,8 +14,15 @@
 ## Conclusão
 Entrada **bloqueada** por G1 (sem português) e G4 (sua decisão). A novidade é que G2 deixou de ser impeditivo em tese. Se um dia G1 for resolvido (modelo com português, ou prova por teste com áudio em português), vale reabrir com plano próprio e auditoria. **Teste que o monitoramento mensal deve repetir:** buscar "PersonaPlex Portuguese", conferir o cartão no Hugging Face (idiomas) e o estado do porte MLX.
 
-## Fontes consultadas (2026-10-13)
+## Atualização e Reavaliação (2026-10-15)
+- **Consulta direta ao repositório no Hugging Face (`nvidia/personaplex-7b-v1`):** A NVIDIA e a comunidade confirmaram que o modelo não possui suporte a pt-BR devido à inexistência de datasets abertos de diálogo em canais separados (*split-channel conversational audio*) em português. Usuários relatam respostas em inglês ou fonemas truncados ao tentar falar em português.
+- **Plano de Integração e Auditoria:** Foi elaborado o plano [`docs/plans/t7-personaplex-spike-e-integracao.md`](file:///Users/rodrigosonsino/orca/workspaces/rodrigo-ai/halibut/docs/plans/t7-personaplex-spike-e-integracao.md) e submetido à auditoria adversarial via Claude Code em [`docs/audits/t7-personaplex-adversarial-audit.md`](file:///Users/rodrigosonsino/orca/workspaces/rodrigo-ai/halibut/docs/audits/t7-personaplex-adversarial-audit.md), recebendo o veredito formal **BLOQUEADO** (violação do critério G1, risco de concorrência de GPU/Metal no M5 de 16 GB e quebra do isolamento de rede do app).
+- **Decisão do Rodrigo (2026-10-15):** Diante da ausência de suporte ao português, o Rodrigo decidiu: *"vamos aguardar então"*.
+- **Estado ratificado:** A trilha T7 permanece **estritamente em monitoramento periódico**. Próxima checagem mensal agendada para **2026-11-13**.
+
+## Fontes consultadas (2026-10-13 e 2026-10-15)
 - Repositório oficial: https://github.com/NVIDIA/personaplex
+- Discussões de suporte multilíngue no Hugging Face: https://huggingface.co/nvidia/personaplex-7b-v1/discussions
 - Resumo do porte para Apple Silicon (Swift/MLX): https://feedbagel.com/post/nvidia-personaplex-7b-enables-real-time-speech-to-speech-on-apple-silicon-via-sw
 - Biblioteca `speech-swift`: https://github.com/soniqo/speech-swift
 - Guia de arquitetura (secundária): https://www.oflight.co.jp/en/columns/nvidia-personaplex-7b-full-duplex-voice-ai-guide-2026

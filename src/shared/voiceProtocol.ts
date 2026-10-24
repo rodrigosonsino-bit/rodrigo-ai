@@ -10,7 +10,26 @@ export type VoiceState = 'ouvindo' | 'processando' | 'falando' | 'aquecendo' | '
 export type OrchestratorLabel = 'GERAL' | 'TEOLOGIA' | 'VIRTOLOGIA' | 'NEUROCIENCIA' | 'AMBIGUO' | 'TELA';
 
 /** Fase 5b — nomes de ferramentas suportadas pelo sistema e detecção. */
-export const TOOL_NAMES = ['HORA', 'DATA', 'LEMBRETE_CONSULTAR', 'NOTA_CONSULTAR', 'MEMORIA_CONSULTAR', 'NENHUMA'] as const;
+/** Fase 17 — DELEGAR_CODIGO: intenção de nuvem para o ClaudeCodeSubAgent (não é ferramenta local). */
+export const TOOL_NAMES = [
+  'HORA',
+  'DATA',
+  'LEMBRETE_CONSULTAR',
+  'NOTA_CONSULTAR',
+  'MEMORIA_CONSULTAR',
+  'DESKTOP_COMANDO',
+  'DITADO_LOCAL',
+  'CONFIGURAR_VOZ',
+  'DELEGAR_CODIGO',
+  /**
+   * Camada Ogra: a fala segue para o webhook quando RODRIGO_OGRA=1.
+   * Não é ferramenta local e o worker de intenção não a emite (o roteamento é do app).
+   */
+  'DELEGAR_OGRA',
+  /** Automação desktop multi-passo (computer-use); só executa com RODRIGO_AUTO_DESKTOP=1. */
+  'AUTOMACAO_DESKTOP',
+  'NENHUMA'
+] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 export function isToolName(v: unknown): v is ToolName {
   return typeof v === 'string' && (TOOL_NAMES as readonly string[]).includes(v);
@@ -30,6 +49,14 @@ export const MUTATION_NAMES = [
   'MEMORIA_ESQUECER',
   // Fase 17: delegação ao Claude Code. Só nasce da detecção DETERMINÍSTICA no Node (claudeCode.ts); a nuvem nunca a propõe.
   'CLAUDE_DELEGAR',
+  'DESKTOP_CRITICO',
+  'DIGITAR_TEXTO',
+  'DIGITAR_INSERIR',
+  'DIGITAR_SUBSTITUIR_SELECAO',
+  'DIGITAR_ANEXAR',
+  'DIGITAR_LIMPAR_INSERIR',
+  'DIGITAR_TRADUZIR_INSERIR',
+  'AUTO_CORRECAO',
   'NENHUMA'
 ] as const;
 export type MutationName = (typeof MUTATION_NAMES)[number];
@@ -38,12 +65,18 @@ export function isMutationName(v: unknown): v is MutationName {
 }
 
 /**
- * Fase 14 — as 3 ações `*_CONSULTAR` são LEITURA, não mutação (vivem em TOOL_NAMES, não em
- * MUTATION_NAMES), mas são detectadas pelo mesmo pipeline de detecção de mutação (é ele que
- * extrai o termo de busca da fala). Este predicado existe pra quem precisa reconhecer as duas
- * famílias juntas (o gate de entrada no pipeline) sem também aceitar HORA/DATA/NENHUMA.
+ * Fase 14 — as ações `*_CONSULTAR` e os comandos imediatos com parâmetro (`DESKTOP_COMANDO`,
+ * `DITADO_LOCAL`, `CONFIGURAR_VOZ`) não exigem confirmação de duas fases (vivem em TOOL_NAMES,
+ * não em MUTATION_NAMES), mas são detectadas pelo mesmo pipeline que extrai `content` da fala.
  */
-export const QUERY_NAMES = ['LEMBRETE_CONSULTAR', 'NOTA_CONSULTAR', 'MEMORIA_CONSULTAR'] as const;
+export const QUERY_NAMES = [
+  'LEMBRETE_CONSULTAR',
+  'NOTA_CONSULTAR',
+  'MEMORIA_CONSULTAR',
+  'DESKTOP_COMANDO',
+  'DITADO_LOCAL',
+  'CONFIGURAR_VOZ'
+] as const;
 export type QueryName = (typeof QUERY_NAMES)[number];
 export function isQueryName(v: unknown): v is QueryName {
   return typeof v === 'string' && (QUERY_NAMES as readonly string[]).includes(v);
@@ -120,6 +153,17 @@ export interface ErrorEvent {
   turnId?: string;
 }
 
+/**
+ * Espera da Ogra, só visual. `start` quando a fala é enviada ao webhook.
+ * `stop` quando a resposta começa a ser falada, no prazo, no cancelamento ou no erro.
+ * Não carrega áudio.
+ */
+export interface OgraWaitingEvent {
+  type: 'ogra_waiting';
+  phase: 'start' | 'stop';
+  turnId?: string;
+}
+
 export type VoiceServerEvent =
   | StateEvent
   | TranscriptEvent
@@ -129,7 +173,8 @@ export type VoiceServerEvent =
   | SessionPreemptedEvent
   | ScreenRequestEvent
   | VoiceNoticeEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | OgraWaitingEvent;
 
 export interface CreateSessionResponse {
   sessionId: string;
@@ -158,7 +203,10 @@ export const VOICE_LIMITS = {
   MAX_AUDIO_SECONDS: 20,
   MAX_TEXT_CHARS: 2000,
   MAX_TURN_TOKENS: 160,
-  MAX_CONTEXT_TURNS: 8,
+  /** Teto máximo de turnos permitidos para histórico configurável (1..100 turnos => até 200 mensagens em memória). */
+  MAX_CONTEXT_TURNS: 100,
+  /** Padrão de produção para histórico enviado ao modelo (30 turnos => até 60 mensagens). */
+  DEFAULT_CONTEXT_TURNS: 30,
   MAX_CONTEXT_TOKENS: 4096,
   TURN_TIMEOUT_MS: 60_000,
   CLASSIFY_TIMEOUT_MS: 10_000,
@@ -169,7 +217,7 @@ export const VOICE_LIMITS = {
   DETECT_CONFIRMATION_TIMEOUT_MS: 10_000,
   PENDING_MUTATION_TTL_MS: 60_000,
   WARMUP_TIMEOUT_MS: 120_000,
-  IDLE_TIMEOUT_MS: 10 * 60_000,
+  IDLE_TIMEOUT_MS: 60 * 60_000,
   WORKER_SHUTDOWN_GRACE_MS: 3_000,
   /** Fase V §4: do screen_request até o quadro chegar (ou a resposta vira "compartilhe a tela e pergunte de novo"). */
   SCREEN_CAPTURE_TIMEOUT_MS: 5_000,
@@ -206,7 +254,8 @@ export const GENERATION_FAILURE_TEXT = 'Não consegui pensar numa resposta agora
 /** Fase V, fatia 2: o caminho de tela existe, mas a visão chega na fatia 4. Dito quando a CAPTURA deu certo. */
 export const SCREEN_NOT_READY_TEXT = 'Ainda estou aprendendo a enxergar a tela. Em breve consigo te ajudar com isso.';
 /** Fase V, fatia 3: sem compartilhamento ativo, captureId vencido/rejeitado, ou upload inválido. */
-export const SCREEN_SHARE_NEEDED_TEXT = 'Compartilhe a tela no botão da página e pergunte de novo.';
+export const SCREEN_SHARE_NEEDED_TEXT =
+  'Não consegui ver a tela. No app, conceda Gravação de Tela ao Rodrigo AI em Ajustes do Sistema, ou use o botão Compartilhar tela e pergunte de novo.';
 
 /** Fase 5a — consulta léxica local ao material de referência (docs/research). */
 export const KNOWLEDGE_LIMITS = {

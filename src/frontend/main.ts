@@ -1,6 +1,20 @@
-import type { HealthResponse, PrivacyStatus, TtsStatus } from '../shared/types.ts';
+import type { HealthResponse, PrivacyStatus, TtsStatus, UsageStatus } from '../shared/types.ts';
 import { describePrivacy, describeTtsStatus, PRIVACY_UNAVAILABLE_TEXT, PRIVACY_FOOTNOTE } from '../shared/privacyText.ts';
 import { VoiceController } from './voice.ts';
+
+// Ponte de logs para o processo desktop nativo (macOS WKWebView)
+const _postToNative = (level: string, ...args: any[]) => {
+  try {
+    const text = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    (window as any).webkit?.messageHandlers?.consoleLog?.postMessage(`[web:${level}] ${text}`);
+  } catch {}
+};
+const _origLog = console.log;
+console.log = (...args: any[]) => { _origLog(...args); _postToNative('log', ...args); };
+const _origWarn = console.warn;
+console.warn = (...args: any[]) => { _origWarn(...args); _postToNative('warn', ...args); };
+const _origError = console.error;
+console.error = (...args: any[]) => { _origError(...args); _postToNative('err', ...args); };
 
 // Elementos da interface do usuário
 const statusContainer = document.getElementById('health-status-container') as HTMLDivElement;
@@ -116,6 +130,26 @@ retryButton.addEventListener('click', () => {
   checkHealth();
 });
 
+const closePanelBtn = document.getElementById('close-panel-btn') as HTMLButtonElement | null;
+if (closePanelBtn) {
+  closePanelBtn.addEventListener('click', () => {
+    try {
+      (window as any).webkit?.messageHandlers?.closePanel?.postMessage('close');
+    } catch {
+      window.close();
+    }
+  });
+}
+
+const minimizePanelBtn = document.getElementById('minimize-panel-btn') as HTMLButtonElement | null;
+if (minimizePanelBtn) {
+  minimizePanelBtn.addEventListener('click', () => {
+    try {
+      (window as any).webkit?.messageHandlers?.minimizePanel?.postMessage('minimize');
+    } catch {}
+  });
+}
+
 // --- Privacidade (Fase 12): lê GET /api/privacy e mostra o que fica local e o que vai ao Gemini ---
 
 function isPrivacyStatus(value: unknown): value is PrivacyStatus {
@@ -197,12 +231,100 @@ async function loadTtsStatus(): Promise<void> {
   }
 }
 
+// --- Uso hoje: gasto PRÓPRIO com o Gemini (GET /api/usage, só números agregados) ---
+
+const USAGE_SOURCE_NAMES: Record<string, string> = {
+  geracao: 'Respostas',
+  intencao: 'Intenções',
+  visao: 'Tela (nuvem)',
+  tts: 'Voz'
+};
+
+function isUsageStatus(value: unknown): value is UsageStatus {
+  const v = value as Partial<UsageStatus> | null;
+  return (
+    !!v &&
+    typeof v.day === 'string' &&
+    typeof v.resetInMs === 'number' &&
+    Array.isArray(v.models) &&
+    v.models.every(
+      (m) =>
+        !!m &&
+        typeof (m as { source?: unknown }).source === 'string' &&
+        typeof (m as { model?: unknown }).model === 'string' &&
+        typeof (m as { req?: unknown }).req === 'number' &&
+        typeof (m as { pct?: unknown }).pct === 'number'
+    )
+  );
+}
+
+function formatResetIn(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${String(m).padStart(2, '0')}min` : `${m}min`;
+}
+
+async function loadUsage(): Promise<void> {
+  const resetEl = document.getElementById('usage-reset') as HTMLParagraphElement;
+  const rowsEl = document.getElementById('usage-rows') as HTMLDivElement;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('/api/usage', { headers: { Accept: 'application/json' }, signal: controller.signal });
+    if (!response.ok) throw new Error(`código ${response.status}`);
+    const data: unknown = await response.json();
+    if (!isUsageStatus(data)) throw new Error('formato não reconhecido');
+    resetEl.textContent = `Zera em ${formatResetIn(data.resetInMs)}.`;
+    rowsEl.replaceChildren();
+    if (data.models.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'cost-note';
+      p.textContent = 'Nenhuma chamada ao Gemini hoje — tudo local, custo zero.';
+      rowsEl.appendChild(p);
+      return;
+    }
+    for (const row of data.models) {
+      const pct = Math.max(0, Math.min(1, row.pct));
+      const wrap = document.createElement('div');
+      wrap.className = 'usage-row';
+      const label = document.createElement('div');
+      label.className = 'usage-label';
+      const name = document.createElement('span');
+      name.textContent = `${USAGE_SOURCE_NAMES[row.source] ?? row.source} · ${row.model}`;
+      const nums = document.createElement('span');
+      nums.className = 'usage-nums';
+      const tokens = row.inTokens + row.outTokens;
+      nums.textContent = `${Math.round(pct * 100)}% · ${row.req} req · ${tokens.toLocaleString('pt-BR')} tok (teto ${row.cap}/dia)`;
+      label.append(name, nums);
+      const bar = document.createElement('div');
+      bar.className = 'usage-bar';
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-valuenow', String(Math.round(pct * 100)));
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      const fill = document.createElement('div');
+      fill.className = 'usage-fill' + (pct >= 1 ? ' usage-fill-full' : '');
+      fill.style.width = `${Math.round(pct * 100)}%`;
+      bar.appendChild(fill);
+      wrap.append(label, bar);
+      rowsEl.appendChild(wrap);
+    }
+  } catch {
+    resetEl.textContent = 'Gasto do dia indisponível (voz local desligada ou sem resposta).';
+    rowsEl.replaceChildren();
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
 // Verificação inicial ao carregar a página
 document.addEventListener('DOMContentLoaded', () => {
   checkHealth();
   void loadPrivacy();
   void loadTtsStatus();
+  void loadUsage();
   window.setInterval(() => void loadTtsStatus(), 15_000);
+  window.setInterval(() => void loadUsage(), 60_000);
 });
 
 // --- Conversa por Voz (Fase 2) ---
@@ -217,6 +339,20 @@ const voiceScreenBtn = document.getElementById('voice-screen-btn') as HTMLButton
 const voiceScreenNote = document.getElementById('voice-screen-note') as HTMLParagraphElement;
 const voiceTranscriptLog = document.getElementById('voice-transcript-log') as HTMLDivElement;
 const voiceAgentIndicator = document.getElementById('voice-agent-indicator') as HTMLSpanElement;
+const ograWaitingEl = document.getElementById('ogra-waiting') as HTMLElement;
+
+let ograWaiting = false;
+
+function publishVoiceIcon(state: string): void {
+  const shown = muted ? 'mutado' : ograWaiting && state !== 'falando' ? 'aguardando' : state;
+  (window as unknown as { webkit?: { messageHandlers?: { iconState?: { postMessage: (s: string) => void } } } }).webkit?.messageHandlers?.iconState?.postMessage(shown);
+}
+
+function setOgraWaiting(waiting: boolean): void {
+  ograWaiting = waiting;
+  ograWaitingEl.hidden = !waiting;
+  publishVoiceIcon(voiceController.getState());
+}
 
 const VOICE_STATE_LABELS: Record<string, string> = {
   idle: 'Parado — clique em "Iniciar conversa" para começar.',
@@ -249,7 +385,7 @@ function resetAgentIndicator(): void {
   voiceAgentIndicator.textContent = '';
 }
 
-function appendTranscriptEntry(speaker: 'Você' | 'Rodrigo AI', text: string): void {
+function appendTranscriptEntry(speaker: 'Você' | 'Orque', text: string): void {
   const entry = document.createElement('p');
   entry.className = 'transcript-entry';
   const strong = document.createElement('strong');
@@ -277,17 +413,18 @@ function appendNoticeEntry(message: string): void {
 }
 
 const voiceController = new VoiceController(
-  (state) => {
-    voiceStateContainer.className = `voice-state voice-state-${state}`;
-    voiceStateText.textContent = VOICE_STATE_LABELS[state] || state;
-    voiceInterruptBtn.disabled = state !== 'falando';
-    // Novo turno começando (processando) ou erro: o rótulo do turno anterior não vale mais.
-    if (state === 'processando' || state === 'erro') {
-      resetAgentIndicator();
-    }
-  },
+    (state) => {
+      voiceStateContainer.className = `voice-state voice-state-${state}`;
+      voiceStateText.textContent = VOICE_STATE_LABELS[state] || state;
+      voiceInterruptBtn.disabled = state !== 'falando';
+      // Novo turno começando (processando) ou erro: o rótulo do turno anterior não vale mais.
+      if (state === 'processando' || state === 'erro') {
+        resetAgentIndicator();
+      }
+      publishVoiceIcon(state);
+    },
   (text) => appendTranscriptEntry('Você', text),
-  (text) => appendTranscriptEntry('Rodrigo AI', text),
+  (text) => appendTranscriptEntry('Orque', text),
   (message) => appendErrorEntry(message),
   (_turnId, label, _handled) => {
     // Checa o rótulo explicitamente (não `handled`) — `!handled` sozinho não garante
@@ -303,7 +440,8 @@ const voiceController = new VoiceController(
     voiceScreenBtn.textContent = sharing ? 'Parar compartilhamento' : 'Compartilhar tela';
     voiceScreenNote.hidden = !sharing;
   },
-  (message) => appendNoticeEntry(message)
+  (message) => appendNoticeEntry(message),
+  (waiting) => setOgraWaiting(waiting)
 );
 
 voiceStartBtn.addEventListener('click', () => {
@@ -333,14 +471,12 @@ voiceEndBtn.addEventListener('click', () => {
     voiceMuteBtn.setAttribute('aria-pressed', 'false');
     voiceMuteBtn.textContent = 'Silenciar microfone';
     resetAgentIndicator();
+    setOgraWaiting(false);
   })();
 });
 
 voiceMuteBtn.addEventListener('click', () => {
-  muted = !muted;
-  voiceController.muteMicrophone(muted);
-  voiceMuteBtn.setAttribute('aria-pressed', String(muted));
-  voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+  setMutedUi(!muted);
 });
 
 voiceInterruptBtn.addEventListener('click', () => {
@@ -454,3 +590,147 @@ setInterval(() => void refreshClaudeCard(), 3000);
 window.addEventListener('beforeunload', () => {
   void voiceController.stop();
 });
+
+// --- Entrada por texto (sempre visível) ---
+// Mesmo pipeline da voz: /api/voice/session/text → submitText → processTranscript.
+// Sem sessão: abre uma e silencia o microfone (você escreveu porque não queria falar).
+const voiceTypeInput = document.getElementById('voice-type-input') as HTMLTextAreaElement;
+const voiceTypeSend = document.getElementById('voice-type-send') as HTMLButtonElement;
+
+function setMutedUi(next: boolean): void {
+  muted = next;
+  voiceController.muteMicrophone(muted);
+  voiceMuteBtn.setAttribute('aria-pressed', String(muted));
+  voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+}
+
+async function ensureSessionForTyping(): Promise<boolean> {
+  const { sessionId } = voiceController.getVoiceSession();
+  if (sessionId) return true;
+  voiceStartBtn.disabled = true;
+  try {
+    await voiceController.start();
+    voiceEndBtn.disabled = false;
+    voiceMuteBtn.disabled = false;
+    voiceScreenBtn.disabled = false;
+    setMutedUi(true);
+    return true;
+  } catch (error) {
+    appendErrorEntry(formatPortugueseErrorMessage(error));
+    voiceStartBtn.disabled = false;
+    return false;
+  }
+}
+
+async function submitTextTurn(text: string): Promise<void> {
+  voiceTypeSend.disabled = true;
+  voiceTypeInput.disabled = true;
+  try {
+    const ready = await ensureSessionForTyping();
+    if (!ready) return;
+    const headers = voiceController.getVoiceHeaders();
+    const res = await fetch('/api/voice/session/text', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: 'Erro ao enviar texto.' }));
+      appendErrorEntry(body.error || 'Erro ao enviar texto.');
+      return;
+    }
+    const textTurn = (await res.json()) as { turnId: string };
+    console.log('[digitação] turnId=', textTurn.turnId);
+    // Liga o player ao turno — sem isso o áudio SSE é descartado (currentTurnId null).
+    voiceController.beginTextTurn(textTurn.turnId);
+    // O transcript "Você" vem pelo SSE (processTranscript); não duplicar aqui.
+    voiceTypeInput.value = '';
+  } catch (err) {
+    appendErrorEntry(formatPortugueseErrorMessage(err));
+  } finally {
+    voiceTypeSend.disabled = false;
+    voiceTypeInput.disabled = false;
+    voiceTypeInput.focus();
+  }
+}
+
+voiceTypeSend.addEventListener('click', () => {
+  const text = voiceTypeInput.value.trim();
+  if (text) void submitTextTurn(text);
+});
+
+voiceTypeInput.addEventListener('keydown', (ev: KeyboardEvent) => {
+  if (ev.key === 'Enter' && !ev.shiftKey) {
+    ev.preventDefault();
+    const text = voiceTypeInput.value.trim();
+    if (text) void submitTextTurn(text);
+  }
+});
+
+(window as any).__focusType = (): string => {
+  voiceTypeInput.focus();
+  return 'focused';
+};
+
+// Exposed for native Swift desktop app via callAsyncJavaScript
+(window as any).__startVoice = async (): Promise<string> => {
+  try {
+    if (!voiceEndBtn.disabled) return 'already_active';
+    voiceStartBtn.disabled = true;
+    await voiceController.start();
+    voiceEndBtn.disabled = false;
+    voiceMuteBtn.disabled = false;
+    voiceScreenBtn.disabled = false;
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage('ouvindo');
+    return 'started';
+  } catch (e) {
+    voiceStartBtn.disabled = false;
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage('idle');
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
+
+(window as any).__stopVoice = async (): Promise<string> => {
+  try {
+    await voiceController.stop();
+    voiceStartBtn.disabled = false;
+    voiceEndBtn.disabled = true;
+    voiceMuteBtn.disabled = true;
+    voiceInterruptBtn.disabled = true;
+    voiceScreenBtn.disabled = true;
+    muted = false;
+    voiceMuteBtn.setAttribute('aria-pressed', 'false');
+    voiceMuteBtn.textContent = 'Silenciar microfone';
+    resetAgentIndicator();
+    setOgraWaiting(false);
+    (window as any).webkit?.messageHandlers?.iconState?.postMessage('idle');
+    return 'stopped';
+  } catch (e) {
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
+
+(window as any).__toggleMute = async (): Promise<string> => {
+  try {
+    const vs = voiceController.getState();
+    if (vs === 'idle' || vs === 'erro') return 'not_active';
+    muted = !muted;
+    voiceController.muteMicrophone(muted);
+    voiceMuteBtn.setAttribute('aria-pressed', String(muted));
+    voiceMuteBtn.textContent = muted ? 'Reativar microfone' : 'Silenciar microfone';
+    publishVoiceIcon(voiceController.getState());
+    return muted ? 'muted' : 'unmuted';
+  } catch (e) {
+    return 'error:' + (e instanceof Error ? e.message : String(e));
+  }
+};
+
+(window as any).__toggleVoice = async (): Promise<string> => {
+  if (!voiceEndBtn.disabled) {
+    return (window as any).__stopVoice();
+  }
+  return (window as any).__startVoice();
+};

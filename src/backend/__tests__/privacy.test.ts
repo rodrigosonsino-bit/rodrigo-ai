@@ -13,20 +13,25 @@ import type { ConversationMessage } from '../../shared/voiceProtocol.js';
 import { freePort } from './helpers/freePort.js';
 
 describe('parsePrivacyConfig (Fase 12)', () => {
-  it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1), a imagem da tela (Fase V), a busca web e o Claude Code (Fase 17)', () => {
+  it('padrões de produção: tudo ligado exceto o trecho de pesquisa (D1), a imagem da tela (Fase V), a busca web e o Claude Code', () => {
     assert.deepEqual(DEFAULT_PRIVACY, {
       cloud: true,
       cloudIntent: true,
       sendHistory: true,
-      historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS,
+      historyTurns: VOICE_LIMITS.DEFAULT_CONTEXT_TURNS,
+      idleTimeoutMinutes: 60,
       sendMemories: true,
       sendKnowledge: false,
       cloudTts: true,
       ttsDictated: true,
       cloudVision: false,
       webSearch: false,
+      outboundGuard: 'redact',
       claudeCode: false,
-      outboundGuard: 'redact'
+      autoDesktop: false,
+      ogra: false,
+      ograFallback: true,
+      ograReplyTimeoutMs: 120_000
     });
   });
 
@@ -53,8 +58,19 @@ describe('parsePrivacyConfig (Fase 12)', () => {
 
   it('HISTORY_TURNS: inteiro 1..MAX, sem zero à esquerda, sem texto', () => {
     assert.equal(parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: '3' }).historyTurns, 3);
+    assert.equal(parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: '30' }).historyTurns, 30);
+    assert.equal(parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: '100' }).historyTurns, 100);
     for (const bad of ['0', '09', '-1', '3.5', 'abc', String(VOICE_LIMITS.MAX_CONTEXT_TURNS + 1), '１２']) {
       assert.throws(() => parsePrivacyConfig({ RODRIGO_HISTORY_TURNS: bad }), /RODRIGO_HISTORY_TURNS/, bad);
+    }
+  });
+
+  it('IDLE_TIMEOUT_MINUTES: inteiro 1..1440, sem zero à esquerda, sem texto ou notação científica', () => {
+    assert.equal(parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: '1' }).idleTimeoutMinutes, 1);
+    assert.equal(parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: '60' }).idleTimeoutMinutes, 60);
+    assert.equal(parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: '1440' }).idleTimeoutMinutes, 1440);
+    for (const bad of ['0', '09', '-1', '1.5', '1e3', '1441', 'abc', ' 1 x']) {
+      assert.throws(() => parsePrivacyConfig({ RODRIGO_IDLE_TIMEOUT_MINUTES: bad }), /RODRIGO_IDLE_TIMEOUT_MINUTES/, bad);
     }
   });
 
@@ -179,11 +195,24 @@ describe('effectivePrivacy (Fase 12)', () => {
       mode: 'cloud',
       intent: 'gemini',
       keyPresent: true,
-      sends: { utteranceForIntent: true, history: true, historyTurns: VOICE_LIMITS.MAX_CONTEXT_TURNS, memories: true, knowledgeSnippet: true, ttsText: true, visionImage: true, webSearch: false, claudeCode: false },
+      sends: {
+        utteranceForIntent: true,
+        history: true,
+        historyTurns: VOICE_LIMITS.DEFAULT_CONTEXT_TURNS,
+        memories: true,
+        knowledgeSnippet: true,
+        ttsText: true,
+        visionImage: true,
+        webSearch: false,
+        claudeCodeOrder: false,
+        ograUtterance: false
+      },
       models: { generation: 'gemini-flash-latest', intent: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
       tts: { cloud: true, reason: null, dictatedViaCloud: true },
       webSearch: { enabled: false, reason: 'channel-off' },
       claudeCode: { enabled: false, reason: 'channel-off' },
+      autoDesktop: { enabled: false, reason: 'flag-off' },
+      ogra: { enabled: false },
       neverSends: ['audio'],
       outboundGuard: 'redact'
     };
@@ -191,10 +220,28 @@ describe('effectivePrivacy (Fase 12)', () => {
   });
 
   it('mestre desligado: nada sai, mesmo com os sub-controles ligados', () => {
-    const st = effectivePrivacy({ RODRIGO_CLOUD: '0', RODRIGO_SEND_KNOWLEDGE: '1', RODRIGO_SEND_MEMORIES: '1', RODRIGO_WEB_SEARCH: '1', RODRIGO_CLOUD_VISION: '1' });
+    const st = effectivePrivacy({
+      RODRIGO_CLOUD: '0',
+      RODRIGO_SEND_KNOWLEDGE: '1',
+      RODRIGO_SEND_MEMORIES: '1',
+      RODRIGO_WEB_SEARCH: '1',
+      RODRIGO_CLOUD_VISION: '1',
+      RODRIGO_CLAUDE_CODE: '1'
+    });
     assert.equal(st.mode, 'local-only');
     assert.equal(st.intent, 'local');
-    assert.deepEqual(st.sends, { utteranceForIntent: false, history: false, historyTurns: null, memories: false, knowledgeSnippet: false, ttsText: false, visionImage: false, webSearch: false, claudeCode: false });
+    assert.deepEqual(st.sends, {
+      utteranceForIntent: false,
+      history: false,
+      historyTurns: null,
+      memories: false,
+      knowledgeSnippet: false,
+      ttsText: false,
+      visionImage: false,
+      webSearch: false,
+      claudeCodeOrder: false,
+      ograUtterance: false
+    });
     assert.deepEqual(st.models, { generation: null, intent: null, tts: null });
     assert.deepEqual(st.tts, { cloud: false, reason: 'master-off', dictatedViaCloud: false });
     assert.deepEqual(st.webSearch, { enabled: false, reason: 'master-off' });
@@ -283,7 +330,7 @@ describe('describePrivacy — o texto do cartão acompanha cada controle (Fase 1
   it('nuvem ligada: o histórico, a intenção, as memórias e o trecho aparecem com o estado certo', () => {
     const on = describePrivacy(effectivePrivacy({ GEMINI_API_KEY: 'x', RODRIGO_SEND_KNOWLEDGE: '1' }));
     assert.match(on.headline, /usa a nuvem \(Gemini\)/);
-    assert.ok(on.goes.some((l) => /últimas 8 trocas/.test(l) && /nota ou memória/.test(l)), 'declara que conteúdo de nota/memória repetido na conversa vai junto');
+    assert.ok(on.goes.some((l) => new RegExp(`últimas ${VOICE_LIMITS.DEFAULT_CONTEXT_TURNS} trocas`).test(l) && /nota ou memória/.test(l)), 'declara que conteúdo de nota/memória repetido na conversa vai junto');
     assert.ok(on.goes.some((l) => /memórias que você salvou são enviadas/.test(l)));
     assert.ok(on.goes.some((l) => /Trechos dos seus textos de pesquisa .* são enviados/.test(l)));
     assert.ok(on.goes.some((l) => /hora, data, lembretes e notas também vai ao Gemini/.test(l)));

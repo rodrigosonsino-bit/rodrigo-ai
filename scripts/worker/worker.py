@@ -34,6 +34,7 @@ import traceback
 import urllib.parse
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from outbound_guard import guard_messages, guard_text  # T1: guarda de saída (camada em profundidade)
@@ -48,6 +49,11 @@ CACHE_LIMIT_BYTES = 1024 * 1024 * 1024  # 1 GiB — Achado v2-8: API moderna, n�
 LLM_MODEL_ID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 VISION_MODEL_ID = os.environ.get("RODRIGO_VISION_MODEL", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")
 CLASSIFICATION_LABELS = frozenset({"GERAL", "TEOLOGIA", "VIRTOLOGIA", "NEUROCIENCIA", "AMBIGUO"})
+# Comandos que o stdin_reader_loop aceita na work_queue (fila de tamanho 1).
+# Todo comando tratado no work_loop precisa estar aqui, senão cai em
+# "Comando desconhecido ignorado" (foi o caso de describe_screen, achado 2026-10-15).
+QUEUED_COMMANDS = ("transcribe", "classify", "generate", "detect_tool", "detect_mutation",
+                   "detect_confirmation", "detect_intent", "describe_screen")
 CLASSIFICATION_SYSTEM_PROMPT = (
     "Você classifica uma frase do usuário em EXATAMENTE uma categoria. "
     "Responda com UMA ÚNICA PALAVRA, sem pontuação, sem explicação: "
@@ -135,21 +141,28 @@ MUTATION_NAMES = {
     "LEMBRETE_CRIAR", "LEMBRETE_EDITAR", "LEMBRETE_APAGAR", "LEMBRETE_REAGENDAR", "LEMBRETE_CONSULTAR",
     "NOTA_CRIAR", "NOTA_EDITAR", "NOTA_APAGAR", "NOTA_CONSULTAR",
     "MEMORIA_GUARDAR", "MEMORIA_EDITAR", "MEMORIA_ESQUECER", "MEMORIA_CONSULTAR",
+    "DESKTOP_COMANDO", "DESKTOP_CRITICO", "DIGITAR_TEXTO", "DIGITAR_INSERIR", "DIGITAR_SUBSTITUIR_SELECAO",
+    "DIGITAR_ANEXAR", "DIGITAR_LIMPAR_INSERIR", "DIGITAR_TRADUZIR_INSERIR",
+    "DITADO_LOCAL", "CONFIGURAR_VOZ", "AUTO_CORRECAO",
     "NENHUMA"
 }
-# Fase 14: as 3 ações *_CONSULTAR são LEITURA, não mutação — mas detectadas pelo mesmo
-# handler (detect_mutation) porque é ele que já extrai conteúdo/filtro da fala. O Node
-# (sessionManager.ts) sabe que estas não passam por confirmação; ver IMutatingTool.
-QUERY_NAMES = {"LEMBRETE_CONSULTAR", "NOTA_CONSULTAR", "MEMORIA_CONSULTAR"}
+# Fase 14 + Controle de Desktop/Voz: ações em QUERY_NAMES têm isMutation=False no Node
+# (sessionManager.ts) e executam sem confirmação de 2 fases; ações fora de QUERY_NAMES
+# exigem confirmação explícita SIM.
+OPTIONAL_CONTENT_QUERY_NAMES = {"LEMBRETE_CONSULTAR", "NOTA_CONSULTAR", "MEMORIA_CONSULTAR"}
+QUERY_NAMES = OPTIONAL_CONTENT_QUERY_NAMES | {"DESKTOP_COMANDO", "DITADO_LOCAL", "CONFIGURAR_VOZ"}
+STRUCTURED_ACTION_NAMES = {"DESKTOP_COMANDO", "DESKTOP_CRITICO", "CONFIGURAR_VOZ"}
+PREFIXED_CONTENT_RE = re.compile(
+    r"^(?:(?:app|alvo|em)\s*:[^|]+\|\s*)?(?:texto|limpar|traduzir_pt|traduzir:[a-z]{2,5})\s*:\s*",
+    re.IGNORECASE,
+)
+APP_TARGET_PREFIX_RE = re.compile(r"^(?:app|alvo|em)\s*:[^|]+\|\s*", re.IGNORECASE)
 MAX_MUTATION_CONTENT_CHARS = 200
 
 DETECT_MUTATION_SYSTEM_PROMPT = (
-    "Você decide se a frase do usuário pede para CRIAR, EDITAR, APAGAR, REAGENDAR ou CONSULTAR "
-    "um LEMBRETE, uma NOTA ou uma MEMÓRIA, ou NENHUMA das treze. Responda em UMA LINHA: AÇÃO, ou "
-    "AÇÃO|conteúdo para *_CRIAR, *_EDITAR, *_REAGENDAR, *_CONSULTAR e MEMORIA_GUARDAR (o texto do "
-    "que deve ser lembrado/anotado/guardado/corrigido/reagendado/procurado, sem aspas, sem "
-    "explicação extra; em *_CONSULTAR o conteúdo é o termo de busca e pode ficar vazio se o "
-    "pedido for 'todos'/'tudo').\n"
+    "Você decide se a frase do usuário pede uma ação de LEMBRETE, NOTA, MEMÓRIA, CONTROLE DO COMPUTADOR, "
+    "DIGITAÇÃO/DITADO, CONFIGURAÇÃO DE VOZ, AUTO-CORREÇÃO DE CÓDIGO, ou NENHUMA. Responda em UMA LINHA: "
+    "AÇÃO, ou AÇÃO|conteúdo.\n"
     "LEMBRETE_CRIAR: um compromisso, tarefa ou coisa temporária a fazer — 'lembra de', 'não "
     "deixa eu esquecer', 'anota aí que eu preciso', 'bota um lembrete pra'.\n"
     "LEMBRETE_EDITAR: pede pra CORRIGIR ou TROCAR o TEXTO do lembrete mais recente, sem criar "
@@ -174,21 +187,39 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "NOTA_CONSULTAR: pede pra OUVIR o que foi anotado, sem mudar nada — 'o que eu anotei sobre "
     "X', 'minhas notas sobre viagem'. content = o termo de busca, ou vazio por todas.\n"
     "MEMORIA_GUARDAR: um FATO ou PREFERÊNCIA sobre o próprio usuário, pra você lembrar quem ele é — "
-    "'lembra que eu prefiro', 'guarda que meu nome é', 'anota que eu gosto de'. Diferença de "
-    "LEMBRETE_CRIAR: aqui não é uma TAREFA a fazer num momento futuro, é uma INFORMAÇÃO SOBRE A "
-    "PESSOA que vale pra sempre. Diferença de NOTA_CRIAR: nota é uma ideia ou observação qualquer "
-    "(sobre qualquer assunto); memória é especificamente um fato sobre QUEM O USUÁRIO É — nome, "
-    "preferência, restrição, característica pessoal.\n"
+    "'lembra que eu prefiro', 'guarda que meu nome é', 'anota que eu gosto de'.\n"
     "MEMORIA_EDITAR: mesma ideia, mas pra memória.\n"
-    "MEMORIA_ESQUECER: pede pra apagar o fato mais recente guardado sobre o usuário — 'apaga essa "
-    "memória sobre mim', 'apaga o que você guardou sobre mim'. Diferença de LEMBRETE_APAGAR: aquele "
-    "apaga uma TAREFA pendente; este apaga um FATO sobre a pessoa.\n"
-    "MEMORIA_CONSULTAR: pede pra OUVIR o que você guardou sobre ele, sem mudar nada — 'o que você "
-    "lembra sobre mim', 'o que você sabe sobre meu time'. content = o termo de busca, ou vazio "
-    "por tudo.\n"
-    "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum, e qualquer "
-    "menção a lembrar/anotar que não seja um pedido direto de ação (ex.: 'eu lembro que você "
-    "me falou isso' é NENHUMA, é o usuário lembrando de algo, não pedindo pra você lembrar).\n"
+    "MEMORIA_ESQUECER: pede pra apagar o fato mais recente guardado sobre o usuário.\n"
+    "MEMORIA_CONSULTAR: pede pra OUVIR o que você guardou sobre ele, sem mudar nada.\n"
+    "DESKTOP_COMANDO: comando imediato e reversível do computador macOS: "
+    "'volume_up' (aumentar volume), 'volume_down' (abaixar volume), 'volume_set:<0..100>' (volume em X%), "
+    "'volume_mute' (mutar som), 'volume_unmute' (desmutar som), 'media_play_pause' (tocar/pausar música), "
+    "'media_next' (próxima música), 'media_prev' (música anterior), 'open_app:<Nome>' (abrir Safari, Notas, "
+    "Calendário, Música, Spotify, Finder, Calculadora, Ajustes, WhatsApp, Mail, Mensagens, DitadoLocal), "
+    "'dark_mode:on' (modo escuro), 'dark_mode:off' (modo claro), 'dark_mode:toggle' (alternar tema), "
+    "'window_minimize' (minimizar janela atual), 'open_folder:downloads|documentos|desktop'.\n"
+    "DESKTOP_CRITICO: comando destrutivo ou de bloqueio do macOS (exige confirmação): "
+    "'app_quit:<Nome>' (fechar aplicativo), 'empty_trash' (esvaziar lixeira), "
+    "'lock_screen' (bloquear tela), 'system_sleep' (suspender/dormir o Mac), "
+    "'system_restart' (reiniciar o Mac), 'system_shutdown' (desligar o Mac).\n"
+    "DIGITAR_TEXTO: digitar/colar texto no aplicativo em foco ('texto:<conteúdo>') ou num app nomeado "
+    "('app:TextEdit|texto:olá', 'app:Notes|texto:oi') ou acionar atalho do Ditado Local "
+    "('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir'). "
+    "Use o prefixo app: quando o usuário pedir para escrever/editar NUM aplicativo específico "
+    "(Editor de Texto=TextEdit, Bloco de Notas=Notes). ATENÇÃO: expressões como 'escreve no cursor', "
+    "'digita no cursor', 'cola no cursor', 'insere no cursor', 'escreve aqui' significam escrever onde "
+    "está o cursor de texto atual (use 'texto:<conteúdo>' SEM 'app:Cursor|').\n"
+    "DIGITAR_INSERIR: inserir texto no campo/cursor atual sem depender do prefixo 'texto:'. content = o texto.\n"
+    "DIGITAR_SUBSTITUIR_SELECAO: substituir o texto selecionado atual. content = o texto novo.\n"
+    "DIGITAR_ANEXAR: anexar texto ao final do campo atual. content = o texto a anexar.\n"
+    "DIGITAR_LIMPAR_INSERIR: limpar muletas do ditado e inserir o resultado no campo atual. content = o ditado bruto.\n"
+    "DIGITAR_TRADUZIR_INSERIR: traduzir um texto e inserir o resultado no campo atual. content = '<idioma>:<texto>' "
+    "ou só '<texto>' (nesse caso assume português).\n"
+    "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir um ditado localmente sem "
+    "injetar teclas ('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
+    "CONFIGURAR_VOZ: trocar a voz do próprio assistente ('voz:<nome de voz local instalada|Kokoro|VoxCPM|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>').\n"
+    "AUTO_CORRECAO: pedir para o próprio Orque (Rodrigo AI) inspecionar e corrigir algo no seu próprio código-fonte em worktree isolada ('<descrição da correção>').\n"
+    "NENHUMA: todo o resto — perguntas, pedidos de informação, conversa comum.\n"
     "Exemplos:\n"
     "Quais são meus lembretes pra hoje? -> LEMBRETE_CONSULTAR|hoje\n"
     "Tem algum lembrete de remédio? -> LEMBRETE_CONSULTAR|remédio\n"
@@ -206,6 +237,36 @@ DETECT_MUTATION_SYSTEM_PROMPT = (
     "Troca essa nota pra: comprar materiais na segunda -> NOTA_EDITAR|Comprar materiais na segunda\n"
     "Guarda que meu nome é Rodrigo -> MEMORIA_GUARDAR|seu nome é Rodrigo\n"
     "Na verdade, corrige isso que eu falei: meu nome é Rodrigo Sonsino -> MEMORIA_EDITAR|seu nome é Rodrigo Sonsino\n"
+    "Aumenta o volume -> DESKTOP_COMANDO|volume_up\n"
+    "Abaixa o som -> DESKTOP_COMANDO|volume_down\n"
+    "Coloca o volume em 40 por cento -> DESKTOP_COMANDO|volume_set:40\n"
+    "Pausa a música -> DESKTOP_COMANDO|media_play_pause\n"
+    "Próxima faixa -> DESKTOP_COMANDO|media_next\n"
+    "Abre o Safari -> DESKTOP_COMANDO|open_app:Safari\n"
+    "Ativa o modo escuro -> DESKTOP_COMANDO|dark_mode:on\n"
+    "Abre a pasta Downloads -> DESKTOP_COMANDO|open_folder:downloads\n"
+    "Fecha o Spotify -> DESKTOP_CRITICO|app_quit:Spotify\n"
+    "Esvazia a lixeira -> DESKTOP_CRITICO|empty_trash\n"
+    "Bloqueia a tela do Mac -> DESKTOP_CRITICO|lock_screen\n"
+    "Suspende o computador -> DESKTOP_CRITICO|system_sleep\n"
+    "Reinicia o Mac -> DESKTOP_CRITICO|system_restart\n"
+    "Desliga o computador -> DESKTOP_CRITICO|system_shutdown\n"
+    "Digita aí: Olá, tudo bem com você? -> DIGITAR_TEXTO|texto:Olá, tudo bem com você?\n"
+    "Escreve no cursor: testando um dois três -> DIGITAR_TEXTO|texto:testando um dois três\n"
+    "Escreve no Editor de Texto: reunião às três -> DIGITAR_TEXTO|app:TextEdit|texto:reunião às três\n"
+    "Edita no Bloco de Notas: comprar pão -> DIGITAR_TEXTO|app:Notes|texto:comprar pão\n"
+    "Escreve no campo atual: reunião confirmada -> DIGITAR_INSERIR|reunião confirmada\n"
+    "Substitui a seleção por Rodrigo Sonsino -> DIGITAR_SUBSTITUIR_SELECAO|Rodrigo Sonsino\n"
+    "Anexa no final: obrigado! -> DIGITAR_ANEXAR|obrigado!\n"
+    "Limpa esse ditado e cola: hã tipo assim vamos fechar hoje -> DIGITAR_LIMPAR_INSERIR|hã tipo assim vamos fechar hoje\n"
+    "Traduz pra inglês e cola bom dia -> DIGITAR_TRADUZIR_INSERIR|inglês:bom dia\n"
+    "Aciona o ditado local para traduzir a seleção -> DIGITAR_TEXTO|atalho:traduzir_selecao\n"
+    "Limpa esse ditado: hã tipo assim vamos fechar o contrato hoje -> DITADO_LOCAL|limpar:hã tipo assim vamos fechar o contrato hoje\n"
+    "Muda sua voz para Luciana -> CONFIGURAR_VOZ|voz:Luciana\n"
+    "Muda sua voz para Fernanda -> CONFIGURAR_VOZ|voz:Fernanda\n"
+    "Troca para a voz Charon do Gemini -> CONFIGURAR_VOZ|voz:Charon\n"
+    "Muda para a voz local VoxCPM -> CONFIGURAR_VOZ|voz:VoxCPM\n"
+    "Corrige no seu próprio código o texto do botão de voz -> AUTO_CORRECAO|Corrigir o texto do botão de voz\n"
     "Vamos trocar de assunto agora -> NENHUMA\n"
     "Me avisa amanhã cedo que eu preciso levar o carro na oficina -> LEMBRETE_CRIAR|Levar o carro na oficina\n"
     "Muda só a frase do lembrete pra devolver o livro na biblioteca -> LEMBRETE_EDITAR|Devolver o livro na biblioteca\n"
@@ -253,7 +314,7 @@ DETECT_CONFIRMATION_SYSTEM_PROMPT = (
 )
 
 
-INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA"}
+INTENT_NAMES = MUTATION_NAMES | {"HORA", "DATA", "DELEGAR_CODIGO", "AUTOMACAO_DESKTOP"}
 CLOUD_INTENT_MODEL = os.environ.get("RODRIGO_CLOUD_INTENT_MODEL", "gemini-3.5-flash-lite")  # fixado pelo nome (sem alias): ver docs/phase-11-addendum-cloud-intent.md §5.2
 CLOUD_INTENT_HTTP_TIMEOUT_MS = 10_000  # mínimo aceito pela API do Gemini
 CLOUD_INTENT_WAIT_S = 4.0  # espera real: passou disso => fallback local (a chamada HTTP segue em 2º plano)
@@ -286,11 +347,46 @@ DETECT_INTENT_SYSTEM_PROMPT = (
     "content = o termo de busca, se houver.\n"
     "HORA: quer saber que horas são agora (qualquer jeito coloquial, inclusive 'já passou das dez?').\n"
     "DATA: quer saber o dia, dia da semana, mês ou ano de hoje.\n"
+    "DESKTOP_COMANDO: comando imediato e reversível do computador macOS. content = um de: "
+    "'volume_up', 'volume_down', 'volume_set:<0..100>', 'volume_mute', 'volume_unmute', "
+    "'media_play_pause', 'media_next', 'media_prev', 'open_app:<Nome>', 'dark_mode:on', 'dark_mode:off', "
+    "'dark_mode:toggle', 'window_minimize', 'open_folder:downloads', 'open_folder:documentos', 'open_folder:desktop'.\n"
+    "DESKTOP_CRITICO: comando destrutivo ou de bloqueio do macOS (exige confirmação). content = um de: "
+    "'app_quit:<Nome>', 'empty_trash', 'lock_screen', 'system_sleep', 'system_restart', 'system_shutdown'.\n"
+    "DIGITAR_TEXTO: digitar/colar texto no app focado ('texto:<conteúdo>'), num app nomeado "
+    "('app:TextEdit|texto:olá' — Editor de Texto=TextEdit, Bloco de Notas=Notes) ou atalho do Ditado Local "
+    "('atalho:ditar', 'atalho:perguntar', 'atalho:traduzir_selecao', 'atalho:ditar_traduzir'). "
+    "ATENÇÃO: 'escreve no cursor', 'digita no cursor', 'cola no cursor', 'insere no cursor' ou 'escreve aqui' "
+    "referem-se ao cursor de texto (caret) no campo atual — use 'texto:<conteúdo>' SEM 'app:Cursor|'.\n"
+    "DIGITAR_INSERIR: inserir texto no campo/cursor atual. content = o texto.\n"
+    "DIGITAR_SUBSTITUIR_SELECAO: substituir o texto selecionado atual. content = o texto novo.\n"
+    "DIGITAR_ANEXAR: anexar texto ao final do campo atual. content = o texto a anexar.\n"
+    "DIGITAR_LIMPAR_INSERIR: limpar muletas de um ditado e inserir o resultado. content = o ditado bruto.\n"
+    "DIGITAR_TRADUZIR_INSERIR: traduzir e inserir no campo atual. content = '<idioma>:<texto>' ou só '<texto>' para português.\n"
+    "DITADO_LOCAL: limpar muletas de um ditado ('limpar:<texto>') ou traduzir ditado localmente sem colar "
+    "('traduzir_pt:<texto>' ou 'traduzir:<lang>:<texto>').\n"
+    "CONFIGURAR_VOZ: trocar a voz do próprio assistente. content = 'voz:<nome de voz local instalada|Kokoro|VoxCPM|Charon|Puck|Aoede|Fenrir|Kore|Zephyr>'.\n"
+    "AUTO_CORRECAO: pedir para o próprio Orque (Rodrigo AI) corrigir ou ajustar algo em seu próprio código-fonte em branch isolada. content = a correção pedida.\n"
+    "DELEGAR_CODIGO: pede ao assistente para acionar, conversar, delegar ou executar uma tarefa genérica no computador/sistema via Claude Code — "
+    "abrir arquivo, criar pasta, buscar no projeto, rodar script, acessar Drive, falar ou mandar mensagem para o Claude. "
+    "content = a tarefa ou pedido exato a executar (texto como pedido, preservando detalhes).\n"
+    "AUTOMACAO_DESKTOP: pede para o assistente controlar a interface gráfica do Mac de forma autônoma e multi-passo — "
+    "abrir apps, clicar, digitar, navegar menus, cumprir um objetivo na tela (ex.: 'abre o Safari e pesquisa X', "
+    "'abre o Editor de Texto e escreve Y', 'automatiza isso no desktop'). content = o objetivo completo, "
+    "preservando detalhes. NÃO use para um único comando imediato de volume/mídia (aí é DESKTOP_COMANDO) "
+    "nem para ações críticas empty_trash/lock/sleep/shutdown (DESKTOP_CRITICO) nem para só Claude Code em arquivos (DELEGAR_CODIGO).\n"
     "NENHUMA: todo o resto — conversa, perguntas de conhecimento, e qualquer menção a lembrar/anotar/"
     "apagar/nota/hora/dia que NÃO seja um pedido direto ('eu lembro que você disse', 'nota dez na prova', "
     "'apagar a luz', 'a hora da verdade', 'hora em Lisboa', preferências comuns 'prefiro café, não chá').\n"
     "Pedidos sem conteúdo utilizável ('guarda isso pra mim') => NENHUMA. Pedido de consulta sem termo "
     "de busca ('quais são meus lembretes') é válido com content vazio/omitido, não é NENHUMA.\n"
+    "Exemplos de content (JSON intent/content):\n"
+    "Reinicia o Mac -> DESKTOP_CRITICO / system_restart\n"
+    "Desliga o computador -> DESKTOP_CRITICO / system_shutdown\n"
+    "Escreve no Editor de Texto: reunião às três -> DIGITAR_TEXTO / app:TextEdit|texto:reunião às três\n"
+    "Edita no Bloco de Notas comprar pão -> DIGITAR_TEXTO / app:Notes|texto:comprar pão\n"
+    "Escreve no cursor: olá mundo -> DIGITAR_TEXTO / texto:olá mundo\n"
+    "Digita aí olá -> DIGITAR_TEXTO / texto:olá\n"
 )
 
 
@@ -332,15 +428,27 @@ def parse_intent_json(raw: str, text: str = ""):
     content = content.strip() if isinstance(content, str) else None
     if intent in ("HORA", "DATA", "NENHUMA") or intent.endswith("_APAGAR") or intent == "MEMORIA_ESQUECER":
         return (intent, None)
-    if intent in QUERY_NAMES:
-        # Consulta: termo de busca é opcional — nunca degrada para NENHUMA por falta de
+    if intent in OPTIONAL_CONTENT_QUERY_NAMES:
+        # Consulta (*_CONSULTAR): termo de busca é opcional — nunca degrada para NENHUMA por falta de
         # conteúdo, só descarta um termo longo demais ou não ancorado na fala.
         if content and (len(content) > MAX_MUTATION_CONTENT_CHARS or (text and not content_grounded(content, text))):
             content = None
         return (intent, content)
     if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
-        return ("NENHUMA", None)  # criar/editar/guardar sem conteúdo utilizável
-    if text and not content_grounded(content, text):
+        return ("NENHUMA", None)  # criar/editar/guardar/desktop/digitar/voz/auto sem conteúdo utilizável
+    if intent in STRUCTURED_ACTION_NAMES:
+        return (intent, content)
+    if intent == "DIGITAR_TEXTO" and content.lower().startswith("atalho:"):
+        return (intent, content)
+    grounding_target = content
+    if intent in ("DIGITAR_TEXTO", "DIGITAR_INSERIR", "DIGITAR_SUBSTITUIR_SELECAO", "DIGITAR_ANEXAR", "DIGITAR_LIMPAR_INSERIR", "DITADO_LOCAL"):
+        grounding_target = APP_TARGET_PREFIX_RE.sub("", grounding_target)
+        grounding_target = PREFIXED_CONTENT_RE.sub("", grounding_target)
+    if intent == "DIGITAR_TRADUZIR_INSERIR":
+        grounding_target = APP_TARGET_PREFIX_RE.sub("", grounding_target)
+        if ":" in grounding_target:
+            grounding_target = grounding_target.split(":", 1)[1].strip()
+    if text and not content_grounded(grounding_target, text):
         return ("NENHUMA", None)  # conteúdo não ancorado na fala: não propõe mutação
     return (intent, content)
 
@@ -364,12 +472,17 @@ def parse_mutation_output(raw: str, truncated: bool) -> tuple[str, str | None]:
         return ("NENHUMA", None)
     if action in ("LEMBRETE_CRIAR", "NOTA_CRIAR", "MEMORIA_GUARDAR",
                   "LEMBRETE_EDITAR", "NOTA_EDITAR", "MEMORIA_EDITAR",
-                  "LEMBRETE_REAGENDAR"):
+                  "LEMBRETE_REAGENDAR",
+                  "DESKTOP_COMANDO", "DESKTOP_CRITICO",
+                  "DIGITAR_TEXTO", "DIGITAR_INSERIR", "DIGITAR_SUBSTITUIR_SELECAO",
+                  "DIGITAR_ANEXAR", "DIGITAR_LIMPAR_INSERIR", "DIGITAR_TRADUZIR_INSERIR",
+                  "DITADO_LOCAL",
+                  "CONFIGURAR_VOZ", "AUTO_CORRECAO"):
         if not content or len(content) > MAX_MUTATION_CONTENT_CHARS:
             return ("NENHUMA", None)
         return (action, content)
-    if action in QUERY_NAMES:
-        # Consulta: o termo de busca é opcional (vazio = "todos"); nunca degrada para NENHUMA
+    if action in OPTIONAL_CONTENT_QUERY_NAMES:
+        # Consulta (*_CONSULTAR): o termo de busca é opcional (vazio = "todos"); nunca degrada para NENHUMA
         # por falta de conteúdo, só descarta um conteúdo longo demais pra ser um termo de busca.
         if content and len(content) > MAX_MUTATION_CONTENT_CHARS:
             content = None
@@ -551,6 +664,36 @@ def log_diag(message: str) -> None:
     """Diagnóstico técnico em stderr — nunca inclui transcrição ou conteúdo de conversa.
     Fase 12: TODA mensagem passa por redact() (ponto único de saída de diagnóstico)."""
     print(f"[worker] {redact(message)}", file=sys.stderr, flush=True)
+
+
+def log_usage(source: str, turn_id: str, model: str, usage: Any, extra: str = "") -> None:
+    """Conta de créditos/cota: UMA linha `[uso]` por chamada ao Gemini (geração, intenção,
+    visão, TTS). Só números (tokens de entrada/saída, raciocínio quando houver) + modelo —
+    nunca texto da conversa. `usage` é o usage_metadata da resposta (ou None)."""
+    entrada = getattr(usage, "prompt_token_count", None) if usage is not None else None
+    saida = getattr(usage, "candidates_token_count", None) if usage is not None else None
+    raciocinio = getattr(usage, "thoughts_token_count", None) if usage is not None else None
+    line = f"[uso] fonte={source} turno={turn_id} modelo={model} entrada={entrada} saida={saida}"
+    if raciocinio is not None:
+        line += f" raciocinio={raciocinio}"
+    if extra:
+        line += f" {extra}"
+    log_diag(line)
+
+
+def usage_dict(model: str, usage: Any, extra: dict | None = None) -> dict | None:
+    """O mesmo conteúdo do [uso], em dicionário SÓ COM NÚMEROS, para o Node acumular no
+    livro-caixa (GET /api/usage). None quando a resposta não trouxe usage_metadata
+    (o Node ainda conta o pedido, que a cota do Google conta também)."""
+    d: dict = {"model": model,
+               "in": getattr(usage, "prompt_token_count", None) if usage is not None else None,
+               "out": getattr(usage, "candidates_token_count", None) if usage is not None else None}
+    reasoning = getattr(usage, "thoughts_token_count", None) if usage is not None else None
+    if reasoning is not None:
+        d["reasoning"] = reasoning
+    if extra:
+        d.update(extra)
+    return d
 
 
 def emit(event: dict[str, Any]) -> None:
@@ -1020,8 +1163,10 @@ class Worker:
                 path_or_hf_repo=self._stt_model_id,
                 language="pt",
                 fp16=True,
+                initial_prompt="Orque, orquestrador e assistente de voz pessoal de Rodrigo Sonsino.",
             )
             text = (result.get("text") or "").strip()
+            text = re.sub(r"\b(orc|ork|orqui|orq|[oó]rqu[eê])\b", "Orque", text, flags=re.IGNORECASE)
             emit({"event": "transcript", "reqId": req_id, "text": text})
         except Exception as exc:  # noqa: BLE001
             log_diag(f"Erro na transcrição: {safe_exc(exc)}")
@@ -1277,6 +1422,8 @@ class Worker:
                     duration_ms = int((time.monotonic() - start_time) * 1000)
                     out_text = (res.text or "").strip()
                     log_diag(f"[screen] turno={turn_id} motor=gemini bytes={len(img_bytes)} ms={duration_ms}")
+                    log_usage("visao", turn_id, "gemini-flash-latest",
+                              getattr(res, "usage_metadata", None), extra="imagem=1")
 
                     emit({
                         "event": "screen_description",
@@ -1284,7 +1431,10 @@ class Worker:
                         "turnId": turn_id,
                         "text": out_text,
                         "engine": "gemini",
-                        "ms": duration_ms
+                        "ms": duration_ms,
+                        "usage": usage_dict("gemini-flash-latest",
+                                            getattr(res, "usage_metadata", None),
+                                            extra={"image": 1})
                     })
                     return
                 except Exception as exc:  # noqa: BLE001
@@ -1324,14 +1474,18 @@ class Worker:
             )
 
             start_time = time.monotonic()
-            output_text = mlx_vlm.generate(
+            # Assinatura: generate(model, processor, prompt, image=None, ...).
+            # SEMPRE por palavra-chave: na ordem posicional image e prompt trocam
+            # de lugar e o erro só aparece em produção ("Failed to load image").
+            output = mlx_vlm.generate(
                 self._vlm_model,
                 self._vlm_processor,
-                image_path,
-                formatted_prompt,
+                prompt=formatted_prompt,
+                image=image_path,
                 max_tokens=200,
                 verbose=False
             )
+            output_text = output.text if hasattr(output, "text") else str(output)
 
             if handle.cancel_event.is_set() or self._turn_cancelled(turn_id):
                 log_diag(f"Descrição de tela cancelada após a inferência (turnId={turn_id}).")
@@ -1435,13 +1589,15 @@ class Worker:
             except Exception as exc:  # noqa: BLE001 — inclui TimeoutError
                 return unavailable(f"{safe_exc(exc)}")
             model_version = getattr(resp, "model_version", None) or CLOUD_INTENT_MODEL
+            log_usage("intencao", turn_id, model_version, getattr(resp, "usage_metadata", None))
             parsed = parse_intent_json(resp.text or "", text)
             log_diag(f"Intenção em nuvem: {time.monotonic() - started:.2f}s (turnId={turn_id})")
             if parsed is None:
                 return unavailable("saída inválida")
             intent, content = parsed
             emit({"event": "intent_detection", "reqId": req_id, "turnId": turn_id, "available": True,
-                  "intent": intent, "content": content, "model": model_version})
+                  "intent": intent, "content": content, "model": model_version,
+                  "usage": usage_dict(model_version, getattr(resp, "usage_metadata", None))})
         except Exception as exc:  # noqa: BLE001
             unavailable(f"erro: {safe_exc(exc)}")
 
@@ -1532,7 +1688,8 @@ class Worker:
         finally:
             with self._synth_lock:
                 self._syntheses.pop(req_id, None)
-        emit({"event": "synth_result", "reqId": req_id, **result})
+        emit({"event": "synth_result", "reqId": req_id,
+              "model": msg.get("model") or TTS_DEFAULT_MODEL, **result})
 
     def _synthesize(self, msg: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
         if entry["cancel"].is_set():
@@ -1584,6 +1741,9 @@ class Worker:
         pcm, rate, tokens = payload
         if not pcm:
             return {"ok": False, "kind": "empty"}
+        log_usage("tts", str(msg.get("turnId")), model,
+                  SimpleNamespace(prompt_token_count=tokens[0], candidates_token_count=tokens[1]),
+                  extra=f"caracteres={len(text)}")
         normalized, stats = normalize_pcm16(pcm)
         write_wav_atomic(out_path, normalized, rate)
         return {"ok": True, "seconds": round(len(normalized) / 2 / rate, 2), "tokensIn": tokens[0], "tokensOut": tokens[1],
@@ -1670,9 +1830,11 @@ class Worker:
             first_chunk_logged = False
             last_finish: Any = None
             last_usage: Any = None
+            used_model: str | None = None
             for attempt, (model, timeout_ms) in enumerate(GENERATION_MODELS):
                 if handle.cancel_event.is_set():
                     break  # cancelado antes de qualquer chamada: nada sai para o Gemini
+                used_model = model
                 try:
                     client = self._gemini_client_for(genai, timeout_ms)
                     stream = client.models.generate_content_stream(
@@ -1738,6 +1900,7 @@ class Worker:
                         f"saida={getattr(last_usage, 'candidates_token_count', None)} "
                         f"raciocinio={getattr(last_usage, 'thoughts_token_count', None)} frases={sentence_index}"
                     )
+                    log_usage("geracao", turn_id, model, last_usage)
                     break  # terminou (ou foi cancelado/loop): não há segunda tentativa
                 except Exception as exc:  # noqa: BLE001
                     # Plano B SÓ se nada foi dito ainda (sentence_index == 0): nunca recomeça nem duplica uma resposta que o
@@ -1773,7 +1936,8 @@ class Worker:
                             "index": sentence_index,
                             "text": leftover,
                         })
-                emit({"event": "done", "reqId": req_id, "turnId": turn_id})
+                emit({"event": "done", "reqId": req_id, "turnId": turn_id,
+                      "usage": usage_dict(used_model, last_usage) if used_model else None})
 
         except Exception as exc:  # noqa: BLE001 — chave ausente, timeout de rede (20s, acima),
                                     # erro de cota/API do Gemini, ValueError de to_gemini_contents —
@@ -1850,7 +2014,7 @@ class Worker:
                 self._file_pool.submit(self.handle_file_write, msg)
             elif cmd == "ping":
                 emit({"event": "pong"})
-            elif cmd in ("transcribe", "classify", "generate", "detect_tool", "detect_mutation", "detect_confirmation", "detect_intent"):
+            elif cmd in QUEUED_COMMANDS:
                 # Fila de tamanho 1: se algo estiver esperando (não deveria, pois o Node só
                 # envia um novo comando após cancelar o anterior), descarta o mais antigo.
                 try:

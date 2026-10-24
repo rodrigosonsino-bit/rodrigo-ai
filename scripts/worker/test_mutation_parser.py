@@ -286,6 +286,73 @@ def main() -> None:
         ("NENHUMA", None),
     )
 
+    # 4 pilares: desktop, digitação, ditado, voz, auto-correção
+    check(
+        "DESKTOP_COMANDO canônico",
+        parse_mutation_output("DESKTOP_COMANDO|volume_up", truncated=False),
+        ("DESKTOP_COMANDO", "volume_up"),
+    )
+    check(
+        "DESKTOP_COMANDO sem conteúdo degrada para NENHUMA",
+        parse_mutation_output("DESKTOP_COMANDO", truncated=False),
+        ("NENHUMA", None),
+    )
+    check(
+        "DESKTOP_CRITICO canônico",
+        parse_mutation_output("DESKTOP_CRITICO|lock_screen", truncated=False),
+        ("DESKTOP_CRITICO", "lock_screen"),
+    )
+    check(
+        "DIGITAR_TEXTO canônico",
+        parse_mutation_output("DIGITAR_TEXTO|texto:Olá mundo", truncated=False),
+        ("DIGITAR_TEXTO", "texto:Olá mundo"),
+    )
+    check(
+        "DIGITAR_INSERIR canônico",
+        parse_mutation_output("DIGITAR_INSERIR|Olá mundo", truncated=False),
+        ("DIGITAR_INSERIR", "Olá mundo"),
+    )
+    check(
+        "DIGITAR_SUBSTITUIR_SELECAO canônico",
+        parse_mutation_output("DIGITAR_SUBSTITUIR_SELECAO|Rodrigo Sonsino", truncated=False),
+        ("DIGITAR_SUBSTITUIR_SELECAO", "Rodrigo Sonsino"),
+    )
+    check(
+        "DIGITAR_ANEXAR canônico",
+        parse_mutation_output("DIGITAR_ANEXAR|obrigado", truncated=False),
+        ("DIGITAR_ANEXAR", "obrigado"),
+    )
+    check(
+        "DIGITAR_LIMPAR_INSERIR canônico",
+        parse_mutation_output("DIGITAR_LIMPAR_INSERIR|hã tipo assim vamos fechar", truncated=False),
+        ("DIGITAR_LIMPAR_INSERIR", "hã tipo assim vamos fechar"),
+    )
+    check(
+        "DIGITAR_TRADUZIR_INSERIR canônico",
+        parse_mutation_output("DIGITAR_TRADUZIR_INSERIR|inglês:bom dia", truncated=False),
+        ("DIGITAR_TRADUZIR_INSERIR", "inglês:bom dia"),
+    )
+    check(
+        "DITADO_LOCAL canônico",
+        parse_mutation_output("DITADO_LOCAL|limpar:hã vamos fechar", truncated=False),
+        ("DITADO_LOCAL", "limpar:hã vamos fechar"),
+    )
+    check(
+        "CONFIGURAR_VOZ canônico",
+        parse_mutation_output("CONFIGURAR_VOZ|voz:Charon", truncated=False),
+        ("CONFIGURAR_VOZ", "voz:Charon"),
+    )
+    check(
+        "CONFIGURAR_VOZ com voz local arbitrária",
+        parse_mutation_output("CONFIGURAR_VOZ|voz:Personal Voice", truncated=False),
+        ("CONFIGURAR_VOZ", "voz:Personal Voice"),
+    )
+    check(
+        "AUTO_CORRECAO canônico",
+        parse_mutation_output("AUTO_CORRECAO|Corrigir botão de mute", truncated=False),
+        ("AUTO_CORRECAO", "Corrigir botão de mute"),
+    )
+
     print()
     print("=== Testes de parse_confirmation_output ===")
     check("SIM canônico", parse_confirmation_output("SIM"), "SIM")

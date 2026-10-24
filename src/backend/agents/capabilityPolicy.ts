@@ -24,20 +24,30 @@ export const EFFECTIVE_GRANTS: GrantTable = {
   openclaw_web: ['network'],
   openclaw_drive: ['network', 'read_file'],
   openclaw_social: ['network'],
-  // Ferramentas locais que MUTAM (gravam nos stores de dados do app): exigem e recebem `write_file`.
+  // Ferramentas locais que MUTAM (gravam nos stores de dados do app ou controlam desktop/voz/código): exigem e recebem `write_file`.
   tool_lembrete: ['write_file'],
   tool_nota: ['write_file'],
   tool_memoria: ['write_file'],
   // Fase 17: delegação ao Claude Code — processo (`shell`) que lê arquivos (`read_file`) e grava o registro da tarefa no store do app.
   // NÃO concede `network` ao app (a rede é do processo filho, sob o canal RODRIGO_CLAUDE_CODE) nem `sensitive_data`.
-  tool_claude: ['write_file', 'shell', 'read_file']
+  tool_claude: ['write_file', 'shell', 'read_file'],
+  tool_desktop: ['write_file'],
+  tool_digitar: ['write_file'],
+  tool_ditado: ['write_file'],
+  tool_configurar: ['write_file'],
+  tool_auto: ['write_file'],
+  // Fase 17: claude -p como proxy para acesso à máquina (D1: escrita desde o início).
+  claude_code: ['shell', 'read_file', 'write_file', 'network', 'browser'],
+  // Ogra: só a rede do webhook. Sem write_file — mutação não passa por este agente.
+  ogra: ['network']
 };
 
 /** Capacidades que a simples existência da operação já exige (ex.: o agente web sempre usa a rede). */
 export const IMPLIED_NEEDS: GrantTable = {
   openclaw_web: ['network'],
   openclaw_drive: ['network', 'read_file'],
-  openclaw_social: ['network']
+  openclaw_social: ['network'],
+  ogra: ['network']
 };
 
 export interface PolicySubject {

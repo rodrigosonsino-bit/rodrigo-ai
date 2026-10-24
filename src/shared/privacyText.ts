@@ -36,13 +36,22 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
   const warnings: string[] = [];
 
   if (status.mode === 'local-only') {
+    const staysLocal = [
+      ...stays,
+      'Hora, data, lembretes e notas funcionam; perguntas que precisam de uma resposta gerada recebem o aviso de que a geração está desligada.'
+    ];
+    const goesLocal: string[] = [];
+    if (status.ogra.enabled) {
+      goesLocal.push(
+        'O texto da sua fala vai ao webhook da Ogra (RODRIGO_OGRA=1), mesmo com o Gemini desligado. O áudio continua neste computador.'
+      );
+    } else {
+      staysLocal.push('A Ogra está desligada (RODRIGO_OGRA=0, padrão): a fala não vai ao webhook.');
+    }
     return {
       headline: 'Modo sem nuvem: nada é enviado ao Gemini.',
-      stays: [
-        ...stays,
-        'Hora, data, lembretes e notas funcionam; perguntas que precisam de uma resposta gerada recebem o aviso de que a geração está desligada.'
-      ],
-      goes: [],
+      stays: staysLocal,
+      goes: goesLocal,
       warnings: [],
       footnote: PRIVACY_FOOTNOTE
     };
@@ -78,6 +87,34 @@ export function describePrivacy(status: PrivacyStatus): PrivacyCardText {
   } else if (status.webSearch.reason === 'master-off') {
     // modo local-only já retornou acima; este ramo é defensivo
     stays.push('A busca na web está desligada porque a nuvem está desligada.');
+  }
+
+  if (status.claudeCode.enabled) {
+    goes.push(
+      'Pedidos confirmados ao Claude Code enviam a ordem (e o conteúdo dos arquivos que ele ler) à Anthropic sob o plano da sua assinatura (canal RODRIGO_CLAUDE_CODE ligado).'
+    );
+  } else if (status.claudeCode.reason === 'channel-off') {
+    stays.push('O Claude Code está desligado (RODRIGO_CLAUDE_CODE=0, padrão).');
+  } else if (status.claudeCode.reason === 'master-off') {
+    stays.push('O Claude Code está desligado porque a nuvem está desligada.');
+  }
+
+  if (status.ogra.enabled) {
+    goes.push(
+      'O texto da sua fala vai ao webhook da Ogra (RODRIGO_OGRA=1). A resposta volta depois, inteira. Lembrete, nota e memória que ela propuser só são gravados depois de um sim falado. O áudio não vai nesse canal.'
+    );
+  } else {
+    stays.push('A Ogra está desligada (RODRIGO_OGRA=0, padrão): a fala não vai ao webhook.');
+  }
+
+  if (status.autoDesktop.enabled) {
+    stays.push(
+      'Automação desktop ligada (RODRIGO_AUTO_DESKTOP=1): o Orque pode abrir apps e manipular a interface localmente sem pedir SIM a cada passo. Diga "parar automação" para interromper. Texto e árvore de acessibilidade não saem da máquina, salvo pelos canais de geração ou visão já ligados acima.'
+    );
+  } else if (status.autoDesktop.reason === 'desktop-control-off') {
+    stays.push('Automação desktop pedida, mas o controle do desktop está desligado (RODRIGO_DESKTOP_CONTROL=0).');
+  } else {
+    stays.push('Automação desktop desligada (RODRIGO_AUTO_DESKTOP=0, padrão).');
   }
 
   if (status.sends.visionImage) {
