@@ -42,6 +42,7 @@ import { registerWiredOpenClawAgents } from '../agents/openClawSubAgent.js';
 import { makeOpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import { PendingAsyncTaskStore, parseAsyncTaskTtlHours } from '../agents/pendingAsyncStore.js';
 import { registerClaudeCodeAgent } from '../agents/claudeCodeSubAgent.js';
+import { createOgraDelegationNotifier } from '../agents/delegationNotice.js';
 import { capabilitiesFromRegistry, registerOgraAgent } from '../agents/ograSubAgent.js';
 
 export type TtsStatusResponse = TtsStatus;
@@ -184,7 +185,12 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     exists: (p) => fs.existsSync(p),
     selftestOk: (root, bin) => selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), { root, claudeBin: bin })
   };
+  // Ajuste 1 (F17): avisos de delegação para a Ogra (no-op sem RODRIGO_OGRA=1 e sem webhook). `sessionManager` ainda não existe
+  // aqui; o callback é avaliado só quando um aviso sai.
+  const delegationObserver = createOgraDelegationNotifier({ privacy, session: () => sessionManagerRef?.currentSessionId() ?? '' });
+  let sessionManagerRef: SessionManager | null = null;
   const claudeRunner = new ClaudeCodeRunner({
+    observer: delegationObserver,
     resolveRoot: () => resolveClaudeRoot(rootDir),
     store: new JsonStore<ClaudeJob>(dataDir, 'claude-jobs.json'),
     claudeBin: () => findClaudeBinary(),
@@ -240,8 +246,10 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
   registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
     sessionManager.consumeMutationToken(turnId, token),
-    claudeIsolation
+    claudeIsolation,
+    delegationObserver
   );
+  sessionManagerRef = sessionManager;
   // Camada Ogra: só entra no coordenador com RODRIGO_OGRA=1. Com 0, este bloco não roda.
   // TODO (fases seguintes): não registrar daqui coordenação de cursor, WhatsApp ou outros apps.
   if (privacy.ogra) {

@@ -2168,6 +2168,11 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
     return `Não consegui falar com o OpenClaw agora (${err instanceof Error ? err.message : 'erro desconhecido'}).`;
   }
 
+  /** Id da sessão de voz corrente ('' se não houver); usado nos avisos de delegação à Ogra. */
+  currentSessionId(): string {
+    return this.current?.id ?? '';
+  }
+
   /** Fase 17: lista (somente leitura) das tarefas do Claude, para a tela. null = sessão inválida. */
   claudeJobsFor(sessionId: string, token: string): { enabled: boolean; busy: boolean; ready: boolean; reason: string | null; jobs: unknown[] } | null {
     if (!this.getAuthorized(sessionId, token)) return null;

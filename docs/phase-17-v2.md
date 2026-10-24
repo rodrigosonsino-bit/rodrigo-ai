@@ -49,3 +49,18 @@ O `npm run doctor` avisa o que falta.
 - O conteúdo que o Claude lê não passa pelo guarda de saída (só a ordem passa).
 - Uma tarefa por vez; timeout 10 min; saída truncada em 12 000 caracteres.
 - Cobertura de intenção por voz não medida (H17.5 é do Rodrigo).
+
+## 6. Opção C e aviso à Ogra (2026-10-24, decisão do Rodrigo no chat)
+
+A `main` já tinha uma Fase 17 de outra sessão (`claudeCodeSubAgent.ts`, comandos `Bash,Read,Write,Edit` com `bypassPermissions` na raiz do
+projeto, que contém `docs/research`). O Rodrigo escolheu **unir as duas** em vez de descartar uma:
+
+- **Modo leitura (padrão):** gatilho determinístico "pede pro Claude …", `plan` + `Read,Grep,Glob`, raiz limpa, isolamento `sandbox-exec`.
+- **Modo escrita (agente `claude_code` da main):** continua com a rota de nuvem `DELEGAR_CODIGO` e a confirmação por voz, mas agora roda **no mesmo
+  isolamento**: `cwd` = worktree limpo (sem `docs/research`), perfil `sandbox-exec` que nega leitura e escrita no HOME e libera escrita **só na raiz**,
+  ambiente em lista de permissão, e **não cria processo** sem a prova de isolamento (selftest). A pergunta de confirmação avisa que o Claude pode criar
+  e alterar arquivos numa cópia isolada. O que ele devolver é dado não confiável (voz do sistema, fora do histórico do Gemini).
+- **Aviso à Ogra (ajuste 1):** `delegationNotice.ts`. Com `RODRIGO_OGRA=1` e webhook configurado, cada tarefa (nos dois modos) avisa início e fim: pedido
+  (truncado), hora, status e conclusão curta; passa pelo guarda de saída; `kind: delegation_status`, `expectsReply: false`.
+- **Limites que continuam:** o modo escrita bloqueia o turno até 10 minutos (não é assíncrono como o de leitura); `sandbox-exec` não restringe rede nem
+  gravação fora do HOME (ex.: `/tmp`); uma versão nova do `claude` pode exigir ajuste do perfil (o selftest revela).

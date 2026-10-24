@@ -21,6 +21,7 @@ import type { IMutatingTool } from '../../shared/extensions/tools.js';
 import type { IntentName } from '../../shared/voiceProtocol.js';
 import type { Capability } from './capabilityPolicy.js';
 import { JsonStore } from '../storage/jsonStore.js';
+import type { DelegationObserver } from './delegationNotice.js';
 
 export const CLAUDE_TOOL_NAME = 'CLAUDE';
 export const CLAUDE_KIND = 'CLAUDE_DELEGAR';
@@ -304,6 +305,8 @@ export interface ClaudeRunnerOptions {
   guard?: (text: string) => { text: string; blocked: boolean };
   now?: () => number;
   onFinished?: (job: ClaudeJob) => void;
+  /** Ajuste 1 (F17): avisa a Ogra no início e no fim de cada tarefa (modo leitura). */
+  observer?: DelegationObserver;
   /**
    * Isolamento do macOS. Produção: SEMPRE ligado (padrão). Só os testes com `spawnFn` falso o desligam explicitamente.
    * Ligado, exige /usr/bin/sandbox-exec e a prova de isolamento (`selftestOk`).
@@ -394,6 +397,7 @@ export class ClaudeCodeRunner {
       root: rootRes.root
     };
     this.persist(job);
+    this.notify(job);
 
     let child: ChildProcess;
     try {
@@ -494,12 +498,28 @@ export class ClaudeCodeRunner {
     if (extra.result !== undefined) job.result = extra.result.slice(0, CLAUDE_MAX_RESULT_CHARS);
     if (extra.error !== undefined) job.error = extra.error;
     this.persist(job);
+    this.notify(job);
     if (notify) {
       try {
         this.opts.onFinished?.(job);
       } catch (err) {
         console.error('[claude] onFinished falhou:', err instanceof Error ? err.name : 'erro');
       }
+    }
+  }
+
+  private notify(job: ClaudeJob): void {
+    try {
+      this.opts.observer?.onEvent({
+        id: job.id,
+        mode: 'leitura',
+        order: job.order,
+        status: job.status === 'running' ? 'started' : job.status,
+        at: job.finishedAt ?? job.startedAt,
+        ...(job.status === 'running' ? {} : { conclusion: job.status === 'done' ? job.result : job.error ?? job.result })
+      });
+    } catch {
+      /* o aviso nunca derruba a tarefa */
     }
   }
 

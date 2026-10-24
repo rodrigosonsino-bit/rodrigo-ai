@@ -5,6 +5,7 @@ import { guardText } from '../privacy/outboundGuard.js';
 import { claudeCodeEffective, DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 import type { SubAgentCoordinator } from './subAgent.js';
 import { isolationReadiness, scrubEnv, wrapSandbox, type IsolationDeps } from './claudeCode.js';
+import type { DelegationObserver, DelegationStatus } from './delegationNotice.js';
 
 /** Timeout padrão: 10 minutos (configurável via RODRIGO_CLAUDE_TIMEOUT_MS). */
 const DEFAULT_TIMEOUT_MS = 600_000;
@@ -62,7 +63,8 @@ export class ClaudeCodeSubAgent implements ISubAgent {
     private readonly privacy: PrivacyConfig = DEFAULT_PRIVACY,
     private readonly rootDir: string = process.cwd(),
     private readonly verifyMutationToken?: (turnId: string, token: string) => boolean,
-    private readonly isolation?: IsolationDeps
+    private readonly isolation?: IsolationDeps,
+    private readonly observer?: DelegationObserver
   ) {
     this.timeoutMs = parseInt(process.env.RODRIGO_CLAUDE_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10);
   }
@@ -118,7 +120,21 @@ export class ClaudeCodeSubAgent implements ISubAgent {
       }
       spec = { command: ready.bin, cwd: ready.root, env: scrubEnv(process.env) };
     }
-    return this._runProcess(safePrompt, req.taskId ?? crypto.randomUUID(), signal, spec);
+    // Ajuste 1 (F17): aviso à Ogra no início e no fim (modo escrita). Nunca derruba a tarefa.
+    const noticeId = req.taskId ?? crypto.randomUUID();
+    const emit = (status: DelegationStatus, conclusion?: string): void => {
+      try {
+        this.observer?.onEvent({ id: noticeId, mode: 'escrita', order: req.prompt, status, at: new Date().toISOString(), ...(conclusion !== undefined ? { conclusion } : {}) });
+      } catch {
+        /* ignora */
+      }
+    };
+    emit('started');
+    const result = await this._runProcess(safePrompt, noticeId, signal, spec);
+    const cancelled = !result.success && /cancelad/i.test(result.error ?? '');
+    const timedOut = !result.success && /Tempo esgotado/i.test(result.error ?? '');
+    emit(result.success ? 'done' : cancelled ? 'cancelled' : timedOut ? 'timeout' : 'failed', result.success ? result.output : result.error);
+    return result;
   }
 
   private _runProcess(
@@ -246,11 +262,12 @@ export function registerClaudeCodeAgent(
   privacy: PrivacyConfig,
   rootDir: string,
   verifyMutationToken?: (turnId: string, token: string) => boolean,
-  isolation?: IsolationDeps
+  isolation?: IsolationDeps,
+  observer?: DelegationObserver
 ): ClaudeCodeSubAgent | null {
   if (!claudeCodeEffective(privacy)) return null;
   if (!isolation) console.warn('[Rodrigo AI] ATENÇÃO: ClaudeCodeSubAgent registrado SEM isolamento (só deve ocorrer em testes).');
-  const agent = new ClaudeCodeSubAgent(privacy, rootDir, verifyMutationToken, isolation);
+  const agent = new ClaudeCodeSubAgent(privacy, rootDir, verifyMutationToken, isolation, observer);
   coordinator.register(agent);
   console.log('[Rodrigo AI] ClaudeCodeSubAgent registrado (RODRIGO_CLAUDE_CODE efetivo).');
   return agent;
