@@ -3,7 +3,7 @@
 Leia inteiro antes da primeira ação. Contexto completo em `docs/f17-estado-e-continuacao-2026-10-24.md` (estado verificado às ~17:25 BRT), `docs/phase-17-v2.md` (§6 a §8) e o parecer do Code em `~/auditoria-code.md`.
 
 ## 0. ATENÇÃO: outra sessão estava mexendo neste worktree  [verificado às ~17:27 BRT]
-Depois do commit `15a710a`, o `git status` do worktree `outputs/rodrigo-ai-wt-f17` mostrou **6 arquivos modificados que a sessão anterior (esta) NÃO tocou**, e havia um `node --test` rodando nele:
+Depois do commit `15a710a` (antes deste documento), o `git status` do worktree `outputs/rodrigo-ai-wt-f17` mostrou **6 arquivos modificados que a sessão anterior (esta) NÃO tocou**, e havia um `node --test` rodando nele:
 `src/backend/agents/{claudeCode,claudeCodeSubAgent,delegationNotice}.ts` e `src/backend/__tests__/{claudeCode,claudeCodeWriteMode,delegationNotice}.test.ts`.
 O conteúdo parece ser as correções **M4** (aviso à Ogra só com metadados: tamanho da conclusão, nunca o texto) e **M5** (`detached: true` e `killProcessGroup` no modo escrita) do parecer do Code, talvez M1. **Autoria desconhecida** (a Ogra, o Code ou outra sessão do Claude). **Não sobrescreva, não faça `git checkout .`, não commite por cima.** Rode primeiro: `git status --short`, `git diff --stat`, `ps aux | grep "node --test"`, e descubra quem trabalha ali (pergunte ao Rodrigo e à Ogra). Regra do projeto: uma sessão por worktree.
 
@@ -23,7 +23,7 @@ git branch --show-current; git rev-parse --short HEAD; git status --short; git f
 git rev-list --left-right --count origin/main...HEAD; git log --oneline origin/main..HEAD | head -15
 ls -la ~/auditoria-code.md; ls -la .runtime/claude-code-selftest.json; grep -n -E "^(RODRIGO_CLAUDE_CODE|RODRIGO_OGRA)=" ../rodrigo-ai/.env
 ```
-Estado esperado às ~17:27: branch `fase-17-claude-code`, HEAD `15a710a`, 12 commits locais à frente da `origin/main` e 0 atrás, **mais os 6 arquivos modificados do §0**; selftest aprovado às 20:21Z (perfil v2); `.env` do checkout principal com as duas flags em `1`; app **não** reaberto.
+Estado esperado às ~17:27: branch `fase-17-claude-code`, HEAD `0d3ea6f` (o commit deste documento; o anterior é `15a710a`), 13 commits locais à frente da `origin/main` e 0 atrás, **mais os 6 arquivos modificados do §0**; selftest aprovado às 20:21Z (perfil v2); `.env` do checkout principal com as duas flags em `1`; app **não** reaberto.
 
 ## 3. O que está pronto  [herdado do estado, ver o outro documento]
 Implementação da F17 (modos leitura e escrita isolados), aviso à Ogra, contador de novos, merge da `main`, correções A1, A2, A3 do Code, selftest real aprovado, 980 testes sem falha (3 execuções). Nada em `origin`: sem push, PR ou merge.
