@@ -317,6 +317,7 @@ describe('Fase 17: runner', () => {
     h.runner.start('analise a estrutura do projeto');
     h.calls[0].child.finish(JSON.stringify({ is_error: true, result: 'quota' }), 0);
     assert.equal(h.finished[0].status, 'failed');
+    assert.match(h.finished[0].error ?? '', /respondeu com erro: quota/, 'o motivo (ex.: sessão expirada) precisa chegar ao usuário');
     h.runner.start('outra análise do projeto inteiro');
     h.calls[1].child.finish('', 3);
     assert.equal(h.finished[1].status, 'failed');

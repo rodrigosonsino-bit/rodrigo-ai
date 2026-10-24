@@ -444,7 +444,7 @@ export class ClaudeCodeRunner {
       if (settled) return;
       const parsed = parseClaudeOutput(stdout);
       if (code === 0 && !parsed.isError) done('done', { exitCode: code, result: parsed.text });
-      else done('failed', { exitCode: code, result: parsed.text || undefined, error: parsed.isError ? 'O Claude respondeu com erro.' : `O Claude terminou com código ${code}.` });
+      else done('failed', { exitCode: code, result: parsed.text || undefined, error: parsed.isError ? `O Claude respondeu com erro${parsed.text ? `: ${parsed.text.replace(/\s+/g, ' ').slice(0, 200)}` : '.'}` : `O Claude terminou com código ${code}.` });
     });
 
     this.current = { job, child, timer };
