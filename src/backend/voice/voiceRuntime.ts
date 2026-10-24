@@ -7,7 +7,9 @@ import {
   ClaudeCodeRunner,
   ClaudeDelegateTool,
   defaultRootFs,
+  claudeSandboxPaths,
   findClaudeBinary,
+  profileFingerprint,
   resolveClaudeRoot,
   selftestMatches,
   SELFTEST_MARKER_FILE,
@@ -178,12 +180,19 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // mas só fica disponível com o canal RODRIGO_CLAUDE_CODE=1, raiz válida, binário e a prova de isolamento (selftest).
   // Isolamento compartilhado pelo modo LEITURA (runner) e pelo modo ESCRITA (ClaudeCodeSubAgent): mesma raiz limpa,
   // mesmo perfil sandbox-exec e a mesma prova (selftest) exigida antes de qualquer execução.
+  const claudeSandboxDirs = claudeSandboxPaths(rootDir);
   const claudeIsolation: IsolationDeps = {
     resolveRoot: () => resolveClaudeRoot(rootDir),
     claudeBin: () => findClaudeBinary(),
     home: os.homedir(),
+    paths: claudeSandboxDirs,
     exists: (p) => fs.existsSync(p),
-    selftestOk: (root, bin) => selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), { root, claudeBin: bin })
+    selftestOk: (root, bin) =>
+      selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), {
+        root,
+        claudeBin: bin,
+        profileHash: profileFingerprint(root, os.homedir(), claudeSandboxDirs)
+      })
   };
   // Ajuste 1 (F17): avisos de delegação para a Ogra (no-op sem RODRIGO_OGRA=1 e sem webhook). `sessionManager` ainda não existe
   // aqui; o callback é avaliado só quando um aviso sai.
@@ -191,16 +200,9 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   let sessionManagerRef: SessionManager | null = null;
   const claudeRunner = new ClaudeCodeRunner({
     observer: delegationObserver,
-    resolveRoot: () => resolveClaudeRoot(rootDir),
     store: new JsonStore<ClaudeJob>(dataDir, 'claude-jobs.json'),
-    claudeBin: () => findClaudeBinary(),
     guard: (t) => guardText(t, privacy.outboundGuard),
-    sandbox: {
-      enabled: true,
-      home: os.homedir(),
-      exists: (p) => fs.existsSync(p),
-      selftestOk: (root, bin) => selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), { root, claudeBin: bin })
-    },
+    isolation: claudeIsolation,
     onFinished: (job) => {
       // Aviso sonoro só se houver sessão ociosa; texto vindo do Claude é NÃO CONFIÁVEL: voz do sistema e fora do histórico.
       void claudeFinishedAnnouncer(job);
@@ -244,9 +246,11 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   );
   desktopTool.setPostSpeechScheduler((action) => sessionManager.schedulePostSpeechAction(action));
   registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
-  registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
-    sessionManager.consumeMutationToken(turnId, token),
+  registerClaudeCodeAgent(
+    coordinator,
+    privacy,
     claudeIsolation,
+    (turnId, token) => sessionManager.consumeMutationToken(turnId, token),
     delegationObserver
   );
   sessionManagerRef = sessionManager;

@@ -4,35 +4,11 @@ import type { Capability } from './capabilityPolicy.js';
 import { guardText } from '../privacy/outboundGuard.js';
 import { claudeCodeEffective, DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 import type { SubAgentCoordinator } from './subAgent.js';
-import { isolationReadiness, scrubEnv, wrapSandbox, type IsolationDeps } from './claudeCode.js';
+import { claudeChildEnv, ensureSandboxDirs, isolationReadiness, wrapSandbox, type IsolationDeps } from './claudeCode.js';
 import type { DelegationObserver, DelegationStatus } from './delegationNotice.js';
 
 /** Timeout padrão: 10 minutos (configurável via RODRIGO_CLAUDE_TIMEOUT_MS). */
 const DEFAULT_TIMEOUT_MS = 600_000;
-
-/**
- * Variáveis que nunca passam ao processo filho.
- * Segredos de nuvem e env vars do app que poderiam revelar configuração interna.
- */
-const ENV_DENY_LIST: readonly string[] = [
-  'GEMINI_API_KEY',
-  'TYPESAFE_API_KEY',
-  'GROK_WEBHOOK_URL',
-  'GROK_WEBHOOK_KEY',
-  'MIMO_API_KEY',
-];
-const RODRIGO_ENV_PREFIX = 'RODRIGO_';
-
-function buildChildEnv(): NodeJS.ProcessEnv {
-  const child: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!v) continue;
-    if (ENV_DENY_LIST.includes(k)) continue;
-    if (k.startsWith(RODRIGO_ENV_PREFIX)) continue;
-    child[k] = v;
-  }
-  return child;
-}
 
 /**
  * Fase 17 — ClaudeCodeSubAgent: spawna `claude -p` como processo filho para delegar
@@ -60,10 +36,10 @@ export class ClaudeCodeSubAgent implements ISubAgent {
   private readonly timeoutMs: number;
 
   constructor(
-    private readonly privacy: PrivacyConfig = DEFAULT_PRIVACY,
-    private readonly rootDir: string = process.cwd(),
-    private readonly verifyMutationToken?: (turnId: string, token: string) => boolean,
-    private readonly isolation?: IsolationDeps,
+    private readonly privacy: PrivacyConfig,
+    private readonly verifyMutationToken: ((turnId: string, token: string) => boolean) | undefined,
+    /** OBRIGATÓRIO (A3 do Code): sem isolamento este agente não existe. Não há caminho legado nem fallback. */
+    private readonly isolation: IsolationDeps,
     private readonly observer?: DelegationObserver
   ) {
     this.timeoutMs = parseInt(process.env.RODRIGO_CLAUDE_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10);
@@ -108,18 +84,16 @@ export class ClaudeCodeSubAgent implements ISubAgent {
     }
     const safePrompt = promptGuard.text;
 
-    let spec: { command: string; args?: string[]; cwd: string; env: NodeJS.ProcessEnv } | null = null;
-    if (this.isolation) {
-      const ready = isolationReadiness(this.isolation);
-      if (!ready.ready) {
-        return {
-          success: false, output: '',
-          error: `A delegação ao Claude não está pronta: ${ready.reason}.`,
-          kind: 'final'
-        };
-      }
-      spec = { command: ready.bin, cwd: ready.root, env: scrubEnv(process.env) };
+    const ready = isolationReadiness(this.isolation);
+    if (!ready.ready) {
+      return {
+        success: false, output: '',
+        error: `A delegação ao Claude não está pronta: ${ready.reason}.`,
+        kind: 'final'
+      };
     }
+    // B1: binário e raiz do spawn são os da leitura que a prova conferiu.
+    const spec = { command: ready.bin, cwd: ready.root, env: claudeChildEnv(process.env, this.isolation.paths) };
     // Ajuste 1 (F17): aviso à Ogra no início e no fim (modo escrita). Nunca derruba a tarefa.
     const noticeId = req.taskId ?? crypto.randomUUID();
     const emit = (status: DelegationStatus, conclusion?: string): void => {
@@ -141,10 +115,10 @@ export class ClaudeCodeSubAgent implements ISubAgent {
     prompt: string,
     _taskId: string,
     signal: AbortSignal,
-    spec: { command: string; cwd: string; env: NodeJS.ProcessEnv } | null
+    spec: { command: string; cwd: string; env: NodeJS.ProcessEnv }
   ): Promise<SubAgentTaskResult> {
     return new Promise<SubAgentTaskResult>((resolve) => {
-      const childEnv = spec ? spec.env : buildChildEnv();
+      const childEnv = spec.env;
 
       // H17.2: vetor de args fixo; prompt chega por stdin, nunca no argv.
       // D1 = escrita desde o início: Bash, Read, Write, Edit, Glob, Grep (sem MCP herdado).
@@ -158,9 +132,10 @@ export class ClaudeCodeSubAgent implements ISubAgent {
 
       let proc: ReturnType<typeof spawn>;
       try {
-        const iso = this.isolation && spec ? wrapSandbox(spec.command, args, spec.cwd, this.isolation.home, { writable: true }) : null;
-        proc = spawn(iso ? iso.command : 'claude', iso ? iso.args : args, {
-          cwd: spec ? spec.cwd : this.rootDir,
+        ensureSandboxDirs(this.isolation.paths);
+        const iso = wrapSandbox(spec.command, args, spec.cwd, this.isolation.home, { writable: true, paths: this.isolation.paths });
+        proc = spawn(iso.command, iso.args, {
+          cwd: spec.cwd,
           env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe']
         });
@@ -260,14 +235,13 @@ export class ClaudeCodeSubAgent implements ISubAgent {
 export function registerClaudeCodeAgent(
   coordinator: SubAgentCoordinator,
   privacy: PrivacyConfig,
-  rootDir: string,
+  /** OBRIGATÓRIO (A3): sem isolamento não há registro. */
+  isolation: IsolationDeps,
   verifyMutationToken?: (turnId: string, token: string) => boolean,
-  isolation?: IsolationDeps,
   observer?: DelegationObserver
 ): ClaudeCodeSubAgent | null {
   if (!claudeCodeEffective(privacy)) return null;
-  if (!isolation) console.warn('[Rodrigo AI] ATENÇÃO: ClaudeCodeSubAgent registrado SEM isolamento (só deve ocorrer em testes).');
-  const agent = new ClaudeCodeSubAgent(privacy, rootDir, verifyMutationToken, isolation, observer);
+  const agent = new ClaudeCodeSubAgent(privacy, verifyMutationToken, isolation, observer);
   coordinator.register(agent);
   console.log('[Rodrigo AI] ClaudeCodeSubAgent registrado (RODRIGO_CLAUDE_CODE efetivo).');
   return agent;

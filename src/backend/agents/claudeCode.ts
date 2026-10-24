@@ -59,6 +59,14 @@ export function scrubEnv(parent: Readonly<Record<string, string | undefined>>): 
   return out;
 }
 
+/**
+ * A1 da auditoria do Code: o filho NUNCA usa o `~/.claude` do usuário (hooks, comandos, agentes e transcrições de outros
+ * projetos). Ele recebe um CLAUDE_CONFIG_DIR próprio dentro de `.runtime` e um TMPDIR próprio; o resto do ambiente é a lista de permissão.
+ */
+export function claudeChildEnv(parent: Readonly<Record<string, string | undefined>>, paths: SandboxPaths): Record<string, string> {
+  return { ...scrubEnv(parent), CLAUDE_CONFIG_DIR: paths.configDir, TMPDIR: paths.tmpDir };
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Raiz de leitura
 // ---------------------------------------------------------------------------------------------------------------------
@@ -150,8 +158,8 @@ export function resolveClaudeRoot(projectRoot: string, rfs: RootFs = defaultRoot
 // inteiro e reabre só a raiz validada e os arquivos do próprio Claude Code. docs/research, ~/.ssh, .env, etc. ficam fora.
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Sobe quando o perfil muda: invalida a prova de isolamento (selftest) anterior. */
-export const SANDBOX_PROFILE_VERSION = 1;
+/** Sobe quando o perfil muda: invalida a prova de isolamento (selftest) anterior. v2: config própria, escrita negada por padrão, rede só 443/DNS. */
+export const SANDBOX_PROFILE_VERSION = 2;
 export const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 
 function sbQuote(p: string): string {
@@ -159,37 +167,68 @@ function sbQuote(p: string): string {
   return `"${p}"`;
 }
 
+/** Pastas próprias do filho, dentro de `<projeto>/.runtime`: configuração do Claude (login separado) e TMPDIR. */
+export interface SandboxPaths {
+  configDir: string;
+  tmpDir: string;
+}
+
+export function claudeSandboxPaths(projectRoot: string): SandboxPaths {
+  return { configDir: path.join(projectRoot, '.runtime', 'claude-home'), tmpDir: path.join(projectRoot, '.runtime', 'claude-tmp') };
+}
+
+/** Cria as duas pastas (modo 0700) antes de qualquer spawn. */
+export function ensureSandboxDirs(paths: SandboxPaths): void {
+  for (const d of [paths.configDir, paths.tmpDir]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+}
+
+export interface SandboxProfileOpts {
+  /** Modo escrita (opção C): a raiz isolada também é gravável. Padrão: leitura. */
+  writable?: boolean;
+  paths: SandboxPaths;
+}
+
 /**
- * Perfil SBPL. Regras posteriores vencem as anteriores: nega o HOME, reabre o necessário. Leitura de metadados (stat) dos
- * ancestrais fica liberada para a resolução de caminhos; o CONTEÚDO fora da raiz não.
+ * Perfil SBPL (regras posteriores vencem as anteriores).
+ *  - LEITURA: nega o HOME inteiro e reabre só a raiz, a configuração/TMPDIR próprios e o necessário para executar o binário e usar o Keychain.
+ *    O `~/.claude` do usuário NÃO é reaberto (A1/M2 do Code).
+ *  - ESCRITA: nega TODA gravação (A2) e reabre só a configuração própria, o TMPDIR próprio, /dev/{null,tty,...} e, no modo escrita, a raiz.
+ *  - REDE: nega tudo e reabre TCP 443 e DNS (A2). Não filtra domínio (o SBPL não consegue); reduz a superfície, não a elimina.
  */
-export function buildSandboxProfile(root: string, home: string, opts: { writable?: boolean } = {}): string {
-  const h = sbQuote(home);
+export function buildSandboxProfile(root: string, home: string, opts: SandboxProfileOpts): string {
+  const q = sbQuote;
+  const { configDir, tmpDir } = opts.paths;
   return [
     '(version 1)',
     '(allow default)',
-    // Nada de leitura nem escrita no HOME por padrão...
-    `(deny file-read-data (subpath ${h}))`,
-    `(deny file-write* (subpath ${h}))`,
-    // ...exceto a raiz validada (leitura) e o que o próprio Claude Code precisa para iniciar e manter o login.
-    `(allow file-read-data (subpath ${sbQuote(root)}))`,
-    // Modo escrita (opção C): a ÚNICA pasta gravável do HOME é a raiz isolada; o resto do HOME segue negado.
-    ...(opts.writable ? [`(allow file-write* (subpath ${sbQuote(root)}))`] : []),
-    `(allow file-read-data (subpath ${sbQuote(path.join(home, '.claude'))}))`,
-    `(allow file-read-data (literal ${sbQuote(path.join(home, '.claude.json'))}))`,
-    `(allow file-read-data (subpath ${sbQuote(path.join(home, '.local', 'share', 'claude'))}))`,
-    `(allow file-read-data (subpath ${sbQuote(path.join(home, '.local', 'bin'))}))`,
-    `(allow file-read-data (subpath ${sbQuote(path.join(home, 'Library', 'Keychains'))}))`,
-    `(allow file-read-data (subpath ${sbQuote(path.join(home, 'Library', 'Preferences'))}))`,
-    `(allow file-read-data (subpath ${sbQuote(path.join(home, 'Library', 'Caches'))}))`,
-    `(allow file-write* (subpath ${sbQuote(path.join(home, '.claude'))}))`,
-    `(allow file-write* (prefix ${sbQuote(path.join(home, '.claude.json'))}))`,
-    `(allow file-write* (subpath ${sbQuote(path.join(home, 'Library', 'Caches'))}))`
+    `(deny file-read-data (subpath ${q(home)}))`,
+    '(deny file-write*)',
+    ...['/dev/null', '/dev/tty', '/dev/dtracehelper', '/dev/zero'].map((d) => `(allow file-write* (literal ${q(d)}))`),
+    `(allow file-read-data (subpath ${q(root)}))`,
+    `(allow file-read-data (subpath ${q(configDir)}))`,
+    `(allow file-read-data (subpath ${q(tmpDir)}))`,
+    `(allow file-read-data (subpath ${q(path.join(home, '.local', 'share', 'claude'))}))`,
+    `(allow file-read-data (subpath ${q(path.join(home, '.local', 'bin'))}))`,
+    `(allow file-read-data (subpath ${q(path.join(home, 'Library', 'Keychains'))}))`,
+    `(allow file-write* (subpath ${q(configDir)}))`,
+    `(allow file-write* (subpath ${q(tmpDir)}))`,
+    ...(opts.writable ? [`(allow file-write* (subpath ${q(root)}))`] : []),
+    '(deny network*)',
+    '(allow network-outbound (remote tcp "*:443"))',
+    '(allow network-outbound (remote udp "*:53"))',
+    `(allow network-outbound (literal ${q('/private/var/run/mDNSResponder')}))`
   ].join('\n');
 }
 
-export function wrapSandbox(bin: string, args: readonly string[], root: string, home: string, opts: { writable?: boolean } = {}): { command: string; args: string[] } {
+export function wrapSandbox(bin: string, args: readonly string[], root: string, home: string, opts: SandboxProfileOpts): { command: string; args: string[] } {
   return { command: SANDBOX_EXEC, args: ['-p', buildSandboxProfile(root, home, opts), bin, ...args] };
+}
+
+/** Impressão digital dos DOIS perfis (leitura e escrita) gerados para esta raiz/HOME/pastas: entra na prova (M3 do Code). */
+export function profileFingerprint(root: string, home: string, paths: SandboxPaths): string {
+  const a = buildSandboxProfile(root, home, { paths });
+  const b = buildSandboxProfile(root, home, { paths, writable: true });
+  return crypto.createHash('sha256').update(`${a}\n--\n${b}`).digest('hex');
 }
 
 /** Dependências do isolamento, compartilhadas pelo modo leitura (runner) e pelo modo escrita (ClaudeCodeSubAgent). */
@@ -197,6 +236,8 @@ export interface IsolationDeps {
   resolveRoot: () => RootResolution;
   claudeBin: () => string | null;
   home: string;
+  /** Pastas próprias do filho (configuração do Claude e TMPDIR). */
+  paths: SandboxPaths;
   exists: (p: string) => boolean;
   selftestOk: (root: string, bin: string) => boolean;
 }
@@ -219,16 +260,18 @@ export interface SelftestMarker {
   profileVersion: number;
   root: string;
   claudeBin: string;
+  /** sha256 dos perfis de leitura e escrita provados (M3). */
+  profileHash: string;
   passedAt: string;
 }
 
 export const SELFTEST_MARKER_FILE = path.join('.runtime', 'claude-code-selftest.json');
 
-export function selftestMatches(raw: string | null, expect: { root: string; claudeBin: string }): boolean {
+export function selftestMatches(raw: string | null, expect: { root: string; claudeBin: string; profileHash: string }): boolean {
   if (raw === null) return false;
   try {
     const m = JSON.parse(raw) as Partial<SelftestMarker>;
-    return m.profileVersion === SANDBOX_PROFILE_VERSION && m.root === expect.root && m.claudeBin === expect.claudeBin && typeof m.passedAt === 'string';
+    return m.profileVersion === SANDBOX_PROFILE_VERSION && m.root === expect.root && m.claudeBin === expect.claudeBin && m.profileHash === expect.profileHash && typeof m.passedAt === 'string';
   } catch {
     return false;
   }
@@ -293,11 +336,7 @@ export interface ClaudeJob {
 export type SpawnFn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
 export interface ClaudeRunnerOptions {
-  /** Raiz de leitura validada agora (chamada a cada start, para refletir mudanças). */
-  resolveRoot: () => RootResolution;
   store: JsonStore<ClaudeJob>;
-  /** Caminho do binário `claude`; null => indisponível. */
-  claudeBin: () => string | null;
   spawnFn?: SpawnFn;
   parentEnv?: () => Readonly<Record<string, string | undefined>>;
   timeoutMs?: number;
@@ -308,10 +347,10 @@ export interface ClaudeRunnerOptions {
   /** Ajuste 1 (F17): avisa a Ogra no início e no fim de cada tarefa (modo leitura). */
   observer?: DelegationObserver;
   /**
-   * Isolamento do macOS. Produção: SEMPRE ligado (padrão). Só os testes com `spawnFn` falso o desligam explicitamente.
-   * Ligado, exige /usr/bin/sandbox-exec e a prova de isolamento (`selftestOk`).
+   * Isolamento do macOS: OBRIGATÓRIO (A3 do Code). Sem /usr/bin/sandbox-exec, raiz limpa e prova de isolamento a tarefa não roda,
+   * e não existe caminho sem isolamento: nem em produção, nem nos testes (que injetam um `spawnFn` falso).
    */
-  sandbox?: { enabled: boolean; home: string; exists: (p: string) => boolean; selftestOk: (root: string, bin: string) => boolean };
+  isolation: IsolationDeps;
 }
 
 export type StartResult = { ok: true; id: string } | { ok: false; error: string };
@@ -331,18 +370,8 @@ export class ClaudeCodeRunner {
   }
 
   /** Pronto = há binário e há raiz válida. (O mestre/canal de privacidade é checado por quem constrói a ferramenta.) */
-  readiness(): { ready: true } | { ready: false; reason: string } {
-    if (!this.opts.claudeBin()) return { ready: false, reason: 'o binário "claude" não foi encontrado' };
-    const r = this.opts.resolveRoot();
-    if (!r.ok) return { ready: false, reason: r.reason };
-    const sb = this.opts.sandbox;
-    if (sb?.enabled) {
-      if (!sb.exists(SANDBOX_EXEC)) return { ready: false, reason: 'o isolamento do macOS (sandbox-exec) não está disponível' };
-      if (!sb.selftestOk(r.root, this.opts.claudeBin() as string)) {
-        return { ready: false, reason: 'falta a prova de isolamento (rode scripts/claude-code-selftest.mjs)' };
-      }
-    }
-    return { ready: true };
+  readiness(): IsolationReadiness {
+    return isolationReadiness(this.opts.isolation);
   }
 
   isBusy(): boolean {
@@ -377,9 +406,9 @@ export class ClaudeCodeRunner {
     if (this.current) return { ok: false, error: 'Já há uma tarefa do Claude em andamento.' };
     const ready = this.readiness();
     if (!ready.ready) return { ok: false, error: `A delegação ao Claude não está pronta: ${ready.reason}.` };
-    const bin = this.opts.claudeBin() as string;
-    const rootRes = this.opts.resolveRoot();
-    if (!rootRes.ok) return { ok: false, error: `Raiz de leitura inválida: ${rootRes.reason}.` };
+    // B1 do Code: o binário e a raiz do spawn são EXATAMENTE os que a prova de isolamento conferiu (uma única leitura).
+    const bin = ready.bin;
+    const rootRes = { ok: true as const, root: ready.root };
 
     let order = orderRaw.trim().slice(0, CLAUDE_MAX_ORDER_CHARS);
     if (order.length === 0) return { ok: false, error: 'A ordem para o Claude está vazia.' };
@@ -401,11 +430,12 @@ export class ClaudeCodeRunner {
 
     let child: ChildProcess;
     try {
-      const sb = this.opts.sandbox;
-      const cmd = sb?.enabled ? wrapSandbox(bin, buildClaudeArgv(), rootRes.root, sb.home) : { command: bin, args: buildClaudeArgv() };
+      const iso = this.opts.isolation;
+      ensureSandboxDirs(iso.paths);
+      const cmd = wrapSandbox(bin, buildClaudeArgv(), rootRes.root, iso.home, { paths: iso.paths });
       child = this.spawnFn(cmd.command, cmd.args, {
         cwd: rootRes.root,
-        env: scrubEnv((this.opts.parentEnv ?? (() => process.env))()),
+        env: claudeChildEnv((this.opts.parentEnv ?? (() => process.env))(), iso.paths),
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
         shell: false

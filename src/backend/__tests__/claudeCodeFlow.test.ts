@@ -13,6 +13,7 @@ import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { ClaudeCodeRunner, ClaudeDelegateTool, CLAUDE_STARTED_TEXT, type ClaudeJob } from '../agents/claudeCode.js';
 import { CLAUDE_CODE_DISABLED_TEXT } from '../privacy.js';
 import { freePort } from './helpers/freePort.js';
+import { fakeIsolation } from './helpers/claudeIsolation.js';
 import { JsonStore } from '../storage/jsonStore.js';
 import { startServer } from '../server.js';
 import { AudioStore } from '../voice/audioStore.js';
@@ -60,9 +61,8 @@ describe('Fase 17: fluxo de voz ponta a ponta', () => {
     const finished: ClaudeJob[] = [];
     let announce: (j: ClaudeJob) => void = () => {};
     const runner = new ClaudeCodeRunner({
-      resolveRoot: () => ({ ok: true, root: '/work/ro' }),
+      isolation: fakeIsolation(),
       store: new JsonStore<ClaudeJob>(tmp, 'claude-jobs.json'),
-      claudeBin: () => '/fake/claude',
       spawnFn: () => { const c = new FakeChild(); children.push(c); return c as unknown as ChildProcess; },
       onFinished: (j) => { finished.push(j); announce(j); }
     });

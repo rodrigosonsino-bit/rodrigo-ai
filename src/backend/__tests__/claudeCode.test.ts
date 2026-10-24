@@ -15,6 +15,9 @@ import {
   SANDBOX_PROFILE_VERSION,
   buildClaudeArgv,
   buildSandboxProfile,
+  claudeChildEnv,
+  claudeSandboxPaths,
+  profileFingerprint,
   detectClaudeDelegation,
   findClaudeBinary,
   isClaudeResultQuery,
@@ -31,6 +34,7 @@ import { JsonStore } from '../storage/jsonStore.js';
 import { ToolSubAgent } from '../agents/adapters.js';
 import { CapabilityPolicy, EFFECTIVE_GRANTS } from '../agents/capabilityPolicy.js';
 import { windowHistory } from '../voice/sessionManager.js';
+import { fakeIsolation, unwrapSpawn } from './helpers/claudeIsolation.js';
 import { claudeCodeEffective, parsePrivacyConfig } from '../privacy.js';
 
 // ------------------------------------------------------------------------------------------------ helpers
@@ -70,9 +74,8 @@ function harness(opts: { timeoutMs?: number; guard?: (t: string) => { text: stri
   const finished: ClaudeJob[] = [];
   const store = new JsonStore<ClaudeJob>(dir, 'claude-jobs.json');
   const runner = new ClaudeCodeRunner({
-    resolveRoot: () => (opts.rootOk === false ? { ok: false, reason: 'sem raiz' } : { ok: true, root: '/work/claude-readonly' }),
+    isolation: fakeIsolation(opts.rootOk === false ? { resolveRoot: () => ({ ok: false, reason: 'sem raiz' }) } : {}),
     store,
-    claudeBin: () => '/fake/bin/claude',
     spawnFn: (command, args, options) => {
       const child = new FakeChild();
       calls.push({ command, args, options, child });
@@ -172,68 +175,120 @@ describe('Fase 17: raiz de leitura', () => {
   });
 });
 
-describe('Fase 17: isolamento do macOS (achados 1 e 3 da auditoria do agy)', () => {
-  it('o perfil nega o HOME e reabre só a raiz e os arquivos do próprio Claude', () => {
-    const p = buildSandboxProfile('/Users/me/proj/.runtime/ro', '/Users/me');
-    assert.match(p, /\(deny file-read-data \(subpath "\/Users\/me"\)\)/);
-    assert.match(p, /\(allow file-read-data \(subpath "\/Users\/me\/proj\/\.runtime\/ro"\)\)/);
-    assert.ok(!/\.ssh|\.aws|Documents/.test(p), 'o perfil não pode reabrir pastas sensíveis');
-    assert.throws(() => buildSandboxProfile('/x"y', '/Users/me'), /inválido/);
+describe('Fase 17: isolamento do macOS (achados 1 e 3 do agy; A1, A2, A3 e M3 do Code)', () => {
+  const PATHS = { configDir: '/Users/me/proj/.runtime/claude-home', tmpDir: '/Users/me/proj/.runtime/claude-tmp' };
+  const ROOT = '/Users/me/proj/.runtime/ro';
+
+  it('A1: o perfil NÃO reabre o ~/.claude do usuário (nem leitura nem escrita) e usa a configuração própria', () => {
+    for (const writable of [false, true]) {
+      const p = buildSandboxProfile(ROOT, '/Users/me', { paths: PATHS, writable });
+      assert.ok(!/\/Users\/me\/\.claude/.test(p), 'nenhuma regra pode citar /Users/me/.claude');
+      assert.match(p, /\(allow file-write\* \(subpath "\/Users\/me\/proj\/\.runtime\/claude-home"\)\)/);
+      assert.ok(!/\(prefix /.test(p), 'nada de prefix (cobria .claude.json.<qualquer coisa>)');
+    }
+    const env = claudeChildEnv({ PATH: '/usr/bin', HOME: '/Users/me', GEMINI_API_KEY: 'x' }, PATHS);
+    assert.equal(env.CLAUDE_CONFIG_DIR, PATHS.configDir);
+    assert.equal(env.TMPDIR, PATHS.tmpDir);
+    assert.ok(!('GEMINI_API_KEY' in env));
+    assert.deepEqual(claudeSandboxPaths('/Users/me/proj'), PATHS);
   });
-  it('prova real (macOS): dentro da raiz lê; fora, no HOME, é negado (sandbox-exec + cat)', { skip: process.platform !== 'darwin' || !fs.existsSync(SANDBOX_EXEC) }, async () => {
+
+  it('A2: escrita NEGADA por padrão e rede restrita; só config/TMPDIR próprios (e a raiz, no modo escrita) gravam', () => {
+    const ro = buildSandboxProfile(ROOT, '/Users/me', { paths: PATHS });
+    const rw = buildSandboxProfile(ROOT, '/Users/me', { paths: PATHS, writable: true });
+    for (const p of [ro, rw]) {
+      assert.match(p, /\(deny file-write\*\)\n/, 'negação GLOBAL de escrita');
+      assert.match(p, /\(deny network\*\)/);
+      assert.match(p, /\(allow network-outbound \(remote tcp "\*:443"\)\)/);
+      assert.ok(!/\(allow default\)[\s\S]*\(allow network\*\)/.test(p));
+      assert.ok(!/Library\/Caches/.test(p), 'sem escrita em Library/Caches');
+    }
+    assert.ok(!ro.includes(`(allow file-write* (subpath "${ROOT}"))`), 'leitura não grava nem na raiz');
+    assert.ok(rw.includes(`(allow file-write* (subpath "${ROOT}"))`), 'escrita grava na raiz');
+    assert.throws(() => buildSandboxProfile('/x"y', '/Users/me', { paths: PATHS }), /inválido/);
+  });
+
+  it('prova real (macOS): leitura fora da raiz, gravação fora (HOME, /tmp, ~/.claude) e config do usuário são NEGADAS; raiz e pastas próprias funcionam', { skip: process.platform !== 'darwin' || !fs.existsSync(SANDBOX_EXEC) }, async () => {
     const { spawnSync } = await import('node:child_process');
     const home = os.homedir();
-    const root = fs.mkdtempSync(path.join(home, '.f17-root-'));
-    const outside = path.join(home, `.f17-outside-${process.pid}.txt`);
+    const base = fs.mkdtempSync(path.join(home, '.f17-base-'));
+    const root = path.join(base, 'root');
+    const paths = { configDir: path.join(base, 'claude-home'), tmpDir: path.join(base, 'claude-tmp') };
+    for (const d of [root, paths.configDir, paths.tmpDir]) fs.mkdirSync(d, { recursive: true });
+    const outsideRead = path.join(home, `.f17-iso-leitura-${process.pid}.txt`);
+    const outsideWrite = path.join(home, `.f17-iso-escrita-${process.pid}.txt`);
+    const tmpWrite = path.join(os.tmpdir(), `f17-iso-tmp-${process.pid}.txt`);
     fs.writeFileSync(path.join(root, 'in.txt'), 'DENTRO');
-    fs.writeFileSync(outside, 'FORA');
+    fs.writeFileSync(outsideRead, 'FORA');
     try {
-      const prof = buildSandboxProfile(root, home);
-      const run = (f: string) => spawnSync(SANDBOX_EXEC, ['-p', prof, '/bin/cat', f], { encoding: 'utf8' });
-      const inside = run(path.join(root, 'in.txt'));
-      // Se o próprio runner de testes já está sob um sandbox, o sandbox-exec aninhado falha: não há o que provar aqui.
-      if (inside.status !== 0 && /sandbox_apply|not permitted|Operation not permitted/i.test(inside.stderr)) return;
-      assert.equal(inside.stdout, 'DENTRO');
-      const out = run(outside);
-      assert.notEqual(out.status, 0);
-      assert.ok(!out.stdout.includes('FORA'));
+      const run = (writable: boolean, cmd: string) =>
+        spawnSync(SANDBOX_EXEC, ['-p', buildSandboxProfile(root, home, { paths, writable }), '/bin/sh', '-c', cmd], { encoding: 'utf8' });
+      const probe = run(false, `cat "${path.join(root, 'in.txt')}"`);
+      // Já sob outro sandbox, o sandbox-exec aninhado falha: não há o que provar aqui.
+      if (probe.status !== 0 && /sandbox_apply|not permitted/i.test(probe.stderr)) return;
+      assert.equal(probe.stdout, 'DENTRO', 'ler a raiz funciona');
+      assert.notEqual(run(false, `cat "${outsideRead}"`).status, 0, 'ler fora da raiz é negado');
+      assert.notEqual(run(false, `cat "${path.join(home, '.claude', 'settings.json')}"`).status, 0, 'ler a config do usuário é negado');
+      assert.equal(run(false, `echo x > "${path.join(paths.configDir, 'ok.txt')}"`).status, 0, 'gravar na config própria funciona');
+      assert.equal(run(false, `echo x > "${path.join(paths.tmpDir, 'ok.txt')}"`).status, 0, 'gravar no TMPDIR próprio funciona');
+      for (const mode of [false, true]) {
+        assert.notEqual(run(mode, `echo x > "${outsideWrite}"`).status, 0, `gravar no HOME é negado (writable=${mode})`);
+        assert.notEqual(run(mode, `echo x > "${tmpWrite}"`).status, 0, `gravar em /tmp é negado (writable=${mode})`);
+        assert.notEqual(run(mode, `echo x > "${path.join(home, '.claude', 'settings.json')}"`).status, 0, `gravar em ~/.claude é negado (writable=${mode})`);
+      }
+      assert.notEqual(run(false, `echo x > "${path.join(root, 'ro.txt')}"`).status, 0, 'o modo leitura não grava nem na raiz');
+      assert.equal(run(true, `echo x > "${path.join(root, 'rw.txt')}"`).status, 0, 'o modo escrita grava na raiz');
+      assert.equal(fs.existsSync(outsideWrite), false);
+      assert.equal(fs.existsSync(tmpWrite), false);
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-      fs.rmSync(outside, { force: true });
+      fs.rmSync(base, { recursive: true, force: true });
+      fs.rmSync(outsideRead, { force: true });
+      fs.rmSync(outsideWrite, { force: true });
+      fs.rmSync(tmpWrite, { force: true });
     }
   });
-  it('a prova de isolamento (selftest) só vale para a mesma versão do perfil, raiz e binário', () => {
-    const good = JSON.stringify({ profileVersion: SANDBOX_PROFILE_VERSION, root: '/r', claudeBin: '/b', passedAt: '2026-10-14T00:00:00Z' });
-    assert.equal(selftestMatches(good, { root: '/r', claudeBin: '/b' }), true);
-    assert.equal(selftestMatches(good, { root: '/outra', claudeBin: '/b' }), false);
-    assert.equal(selftestMatches(good, { root: '/r', claudeBin: '/outro' }), false);
-    assert.equal(selftestMatches(good.replace(String(SANDBOX_PROFILE_VERSION), '999'), { root: '/r', claudeBin: '/b' }), false);
-    assert.equal(selftestMatches(null, { root: '/r', claudeBin: '/b' }), false);
-    assert.equal(selftestMatches('{ruim', { root: '/r', claudeBin: '/b' }), false);
+
+  it('M3: a prova só vale para a MESMA versão e impressão digital dos perfis, raiz e binário', () => {
+    const hash = profileFingerprint(ROOT, '/Users/me', PATHS);
+    assert.equal(hash, profileFingerprint(ROOT, '/Users/me', PATHS), 'determinístico');
+    assert.notEqual(hash, profileFingerprint(ROOT, '/Users/me', { ...PATHS, tmpDir: '/outro' }), 'mudar o perfil muda o hash');
+    const good = JSON.stringify({ profileVersion: SANDBOX_PROFILE_VERSION, root: '/r', claudeBin: '/b', profileHash: 'h', passedAt: '2026-10-14T00:00:00Z' });
+    const ex = { root: '/r', claudeBin: '/b', profileHash: 'h' };
+    assert.equal(selftestMatches(good, ex), true);
+    assert.equal(selftestMatches(good, { ...ex, root: '/outra' }), false);
+    assert.equal(selftestMatches(good, { ...ex, claudeBin: '/outro' }), false);
+    assert.equal(selftestMatches(good, { ...ex, profileHash: 'diferente' }), false, 'perfil mudou: prova antiga não vale');
+    assert.equal(selftestMatches(good.replace(String(SANDBOX_PROFILE_VERSION), '999'), ex), false);
+    assert.equal(selftestMatches(JSON.stringify({ ...JSON.parse(good), profileHash: undefined }), ex), false, 'marcador sem hash (v1) não vale');
+    assert.equal(selftestMatches(null, ex), false);
+    assert.equal(selftestMatches('{ruim', ex), false);
   });
-  it('com o isolamento ligado (produção), o runner NÃO fica pronto sem a prova nem sem o sandbox-exec, e embrulha o spawn', () => {
-    const calls: Array<{ command: string; args: readonly string[] }> = [];
+
+  it('A3: sem a prova ou sem o sandbox-exec o runner NÃO fica pronto nem cria processo, e o spawn sempre sai embrulhado', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'f17sb-'));
-    const mk = (selftestOk: boolean, hasExec: boolean) =>
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const mk = (over: Parameters<typeof fakeIsolation>[0]) =>
       new ClaudeCodeRunner({
-        resolveRoot: () => ({ ok: true, root: '/work/ro' }),
         store: new JsonStore<ClaudeJob>(dir, 'j.json'),
-        claudeBin: () => '/fake/claude',
+        isolation: fakeIsolation(over),
         spawnFn: (command, args) => {
           calls.push({ command, args });
           return new FakeChild() as unknown as ChildProcess;
-        },
-        sandbox: { enabled: true, home: '/home/x', exists: () => hasExec, selftestOk: () => selftestOk }
+        }
       });
     try {
-      assert.equal(mk(false, true).readiness().ready, false);
-      assert.equal(mk(true, false).readiness().ready, false);
-      const r = mk(true, true);
-      assert.equal(r.readiness().ready, true);
-      assert.equal(r.start('analise o projeto inteiro agora').ok, true);
-      assert.equal(calls[0].command, SANDBOX_EXEC);
-      assert.equal(calls[0].args[0], '-p');
-      assert.deepEqual(calls[0].args.slice(2), ['/fake/claude', ...buildClaudeArgv()]);
+      for (const over of [{ selftestOk: () => false }, { exists: () => false }, { claudeBin: () => null }, { resolveRoot: () => ({ ok: false as const, reason: 'sem raiz' }) }]) {
+        const r = mk(over);
+        assert.equal(r.readiness().ready, false);
+        assert.equal(r.start('analise o projeto inteiro agora').ok, false);
+      }
+      assert.equal(calls.length, 0, 'nenhum processo sem isolamento pronto');
+      const ok = mk({});
+      assert.equal(ok.readiness().ready, true);
+      assert.equal(ok.start('analise o projeto inteiro agora').ok, true);
+      const u = unwrapSpawn(calls[0]);
+      assert.equal(u.bin, '/fake/bin/claude');
+      assert.deepEqual(u.argv, buildClaudeArgv());
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -288,13 +343,15 @@ describe('Fase 17: runner', () => {
     assert.equal(r.ok, true);
     assert.equal(h.calls.length, 1);
     const c = h.calls[0];
-    assert.equal(c.command, '/fake/bin/claude');
-    assert.deepEqual(c.args, buildClaudeArgv());
-    assert.ok(!c.args.join(' ').includes('whoami'), 'a ordem não pode estar no argv');
+    const u = unwrapSpawn(c);
+    assert.equal(u.bin, '/fake/bin/claude');
+    assert.deepEqual(u.argv, buildClaudeArgv());
+    assert.ok(!c.args.join(' ').includes('whoami'), 'a ordem não pode estar no argv (nem no perfil)');
     assert.equal(c.options.cwd, '/work/claude-readonly');
     assert.equal(c.options.shell, false);
     assert.equal(c.options.detached, true);
-    assert.deepEqual(Object.keys(c.options.env ?? {}).sort(), ['HOME', 'PATH']);
+    assert.deepEqual(Object.keys(c.options.env ?? {}).sort(), ['CLAUDE_CONFIG_DIR', 'HOME', 'PATH', 'TMPDIR'], 'config e TMPDIR PRÓPRIOS; nenhum segredo');
+    assert.ok(!String(c.options.env?.CLAUDE_CONFIG_DIR).includes('/.claude'), 'nunca o ~/.claude do usuário')
     assert.equal(c.child.stdinText, order);
   });
 

@@ -64,3 +64,20 @@ projeto, que contém `docs/research`). O Rodrigo escolheu **unir as duas** em ve
   (truncado), hora, status e conclusão curta; passa pelo guarda de saída; `kind: delegation_status`, `expectsReply: false`.
 - **Limites que continuam:** o modo escrita bloqueia o turno até 10 minutos (não é assíncrono como o de leitura); `sandbox-exec` não restringe rede nem
   gravação fora do HOME (ex.: `/tmp`); uma versão nova do `claude` pode exigir ajuste do perfil (o selftest revela).
+
+## 7. Parecer do Code (24/10, `~/auditoria-code.md`) e correções A1 a A3
+
+Veredito do Code: **NÃO MERGEAR antes de corrigir A1 a A3** (nenhum crítico). Corrigidos nesta branch (M1, M4, M5, M6 e os baixos seguem abertos, ver §8):
+
+| Achado | Correção |
+|---|---|
+| **A1** modo escrita persistia fuga em `~/.claude`/`~/.claude.json*` | O filho usa **`CLAUDE_CONFIG_DIR` próprio** (`<projeto>/.runtime/claude-home`, login separado: `sh scripts/claude-code-login.sh`) e **`TMPDIR` próprio** (`.runtime/claude-tmp`). O perfil não cita mais o `~/.claude` do usuário (nem `prefix`). Resolve também M2 (transcrições de outros projetos deixam de ser legíveis; `Library/Preferences` e `Caches` saíram do perfil) |
+| **A2** escrita, execução e rede livres fora do HOME | `(deny file-write*)` **global**; reabre só config própria, TMPDIR próprio, `/dev/{null,tty,dtracehelper,zero}` e, no modo escrita, a raiz. Rede: `(deny network*)` + TCP 443 + DNS. **Limite honesto:** o SBPL não filtra por domínio, então 443 para qualquer host continua possível (reduz a superfície, não elimina a exfiltração) |
+| **A3** isolamento opcional (fail-open) | **Obrigatório no tipo e na construção** nos dois modos (`IsolationDeps`; `ClaudeRunnerOptions.isolation`, `ClaudeCodeSubAgent(privacy, verify, isolation, ...)`, `registerClaudeCodeAgent(coordinator, privacy, isolation, ...)`). Removidos o caminho legado, o `buildChildEnv`, o `cwd: rootDir` e o aviso `console.warn`. Os testes injetam um isolamento falso (`helpers/claudeIsolation.ts`); nenhum caminho cria processo sem sandbox, raiz limpa e prova |
+| **M3** (parcial, acoplado ao perfil novo) | `SANDBOX_PROFILE_VERSION = 2`; o marcador guarda o **sha256 dos dois perfis** (leitura e escrita) e só vale com o mesmo hash. O selftest ganhou uma **parte determinística sem LLM** (13 verificações com `sandbox-exec` + `sh`: negado ler a isca, negado ler/gravar `~/.claude`, negado gravar no HOME e em `/tmp` nos dois modos; liberado raiz/config/TMPDIR) antes das 2 chamadas reais |
+| **B1** TOCTOU binário/raiz (acoplado) | O spawn usa o `bin` e a `root` devolvidos pela mesma verificação de prontidão |
+
+Estado: parte determinística do selftest **aprovada (13/13)**; a parte real depende do login do Claude na configuração própria (ainda não feito).
+
+## 8. Ainda aberto do parecer do Code
+M1 (cancel/close duplo e single-flight), M4 (conclusão do Claude indo à Ogra: enviar só metadados), M5 (órfãos no modo escrita: `detached` + grupo), M6 (raiz ancestral do HOME), B2–B6, I1–I5. Aguardam o ok do Rodrigo para entrar nesta branch.

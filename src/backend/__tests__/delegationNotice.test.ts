@@ -11,6 +11,8 @@ import { ClaudeCodeRunner, type ClaudeJob } from '../agents/claudeCode.js';
 import { ClaudeCodeSubAgent } from '../agents/claudeCodeSubAgent.js';
 import { DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 import { JsonStore } from '../storage/jsonStore.js';
+import { fakeIsolation } from './helpers/claudeIsolation.js';
+import { SANDBOX_EXEC } from '../agents/claudeCode.js';
 
 /** Ajuste 1 da F17: a Ogra é avisada (pedido, quando, status, conclusão) a cada delegação, sem abrir tarefa de resposta. */
 const ON: PrivacyConfig = { ...DEFAULT_PRIVACY, ogra: true };
@@ -105,9 +107,8 @@ describe('Fase 17: os dois modos emitem os avisos', () => {
     const events: DelegationEvent[] = [];
     let child!: FakeChild;
     const runner = new ClaudeCodeRunner({
-      resolveRoot: () => ({ ok: true, root: '/work/ro' }),
+      isolation: fakeIsolation(),
       store: new JsonStore<ClaudeJob>(dir, 'j.json'),
-      claudeBin: () => '/fake/claude',
       spawnFn: () => {
         child = new FakeChild();
         return child as unknown as ChildProcess;
@@ -124,24 +125,17 @@ describe('Fase 17: os dois modos emitem os avisos', () => {
     assert.equal(events[0].order, 'analise a estrutura do projeto');
   });
 
-  it('modo escrita: started e done/failed, com a ordem e o modo corretos', async () => {
+  it('modo escrita: started e done, com a ordem e o modo corretos', { skip: process.platform !== 'darwin' || !fs.existsSync(SANDBOX_EXEC) }, async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'f17n-'));
     tmps.push(dir);
     const root = fs.realpathSync(dir);
     const fake = path.join(root, 'fake-claude.sh');
     fs.writeFileSync(fake, `#!/bin/sh\ncat >/dev/null\nprintf '{"result":"feito"}'\n`, { mode: 0o755 });
     const events: DelegationEvent[] = [];
-    // sem isolamento (caminho legado de teste) para não depender do sandbox-exec aqui; o isolamento tem teste próprio
-    const agent = new ClaudeCodeSubAgent(DEFAULT_PRIVACY, root, () => true, undefined, { onEvent: (e) => events.push(e) });
-    const original = process.env.PATH;
-    process.env.PATH = `${root}:${original}`;
-    fs.renameSync(fake, path.join(root, 'claude'));
-    try {
-      const r = await agent.runTask({ taskId: 't9', turnId: 'tt', prompt: 'crie um arquivo notas.txt', isMutation: true, confirmationToken: 'tt:x' }, new AbortController().signal);
-      assert.equal(r.success, true, r.error);
-    } finally {
-      process.env.PATH = original;
-    }
+    const iso = fakeIsolation({ resolveRoot: () => ({ ok: true, root }), claudeBin: () => fake, home: os.homedir(), exists: (p) => fs.existsSync(p) });
+    const agent = new ClaudeCodeSubAgent(DEFAULT_PRIVACY, () => true, iso, { onEvent: (e) => events.push(e) });
+    const r = await agent.runTask({ taskId: 't9', turnId: 'tt', prompt: 'crie um arquivo notas.txt', isMutation: true, confirmationToken: 'tt:x' }, new AbortController().signal);
+    assert.equal(r.success, true, r.error);
     assert.deepEqual(events.map((e) => e.status), ['started', 'done']);
     assert.ok(events.every((e) => e.mode === 'escrita' && e.order === 'crie um arquivo notas.txt' && e.id === 't9'));
     assert.equal(events[1].conclusion, 'feito');
