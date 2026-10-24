@@ -366,6 +366,35 @@ const claudeCard = document.getElementById('claude-card') as HTMLElement;
 const claudeStatus = document.getElementById('claude-status') as HTMLParagraphElement;
 const claudeJobsEl = document.getElementById('claude-jobs') as HTMLDivElement;
 const claudeCancelBtn = document.getElementById('claude-cancel-btn') as HTMLButtonElement;
+const claudeUnreadEl = document.getElementById('claude-unread') as HTMLSpanElement;
+const claudeReadBtn = document.getElementById('claude-read-btn') as HTMLButtonElement;
+const BASE_TITLE = document.title;
+
+// Contador de resultados novos: tarefa concluída depois do último "visto". O "visto" mora só neste navegador
+// (conveniência por visualização; sem armazenamento, nada quebra) e começa na abertura da página, para o histórico antigo não contar.
+const CLAUDE_SEEN_KEY = 'rodrigo-claude-last-seen';
+function readClaudeSeen(): number {
+  try {
+    const v = Number(localStorage.getItem(CLAUDE_SEEN_KEY));
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch {
+    /* sem armazenamento */
+  }
+  return Date.now();
+}
+let claudeSeenAt = readClaudeSeen();
+function markClaudeSeen(): void {
+  claudeSeenAt = Date.now();
+  try {
+    localStorage.setItem(CLAUDE_SEEN_KEY, String(claudeSeenAt));
+  } catch {
+    /* sem armazenamento */
+  }
+}
+/** Conta tarefas já terminadas (qualquer desfecho) cujo término é posterior ao último visto. */
+function countUnreadClaudeJobs(jobs: ReadonlyArray<{ status: string; finishedAt?: string }>, seenAt: number): number {
+  return jobs.filter((j) => j.status !== 'running' && j.finishedAt !== undefined && Date.parse(j.finishedAt) > seenAt).length;
+}
 
 const CLAUDE_STATUS_LABELS: Record<string, string> = {
   running: 'em andamento',
@@ -389,6 +418,11 @@ async function refreshClaudeCard(): Promise<void> {
       : 'Delegação ativa. Diga "pede pro Claude" seguido da ordem.'
     : `Delegação desligada${view.reason ? ` (${view.reason})` : ''}. Ligue com RODRIGO_CLAUDE_CODE=1.`;
   claudeCancelBtn.hidden = !view.busy;
+  const unread = countUnreadClaudeJobs(view.jobs, claudeSeenAt);
+  claudeUnreadEl.hidden = unread === 0;
+  claudeUnreadEl.textContent = unread === 0 ? '' : `${unread} ${unread === 1 ? 'novo' : 'novos'}`;
+  claudeReadBtn.hidden = unread === 0;
+  document.title = unread === 0 ? BASE_TITLE : `(${unread}) ${BASE_TITLE}`;
   claudeJobsEl.replaceChildren(
     ...view.jobs.map((job) => {
       const box = document.createElement('div');
@@ -408,6 +442,10 @@ async function refreshClaudeCard(): Promise<void> {
     })
   );
 }
+claudeReadBtn.addEventListener('click', () => {
+  markClaudeSeen();
+  void refreshClaudeCard();
+});
 claudeCancelBtn.addEventListener('click', () => {
   void voiceController.cancelClaudeJob().then(refreshClaudeCard);
 });

@@ -64,9 +64,10 @@
 
         <!-- Fase 17: tarefas delegadas ao Claude Code (somente leitura; aparece com a conversa ativa) -->
         <section class="card claude-card" aria-labelledby="claude-title" id="claude-card" hidden>
-          <h2 id="claude-title">Claude (tarefas delegadas)</h2>
+          <h2 id="claude-title">Claude (tarefas delegadas) <span id="claude-unread" class="claude-unread" hidden></span></h2>
           <p id="claude-status" class="cost-note" role="status" aria-live="polite"></p>
           <button id="claude-cancel-btn" type="button" class="btn" hidden>Cancelar tarefa em andamento</button>
+          <button id="claude-read-btn" type="button" class="btn" hidden>Marcar como lidos</button>
           <div id="claude-jobs" class="claude-jobs"></div>
           <p class="voice-note">
             Diga, por exemplo, "pede pro Claude listar os arquivos de configuração". O app repete a ordem, espera o seu sim e só

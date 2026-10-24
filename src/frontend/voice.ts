@@ -31,6 +31,7 @@ export interface ClaudeJobView {
   order: string;
   status: 'running' | 'done' | 'failed' | 'timeout' | 'cancelled' | 'interrupted';
   startedAt: string;
+  finishedAt?: string;
   durationMs?: number;
   result?: string;
   error?: string;
