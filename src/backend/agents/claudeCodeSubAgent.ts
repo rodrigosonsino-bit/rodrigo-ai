@@ -4,6 +4,7 @@ import type { Capability } from './capabilityPolicy.js';
 import { guardText } from '../privacy/outboundGuard.js';
 import { claudeCodeEffective, DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 import type { SubAgentCoordinator } from './subAgent.js';
+import { isolationReadiness, scrubEnv, wrapSandbox, type IsolationDeps } from './claudeCode.js';
 
 /** Timeout padrão: 10 minutos (configurável via RODRIGO_CLAUDE_TIMEOUT_MS). */
 const DEFAULT_TIMEOUT_MS = 600_000;
@@ -41,6 +42,10 @@ function buildChildEnv(): NodeJS.ProcessEnv {
  * - Ambiente sanitizado: nenhuma chave de nuvem ou var RODRIGO_* passa ao filho.
  * - Prompt e saída passam pelo outboundGuard (T1) como dado não-confiável.
  * - Processo filho morto no abort/timeout (SIGTERM → SIGKILL após 5s).
+ *
+ * Opção C (F17, 2026-10-24): com `isolation` (produção), o processo roda NUM WORKTREE LIMPO (sem docs/research),
+ * dentro do perfil sandbox-exec que nega leitura e escrita no HOME e libera escrita só nessa raiz, com ambiente em
+ * lista de permissão e só depois da prova de isolamento (selftest). Sem `isolation` é o caminho legado (só testes).
  */
 export class ClaudeCodeSubAgent implements ISubAgent {
   readonly id = 'claude_code';
@@ -56,7 +61,8 @@ export class ClaudeCodeSubAgent implements ISubAgent {
   constructor(
     private readonly privacy: PrivacyConfig = DEFAULT_PRIVACY,
     private readonly rootDir: string = process.cwd(),
-    private readonly verifyMutationToken?: (turnId: string, token: string) => boolean
+    private readonly verifyMutationToken?: (turnId: string, token: string) => boolean,
+    private readonly isolation?: IsolationDeps
   ) {
     this.timeoutMs = parseInt(process.env.RODRIGO_CLAUDE_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10);
   }
@@ -100,16 +106,29 @@ export class ClaudeCodeSubAgent implements ISubAgent {
     }
     const safePrompt = promptGuard.text;
 
-    return this._runProcess(safePrompt, req.taskId ?? crypto.randomUUID(), signal);
+    let spec: { command: string; args?: string[]; cwd: string; env: NodeJS.ProcessEnv } | null = null;
+    if (this.isolation) {
+      const ready = isolationReadiness(this.isolation);
+      if (!ready.ready) {
+        return {
+          success: false, output: '',
+          error: `A delegação ao Claude não está pronta: ${ready.reason}.`,
+          kind: 'final'
+        };
+      }
+      spec = { command: ready.bin, cwd: ready.root, env: scrubEnv(process.env) };
+    }
+    return this._runProcess(safePrompt, req.taskId ?? crypto.randomUUID(), signal, spec);
   }
 
   private _runProcess(
     prompt: string,
     _taskId: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    spec: { command: string; cwd: string; env: NodeJS.ProcessEnv } | null
   ): Promise<SubAgentTaskResult> {
     return new Promise<SubAgentTaskResult>((resolve) => {
-      const childEnv = buildChildEnv();
+      const childEnv = spec ? spec.env : buildChildEnv();
 
       // H17.2: vetor de args fixo; prompt chega por stdin, nunca no argv.
       // D1 = escrita desde o início: Bash, Read, Write, Edit, Glob, Grep (sem MCP herdado).
@@ -123,8 +142,9 @@ export class ClaudeCodeSubAgent implements ISubAgent {
 
       let proc: ReturnType<typeof spawn>;
       try {
-        proc = spawn('claude', args, {
-          cwd: this.rootDir,
+        const iso = this.isolation && spec ? wrapSandbox(spec.command, args, spec.cwd, this.isolation.home, { writable: true }) : null;
+        proc = spawn(iso ? iso.command : 'claude', iso ? iso.args : args, {
+          cwd: spec ? spec.cwd : this.rootDir,
           env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe']
         });
@@ -225,10 +245,12 @@ export function registerClaudeCodeAgent(
   coordinator: SubAgentCoordinator,
   privacy: PrivacyConfig,
   rootDir: string,
-  verifyMutationToken?: (turnId: string, token: string) => boolean
+  verifyMutationToken?: (turnId: string, token: string) => boolean,
+  isolation?: IsolationDeps
 ): ClaudeCodeSubAgent | null {
   if (!claudeCodeEffective(privacy)) return null;
-  const agent = new ClaudeCodeSubAgent(privacy, rootDir, verifyMutationToken);
+  if (!isolation) console.warn('[Rodrigo AI] ATENÇÃO: ClaudeCodeSubAgent registrado SEM isolamento (só deve ocorrer em testes).');
+  const agent = new ClaudeCodeSubAgent(privacy, rootDir, verifyMutationToken, isolation);
   coordinator.register(agent);
   console.log('[Rodrigo AI] ClaudeCodeSubAgent registrado (RODRIGO_CLAUDE_CODE efetivo).');
   return agent;

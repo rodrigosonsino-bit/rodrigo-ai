@@ -1319,8 +1319,10 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
           this.emit(session, { type: 'state', state: 'falando' });
           const clean = cleanTextForSpeech(text);
+          // F17 (opção C): a saída do Claude é dado NÃO CONFIÁVEL — voz do sistema e fora do histórico enviado ao Gemini.
+          if (confirmed === 'SIM') turn.provenance = 'claude';
           turn.expectedSentences.add(0);
-          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, 'dictated'));
+          turn.pendingSynthesis.push(this.synthesizeSentence(session, turn, clean, 0, confirmed === 'SIM' ? 'untrusted' : 'dictated'));
           await Promise.allSettled(turn.pendingSynthesis);
           if (session.activeTurn === turn) {
             this.finishTurn(session, turn);
@@ -1595,7 +1597,7 @@ descriptionResult = await this.engine.describeScreen(turn.turnId, capture.filePa
           return;
         }
         // Arma confirmação: "Vou pedir ao Claude: <transcrição>. Pode ser?"
-        const previewText = `Vou pedir ao Claude: ${transcript}. Pode ser?`;
+        const previewText = `Vou pedir ao Claude, que pode criar e alterar arquivos numa cópia isolada do projeto: ${transcript}. Pode ser?`;
         const question = cleanTextForSpeech(previewText);
         this.emit(session, { type: 'routing', turnId: turn.turnId, label: 'GERAL', handled: true });
         this.emit(session, { type: 'state', state: 'falando' });

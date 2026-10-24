@@ -162,7 +162,7 @@ function sbQuote(p: string): string {
  * Perfil SBPL. Regras posteriores vencem as anteriores: nega o HOME, reabre o necessário. Leitura de metadados (stat) dos
  * ancestrais fica liberada para a resolução de caminhos; o CONTEÚDO fora da raiz não.
  */
-export function buildSandboxProfile(root: string, home: string): string {
+export function buildSandboxProfile(root: string, home: string, opts: { writable?: boolean } = {}): string {
   const h = sbQuote(home);
   return [
     '(version 1)',
@@ -172,6 +172,8 @@ export function buildSandboxProfile(root: string, home: string): string {
     `(deny file-write* (subpath ${h}))`,
     // ...exceto a raiz validada (leitura) e o que o próprio Claude Code precisa para iniciar e manter o login.
     `(allow file-read-data (subpath ${sbQuote(root)}))`,
+    // Modo escrita (opção C): a ÚNICA pasta gravável do HOME é a raiz isolada; o resto do HOME segue negado.
+    ...(opts.writable ? [`(allow file-write* (subpath ${sbQuote(root)}))`] : []),
     `(allow file-read-data (subpath ${sbQuote(path.join(home, '.claude'))}))`,
     `(allow file-read-data (literal ${sbQuote(path.join(home, '.claude.json'))}))`,
     `(allow file-read-data (subpath ${sbQuote(path.join(home, '.local', 'share', 'claude'))}))`,
@@ -185,8 +187,30 @@ export function buildSandboxProfile(root: string, home: string): string {
   ].join('\n');
 }
 
-export function wrapSandbox(bin: string, args: readonly string[], root: string, home: string): { command: string; args: string[] } {
-  return { command: SANDBOX_EXEC, args: ['-p', buildSandboxProfile(root, home), bin, ...args] };
+export function wrapSandbox(bin: string, args: readonly string[], root: string, home: string, opts: { writable?: boolean } = {}): { command: string; args: string[] } {
+  return { command: SANDBOX_EXEC, args: ['-p', buildSandboxProfile(root, home, opts), bin, ...args] };
+}
+
+/** Dependências do isolamento, compartilhadas pelo modo leitura (runner) e pelo modo escrita (ClaudeCodeSubAgent). */
+export interface IsolationDeps {
+  resolveRoot: () => RootResolution;
+  claudeBin: () => string | null;
+  home: string;
+  exists: (p: string) => boolean;
+  selftestOk: (root: string, bin: string) => boolean;
+}
+
+export type IsolationReadiness = { ready: true; root: string; bin: string } | { ready: false; reason: string };
+
+/** Sem binário, raiz limpa, sandbox-exec e prova de isolamento, nenhum modo (leitura ou escrita) roda. */
+export function isolationReadiness(d: IsolationDeps): IsolationReadiness {
+  const bin = d.claudeBin();
+  if (!bin) return { ready: false, reason: 'o binário "claude" não foi encontrado' };
+  const r = d.resolveRoot();
+  if (!r.ok) return { ready: false, reason: r.reason };
+  if (!d.exists(SANDBOX_EXEC)) return { ready: false, reason: 'o isolamento do macOS (sandbox-exec) não está disponível' };
+  if (!d.selftestOk(r.root, bin)) return { ready: false, reason: 'falta a prova de isolamento (rode scripts/claude-code-selftest.mjs)' };
+  return { ready: true, root: r.root, bin };
 }
 
 /** Prova de isolamento: gravada pelo scripts/claude-code-selftest.mjs só depois de um teste real passar. */

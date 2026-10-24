@@ -12,7 +12,8 @@ import {
   selftestMatches,
   SELFTEST_MARKER_FILE,
   spokenSummary,
-  type ClaudeJob
+  type ClaudeJob,
+  type IsolationDeps
 } from '../agents/claudeCode.js';
 import { claudeCodeEffective, parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
 import { workerGeminiEnv } from '../geminiTestEndpoint.js';
@@ -174,6 +175,15 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
 
   // Fase 17: delegação ao Claude Code. A ferramenta SEMPRE existe no registro (para o app saber nomear o que está desligado),
   // mas só fica disponível com o canal RODRIGO_CLAUDE_CODE=1, raiz válida, binário e a prova de isolamento (selftest).
+  // Isolamento compartilhado pelo modo LEITURA (runner) e pelo modo ESCRITA (ClaudeCodeSubAgent): mesma raiz limpa,
+  // mesmo perfil sandbox-exec e a mesma prova (selftest) exigida antes de qualquer execução.
+  const claudeIsolation: IsolationDeps = {
+    resolveRoot: () => resolveClaudeRoot(rootDir),
+    claudeBin: () => findClaudeBinary(),
+    home: os.homedir(),
+    exists: (p) => fs.existsSync(p),
+    selftestOk: (root, bin) => selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), { root, claudeBin: bin })
+  };
   const claudeRunner = new ClaudeCodeRunner({
     resolveRoot: () => resolveClaudeRoot(rootDir),
     store: new JsonStore<ClaudeJob>(dataDir, 'claude-jobs.json'),
@@ -229,7 +239,8 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   desktopTool.setPostSpeechScheduler((action) => sessionManager.schedulePostSpeechAction(action));
   registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
   registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
-    sessionManager.consumeMutationToken(turnId, token)
+    sessionManager.consumeMutationToken(turnId, token),
+    claudeIsolation
   );
   // Camada Ogra: só entra no coordenador com RODRIGO_OGRA=1. Com 0, este bloco não roda.
   // TODO (fases seguintes): não registrar daqui coordenação de cursor, WhatsApp ou outros apps.
