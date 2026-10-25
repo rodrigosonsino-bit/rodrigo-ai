@@ -13,6 +13,7 @@ import { SessionManager, type SessionTuning } from '../voice/sessionManager.js';
 import { createSpecialistAgents } from '../agents/specialistAgents.js';
 import { createSystemTools, createMutatingTools } from '../tools/index.js';
 import type { IMutatingTool, ITool } from '../../shared/extensions/tools.js';
+import { freePort } from './helpers/freePort.js';
 
 /**
  * Fase 13a (docs/phase-13a-v3.md §4.3, H13a.15/.17): emissão das frases em ORDEM ESTRITA, coalescência de frases geradas
@@ -77,7 +78,7 @@ interface H {
 }
 
 async function setup(opts: { tuning?: SessionTuning; tools?: readonly ITool[]; mutating?: readonly IMutatingTool[] } = {}): Promise<H> {
-  const port = 25000 + Math.floor(Math.random() * 4000);
+  const port = await freePort();
   const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'f13-session-'));
   const engine = new FakeVoiceEngine();

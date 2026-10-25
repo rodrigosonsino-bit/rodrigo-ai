@@ -43,6 +43,11 @@ export interface PrivacyConfig {
    */
   readonly claudeCode: boolean;
   /**
+   * Fase 17 (decisão do Rodrigo, 24/10) — RODRIGO_CLAUDE_CODE_WRITE: liga o MODO ESCRITA (agente `claude_code`, com Bash/Write/Edit).
+   * Padrão DESLIGADO: ausente => desligado. Só vale com RODRIGO_CLAUDE_CODE efetivo. Valor inválido aborta o boot.
+   */
+  readonly claudeCodeWrite: boolean;
+  /**
    * Automação desktop (computer-use): RODRIGO_AUTO_DESKTOP.
    * Padrão DESLIGADO. Com 1 + RODRIGO_DESKTOP_CONTROL=1, intenções AUTOMACAO_DESKTOP
    * executam sem SIM por passo (kill switch por voz ainda vale). Valor inválido aborta o boot.
@@ -137,6 +142,11 @@ export function claudeCodeEffective(cfg: PrivacyConfig): boolean {
   return cfg.cloud && cfg.claudeCode;
 }
 
+/** Modo escrita: só com o Claude Code efetivo E RODRIGO_CLAUDE_CODE_WRITE=1 explícito (padrão desligado). */
+export function claudeCodeWriteEffective(cfg: PrivacyConfig): boolean {
+  return claudeCodeEffective(cfg) && cfg.claudeCodeWrite === true;
+}
+
 export type ClaudeCodeOffReason = 'master-off' | 'channel-off';
 
 export function claudeCodeOffReason(cfg: PrivacyConfig): ClaudeCodeOffReason | null {
@@ -145,6 +155,9 @@ export function claudeCodeOffReason(cfg: PrivacyConfig): ClaudeCodeOffReason | n
   return null;
 }
 
+/** Fase 17: fala honesta quando o canal está desligado (mesmo padrão de WEB_SEARCH_DISABLED_TEXT). */
+export const CLAUDE_CODE_DISABLED_TEXT =
+  'A delegação ao Claude está desligada. Para ligar, é preciso ativar RODRIGO_CLAUDE_CODE e configurar uma pasta de leitura.';
 /**
  * Automação desktop efetiva: RODRIGO_AUTO_DESKTOP=1 E controle de desktop ligado.
  * Não envia áudio; AX/texto só saem pelos canais de geração/visão já configurados.
@@ -254,6 +267,7 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
     outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact'),
     claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
+    claudeCodeWrite: parseFlag(env, 'RODRIGO_CLAUDE_CODE_WRITE', false),
     autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false),
     ogra: parseFlag(env, 'RODRIGO_OGRA', false),
     ograFallback: parseFlag(env, 'RODRIGO_OGRA_FALLBACK', true),

@@ -1,0 +1,4 @@
+{
+  "roots": [".runtime/claude-readonly"],
+  "writeRoots": [".runtime/claude-write"]
+}

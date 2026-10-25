@@ -144,6 +144,9 @@ export class GeminiVoiceProvider implements IVoiceProvider {
     const kind = options.kind ?? 'local';
     const turnId = options.turnId ?? `adhoc-${outputPath}`;
 
+    // Fase 17: resposta do Claude Code (dado não confiável, pode conter código do projeto) nunca vira voz em nuvem.
+    if (kind === 'untrusted') return this.useFallback(text, outputPath, signal, options);
+
     // D-b: conteúdo ditado só vai à nuvem se a configuração permitir; o resto da resposta segue no Gemini.
     if (kind === 'dictated' && !ttsDictatedViaCloud(this.privacy)) return this.useFallback(text, outputPath, signal, options);
 

@@ -497,6 +497,96 @@ voiceScreenBtn.addEventListener('click', () => {
   })();
 });
 
+// --- Fase 17: cartão das tarefas do Claude (consulta a sessão a cada 3 s enquanto a conversa está ativa) ---
+const claudeCard = document.getElementById('claude-card') as HTMLElement;
+const claudeStatus = document.getElementById('claude-status') as HTMLParagraphElement;
+const claudeJobsEl = document.getElementById('claude-jobs') as HTMLDivElement;
+const claudeCancelBtn = document.getElementById('claude-cancel-btn') as HTMLButtonElement;
+const claudeUnreadEl = document.getElementById('claude-unread') as HTMLSpanElement;
+const claudeReadBtn = document.getElementById('claude-read-btn') as HTMLButtonElement;
+const BASE_TITLE = document.title;
+
+// Contador de resultados novos: tarefa concluída depois do último "visto". O "visto" mora só neste navegador
+// (conveniência por visualização; sem armazenamento, nada quebra) e começa na abertura da página, para o histórico antigo não contar.
+const CLAUDE_SEEN_KEY = 'rodrigo-claude-last-seen';
+function readClaudeSeen(): number {
+  try {
+    const v = Number(localStorage.getItem(CLAUDE_SEEN_KEY));
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch {
+    /* sem armazenamento */
+  }
+  return Date.now();
+}
+let claudeSeenAt = readClaudeSeen();
+function markClaudeSeen(): void {
+  claudeSeenAt = Date.now();
+  try {
+    localStorage.setItem(CLAUDE_SEEN_KEY, String(claudeSeenAt));
+  } catch {
+    /* sem armazenamento */
+  }
+}
+/** Conta tarefas já terminadas (qualquer desfecho) cujo término é posterior ao último visto. */
+function countUnreadClaudeJobs(jobs: ReadonlyArray<{ status: string; finishedAt?: string }>, seenAt: number): number {
+  return jobs.filter((j) => j.status !== 'running' && j.finishedAt !== undefined && Date.parse(j.finishedAt) > seenAt).length;
+}
+
+const CLAUDE_STATUS_LABELS: Record<string, string> = {
+  running: 'em andamento',
+  done: 'concluída',
+  failed: 'falhou',
+  timeout: 'passou do tempo',
+  cancelled: 'cancelada',
+  interrupted: 'interrompida'
+};
+
+async function refreshClaudeCard(): Promise<void> {
+  const view = await voiceController.fetchClaudeJobs();
+  if (!view) {
+    claudeCard.hidden = true;
+    return;
+  }
+  claudeCard.hidden = false;
+  claudeStatus.textContent = view.enabled
+    ? view.busy
+      ? 'O Claude está trabalhando numa tarefa.'
+      : 'Delegação ativa. Diga "pede pro Claude" seguido da ordem.'
+    : `Delegação desligada${view.reason ? ` (${view.reason})` : ''}. Ligue com RODRIGO_CLAUDE_CODE=1.`;
+  claudeCancelBtn.hidden = !view.busy;
+  const unread = countUnreadClaudeJobs(view.jobs, claudeSeenAt);
+  claudeUnreadEl.hidden = unread === 0;
+  claudeUnreadEl.textContent = unread === 0 ? '' : `${unread} ${unread === 1 ? 'novo' : 'novos'}`;
+  claudeReadBtn.hidden = unread === 0;
+  document.title = unread === 0 ? BASE_TITLE : `(${unread}) ${BASE_TITLE}`;
+  claudeJobsEl.replaceChildren(
+    ...view.jobs.map((job) => {
+      const box = document.createElement('div');
+      box.className = 'claude-job';
+      const head = document.createElement('p');
+      head.className = 'claude-job-head';
+      head.textContent = `${CLAUDE_STATUS_LABELS[job.status] ?? job.status} — ${job.order}`; // textContent: o texto vem de fala e do Claude
+      box.appendChild(head);
+      const body = job.result ?? job.error;
+      if (body) {
+        const pre = document.createElement('pre');
+        pre.className = 'claude-job-result';
+        pre.textContent = body;
+        box.appendChild(pre);
+      }
+      return box;
+    })
+  );
+}
+claudeReadBtn.addEventListener('click', () => {
+  markClaudeSeen();
+  void refreshClaudeCard();
+});
+claudeCancelBtn.addEventListener('click', () => {
+  void voiceController.cancelClaudeJob().then(refreshClaudeCard);
+});
+setInterval(() => void refreshClaudeCard(), 3000);
+
 window.addEventListener('beforeunload', () => {
   void voiceController.stop();
 });

@@ -1,5 +1,25 @@
 import fs from 'node:fs';
-import { parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { JsonStore } from '../storage/jsonStore.js';
+import { guardText } from '../privacy/outboundGuard.js';
+import {
+  ClaudeCodeRunner,
+  ClaudeDelegateTool,
+  defaultRootFs,
+  claudeSandboxPaths,
+  findClaudeBinary,
+  profileFingerprint,
+  resolveClaudeRoot,
+  resolveClaudeWriteRoot,
+  warmClaudeProxy,
+  selftestMatches,
+  SELFTEST_MARKER_FILE,
+  spokenSummary,
+  type ClaudeJob,
+  type IsolationDeps
+} from '../agents/claudeCode.js';
+import { claudeCodeEffective, parsePrivacyConfig, workerPrivacyEnv } from '../privacy.js';
 import { workerGeminiEnv } from '../geminiTestEndpoint.js';
 import { prepareProcessTmpDir } from './tmpSweeper.js';
 import { DecisionLog, unavailableAuditFs } from '../audit/decisionLog.js';
@@ -26,6 +46,7 @@ import { registerWiredOpenClawAgents } from '../agents/openClawSubAgent.js';
 import { makeOpenClawHttpClient } from '../agents/openClawHttpClient.js';
 import { PendingAsyncTaskStore, parseAsyncTaskTtlHours } from '../agents/pendingAsyncStore.js';
 import { registerClaudeCodeAgent } from '../agents/claudeCodeSubAgent.js';
+import { createOgraDelegationNotifier } from '../agents/delegationNotice.js';
 import { capabilitiesFromRegistry, registerOgraAgent } from '../agents/ograSubAgent.js';
 
 export type TtsStatusResponse = TtsStatus;
@@ -156,7 +177,52 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     voiceProvider: ttsProvider
   });
   const mutatingTools = [...baseMutatingTools, ...desktopAndSelfTools];
+
+  // Fase 17: delegação ao Claude Code. A ferramenta SEMPRE existe no registro (para o app saber nomear o que está desligado),
+  // mas só fica disponível com o canal RODRIGO_CLAUDE_CODE=1, raiz válida, binário e a prova de isolamento (selftest).
+  // Isolamento compartilhado pelo modo LEITURA (runner) e pelo modo ESCRITA (ClaudeCodeSubAgent): mesma raiz limpa,
+  // mesmo perfil sandbox-exec e a mesma prova (selftest) exigida antes de qualquer execução.
+  const claudeSandboxDirs = claudeSandboxPaths(rootDir, 'leitura');
+  const claudeWriteDirs = claudeSandboxPaths(rootDir, 'escrita');
+  const claudeIsolation: IsolationDeps = {
+    resolveRoot: () => resolveClaudeRoot(rootDir),
+    resolveWriteRoot: () => resolveClaudeWriteRoot(rootDir),
+    claudeBin: () => findClaudeBinary(),
+    home: os.homedir(),
+    paths: claudeSandboxDirs,
+    writePaths: claudeWriteDirs,
+    exists: (p) => fs.existsSync(p),
+    selftestOk: (root, bin) =>
+      selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), {
+        root,
+        claudeBin: bin,
+        profileHash: profileFingerprint(root, os.homedir(), claudeSandboxDirs, (() => {
+          const w = resolveClaudeWriteRoot(rootDir);
+          return w.ok ? w.root : null;
+        })(), claudeWriteDirs)
+      })
+  };
+  // A3: sobe o proxy local cedo (só com o canal ligado) para a 1ª tarefa não esbarrar nele ainda subindo.
+  if (process.env.RODRIGO_CLAUDE_CODE === '1') warmClaudeProxy(os.homedir());
+  // Ajuste 1 (F17): avisos de delegação para a Ogra (no-op sem RODRIGO_OGRA=1 e sem webhook). `sessionManager` ainda não existe
+  // aqui; o callback é avaliado só quando um aviso sai.
+  const delegationObserver = createOgraDelegationNotifier({ privacy, session: () => sessionManagerRef?.currentSessionId() ?? '' });
+  let sessionManagerRef: SessionManager | null = null;
+  const claudeRunner = new ClaudeCodeRunner({
+    observer: delegationObserver,
+    store: new JsonStore<ClaudeJob>(dataDir, 'claude-jobs.json'),
+    guard: (t) => guardText(t, privacy.outboundGuard),
+    isolation: claudeIsolation,
+    onFinished: (job) => {
+      // Aviso sonoro só se houver sessão ociosa; texto vindo do Claude é NÃO CONFIÁVEL: voz do sistema e fora do histórico.
+      void claudeFinishedAnnouncer(job);
+    }
+  });
+  const recovered = claudeRunner.recoverInterrupted();
+  if (recovered > 0) console.warn(`[Rodrigo AI] Claude: ${recovered} tarefa(s) ficaram interrompidas pelo reinício e não foram retomadas.`);
+  mutatingTools.push(new ClaudeDelegateTool(claudeRunner, () => claudeCodeEffective(privacy)));
   for (const mTool of mutatingTools) ExtensionRegistry.getInstance().registerMutatingTool(mTool);
+  let claudeFinishedAnnouncer: (job: ClaudeJob) => Promise<void> = async () => {};
 
   // Inicializa o agendador carregando lembretes persistidos
   reminderScheduler.bootstrap();
@@ -190,9 +256,14 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   );
   desktopTool.setPostSpeechScheduler((action) => sessionManager.schedulePostSpeechAction(action));
   registerWiredOpenClawAgents(coordinator, openClawClient, privacy);
-  registerClaudeCodeAgent(coordinator, privacy, rootDir, (turnId, token) =>
-    sessionManager.consumeMutationToken(turnId, token)
+  registerClaudeCodeAgent(
+    coordinator,
+    privacy,
+    claudeIsolation,
+    (turnId, token) => sessionManager.consumeMutationToken(turnId, token),
+    delegationObserver
   );
+  sessionManagerRef = sessionManager;
   // Camada Ogra: só entra no coordenador com RODRIGO_OGRA=1. Com 0, este bloco não roda.
   // TODO (fases seguintes): não registrar daqui coordenação de cursor, WhatsApp ou outros apps.
   if (privacy.ogra) {
@@ -216,6 +287,13 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
     decisionLog = new DecisionLog(path.join(dataDir, 'audit', 'decisions.jsonl'), unavailableAuditFs());
   }
   sessionManager.decisionLog = decisionLog;
+  sessionManager.claudeRunner = claudeRunner;
+  claudeFinishedAnnouncer = async (job) => {
+    // Notificação do sistema com texto FIXO (nunca o conteúdo do resultado: não há como injetar AppleScript por aqui).
+    const title = job.status === 'done' ? 'O Claude terminou' : 'O Claude não concluiu';
+    execFile('osascript', ['-e', `display notification "Veja o resultado na tela do Rodrigo AI." with title "${title}"`], { timeout: 5000 }, () => {});
+    await sessionManager.announce(spokenSummary(job), true);
+  };
 
   // Fase 15 §4.3: recuperação mínima pós-restart (descarta por TTL; fala datada na 1ª sessão).
   void sessionManager.recoverPendingAsyncOnBoot(openClawClient, parseAsyncTaskTtlHours()).then((r) => {

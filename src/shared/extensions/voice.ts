@@ -3,7 +3,8 @@
  */
 
 /** Fase 13a: de onde vem o texto que será falado (decide se pode ir à voz em nuvem; ver docs/phase-13a-v3.md §3, D-b). */
-export type SpeechKind = 'generated' | 'dictated' | 'local';
+export type SpeechKind = 'generated' | 'dictated' | 'local' | 'untrusted';
+// 'untrusted' (Fase 17): texto que veio de fora (resposta do Claude Code). NUNCA vai à voz em nuvem: sempre a voz do sistema.
 
 export interface SynthesizeOptions {
   /** Turno ao qual a frase pertence (reserva de cota e disjuntor são por turno). */

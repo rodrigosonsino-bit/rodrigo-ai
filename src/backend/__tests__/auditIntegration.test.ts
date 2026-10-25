@@ -14,6 +14,7 @@ import { startServer } from '../server.js';
 import { AudioStore } from '../voice/audioStore.js';
 import { FakeVoiceEngine } from '../voice/fakeEngine.js';
 import { SessionManager } from '../voice/sessionManager.js';
+import { freePort } from './helpers/freePort.js';
 
 /** T4 ponta a ponta: uma mutação confirmada por voz passa pelas duas fases; registro quebrado => a ação NÃO é executada. */
 function wav(): Buffer {
@@ -45,7 +46,7 @@ describe('T4: auditoria das mutações no fluxo real', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
   async function boot(io: AuditFs = realAuditFs): Promise<DecisionLog> {
-    const port = 29900 + Math.floor(Math.random() * 90);
+    const port = await freePort();
     const config: AppConfig = { port, host: '127.0.0.1', clientPort: port + 1 };
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't4-int-'));
     engine = new FakeVoiceEngine(); tool = new FakeReminder();

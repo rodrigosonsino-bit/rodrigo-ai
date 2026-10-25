@@ -28,6 +28,9 @@ export const EFFECTIVE_GRANTS: GrantTable = {
   tool_lembrete: ['write_file'],
   tool_nota: ['write_file'],
   tool_memoria: ['write_file'],
+  // Fase 17: delegação ao Claude Code — processo (`shell`) que lê arquivos (`read_file`) e grava o registro da tarefa no store do app.
+  // NÃO concede `network` ao app (a rede é do processo filho, sob o canal RODRIGO_CLAUDE_CODE) nem `sensitive_data`.
+  tool_claude: ['write_file', 'shell', 'read_file'],
   tool_desktop: ['write_file'],
   tool_digitar: ['write_file'],
   tool_ditado: ['write_file'],
