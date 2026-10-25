@@ -17,6 +17,10 @@ export function fakeIsolation(over: Partial<IsolationDeps> = {}): IsolationDeps 
     paths: { configDir: path.join(base, 'claude-home'), tmpDir: path.join(base, 'claude-tmp') },
     exists: () => true,
     selftestOk: () => true,
+    resolveWriteRoot: () => ({ ok: true, root: '/work/claude-write' }),
+    writePaths: { configDir: path.join(base, 'claude-home-write'), tmpDir: path.join(base, 'claude-tmp-write') },
+    proxyAuth: () => ({ baseUrl: 'http://127.0.0.1:47817', nonce: 'nonce-de-teste', port: 47817, revoke: () => {} }),
+    sweep: () => 0,
     ...over
   };
 }

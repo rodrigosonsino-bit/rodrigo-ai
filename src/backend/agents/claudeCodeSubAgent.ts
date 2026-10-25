@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process';
 import type { ISubAgent, SubAgentTaskRequest, SubAgentTaskResult } from './subAgent.js';
 import type { Capability } from './capabilityPolicy.js';
 import { guardText } from '../privacy/outboundGuard.js';
-import { claudeCodeEffective, DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
+import { claudeCodeWriteEffective, DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
 import type { SubAgentCoordinator } from './subAgent.js';
-import { claudeChildEnv, ensureSandboxDirs, isolationReadiness, wrapSandbox, type IsolationDeps } from './claudeCode.js';
+import { CLAUDE_CHILD_STDIO, passNonceFd, claudeChildEnv, defaultProxyAuth, ensureSandboxDirs, isolationReadiness, sweepSurvivors, wrapSandbox, writeRootReadiness, type IsolationDeps, type SandboxPaths } from './claudeCode.js';
+import type { ProxyAuth } from './claudeProxy.js';
 import type { DelegationObserver, DelegationStatus } from './delegationNotice.js';
 
 /** Timeout padrão: 10 minutos (configurável via RODRIGO_CLAUDE_TIMEOUT_MS). */
@@ -18,7 +19,7 @@ const DEFAULT_TIMEOUT_MS = 600_000;
  * - Exige confirmationToken em TODA chamada (toda tarefa é potencialmente mutante).
  * - Ambiente sanitizado: nenhuma chave de nuvem ou var RODRIGO_* passa ao filho.
  * - Prompt e saída passam pelo outboundGuard (T1) como dado não-confiável.
- * - Processo filho morto no abort/timeout (SIGTERM → SIGKILL após 5s).
+ * - Grupo de processos (detached) morto no abort/timeout: SIGTERM → SIGKILL após 5s (M5).
  *
  * Opção C (F17, 2026-10-24): com `isolation` (produção), o processo roda NUM WORKTREE LIMPO (sem docs/research),
  * dentro do perfil sandbox-exec que nega leitura e escrita no HOME e libera escrita só nessa raiz, com ambiente em
@@ -92,8 +93,18 @@ export class ClaudeCodeSubAgent implements ISubAgent {
         kind: 'final'
       };
     }
-    // B1: binário e raiz do spawn são os da leitura que a prova conferiu.
-    const spec = { command: ready.bin, cwd: ready.root, env: claudeChildEnv(process.env, this.isolation.paths) };
+    // A3: o modo escrita roda na raiz de ESCRITA (separada); o perfil dele não reabre a raiz de leitura.
+    const wr = writeRootReadiness(this.isolation, ready.root);
+    if (!wr.ok) {
+      return { success: false, output: '', error: `O modo escrita do Claude não está pronto: ${wr.reason}.`, kind: 'final' };
+    }
+    const wpaths = this.isolation.writePaths as SandboxPaths;
+    const auth = (this.isolation.proxyAuth ?? defaultProxyAuth)(this.isolation.home, 'escrita');
+    if (!auth) {
+      return { success: false, output: '', error: 'O proxy do Claude não está pronto (token dedicado ausente ou porta ocupada).', kind: 'final' };
+    }
+    // B1: binário do spawn é o que a prova conferiu; a raiz é a de escrita provada no mesmo selftest (hash inclui as duas).
+    const spec = { command: ready.bin, cwd: wr.root, env: claudeChildEnv(process.env, wpaths, auth), paths: wpaths, auth };
     // Ajuste 1 (F17): aviso à Ogra no início e no fim (modo escrita). Nunca derruba a tarefa.
     const noticeId = req.taskId ?? crypto.randomUUID();
     const emit = (status: DelegationStatus, conclusion?: string): void => {
@@ -115,7 +126,7 @@ export class ClaudeCodeSubAgent implements ISubAgent {
     prompt: string,
     _taskId: string,
     signal: AbortSignal,
-    spec: { command: string; cwd: string; env: NodeJS.ProcessEnv }
+    spec: { command: string; cwd: string; env: NodeJS.ProcessEnv; paths: SandboxPaths; auth: ProxyAuth }
   ): Promise<SubAgentTaskResult> {
     return new Promise<SubAgentTaskResult>((resolve) => {
       const childEnv = spec.env;
@@ -132,14 +143,17 @@ export class ClaudeCodeSubAgent implements ISubAgent {
 
       let proc: ReturnType<typeof spawn>;
       try {
-        ensureSandboxDirs(this.isolation.paths);
-        const iso = wrapSandbox(spec.command, args, spec.cwd, this.isolation.home, { writable: true, paths: this.isolation.paths });
+        ensureSandboxDirs(spec.paths);
+        const iso = wrapSandbox(spec.command, args, spec.cwd, this.isolation.home, { writable: true, paths: spec.paths, proxyPort: spec.auth.port });
         proc = spawn(iso.command, iso.args, {
           cwd: spec.cwd,
           env: childEnv,
-          stdio: ['pipe', 'pipe', 'pipe']
+          stdio: [...CLAUDE_CHILD_STDIO],
+          // M5 do Code: grupo de processos próprio, para que o kill alcance os filhos do Bash (servidores, npm, sleep).
+          detached: true
         });
       } catch (err) {
+        spec.auth.revoke();
         return resolve({
           success: false, output: '',
           error: `Falha ao iniciar claude: ${err instanceof Error ? err.message : String(err)}`,
@@ -156,19 +170,25 @@ export class ClaudeCodeSubAgent implements ISubAgent {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
+        // P2: nonce do job revogado; grupo encerrado e sobreviventes (setsid) varridos.
+        spec.auth.revoke();
+        killProcessGroup(proc, 0);
+        try {
+          (this.isolation.sweep ?? sweepSurvivors)([spec.cwd, spec.paths.configDir, spec.paths.tmpDir]);
+        } catch {
+          /* melhor esforço */
+        }
         signal.removeEventListener('abort', abortHandler);
         resolve(result);
       };
 
       const timer = setTimeout(() => {
         timedOut = true;
-        proc.kill('SIGTERM');
-        setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* já morto */ } }, 5000);
+        killProcessGroup(proc);
       }, this.timeoutMs);
 
       const abortHandler = (): void => {
-        proc.kill('SIGTERM');
-        setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* já morto */ } }, 5000);
+        killProcessGroup(proc);
         finish({ success: false, output: '', error: 'Tarefa cancelada pelo usuário.', kind: 'final' });
       };
       signal.addEventListener('abort', abortHandler, { once: true });
@@ -222,10 +242,33 @@ export class ClaudeCodeSubAgent implements ISubAgent {
       });
 
       // H17.2: prompt por stdin, entrada fechada (sem injeção via arg ou shell).
+      // F2: nonce do job pelo fd 3 (fora do env); sem o pipe, falha fechada.
+      if (!passNonceFd(proc, spec.auth)) {
+        killProcessGroup(proc);
+        return finish({ success: false, output: '', error: 'Não consegui entregar a credencial do job ao Claude.', kind: 'final' });
+      }
       proc.stdin!.write(prompt);
       proc.stdin!.end();
     });
   }
+}
+
+/**
+ * M5 do Code: encerra o GRUPO inteiro (SIGTERM e, 5 s depois, SIGKILL), não só o PID do sandbox-exec. Exige `detached: true` no spawn.
+ * Se o grupo não existir mais (ESRCH), cai no kill do PID.
+ */
+export function killProcessGroup(proc: { pid?: number; kill: (s: NodeJS.Signals) => boolean }, graceMs = 5000): void {
+  const send = (sig: NodeJS.Signals): void => {
+    try {
+      if (proc.pid) process.kill(-proc.pid, sig);
+      else proc.kill(sig);
+    } catch {
+      try { proc.kill(sig); } catch { /* já morto */ }
+    }
+  };
+  send('SIGTERM');
+  const t = setTimeout(() => send('SIGKILL'), graceMs);
+  t.unref?.();
 }
 
 /**
@@ -240,7 +283,8 @@ export function registerClaudeCodeAgent(
   verifyMutationToken?: (turnId: string, token: string) => boolean,
   observer?: DelegationObserver
 ): ClaudeCodeSubAgent | null {
-  if (!claudeCodeEffective(privacy)) return null;
+  // Modo escrita DESLIGADO por padrão: exige RODRIGO_CLAUDE_CODE_WRITE=1 além do canal efetivo.
+  if (!claudeCodeWriteEffective(privacy)) return null;
   const agent = new ClaudeCodeSubAgent(privacy, verifyMutationToken, isolation, observer);
   coordinator.register(agent);
   console.log('[Rodrigo AI] ClaudeCodeSubAgent registrado (RODRIGO_CLAUDE_CODE efetivo).');

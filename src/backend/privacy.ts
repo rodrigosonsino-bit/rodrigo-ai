@@ -43,6 +43,11 @@ export interface PrivacyConfig {
    */
   readonly claudeCode: boolean;
   /**
+   * Fase 17 (decisão do Rodrigo, 24/10) — RODRIGO_CLAUDE_CODE_WRITE: liga o MODO ESCRITA (agente `claude_code`, com Bash/Write/Edit).
+   * Padrão DESLIGADO: ausente => desligado. Só vale com RODRIGO_CLAUDE_CODE efetivo. Valor inválido aborta o boot.
+   */
+  readonly claudeCodeWrite: boolean;
+  /**
    * Automação desktop (computer-use): RODRIGO_AUTO_DESKTOP.
    * Padrão DESLIGADO. Com 1 + RODRIGO_DESKTOP_CONTROL=1, intenções AUTOMACAO_DESKTOP
    * executam sem SIM por passo (kill switch por voz ainda vale). Valor inválido aborta o boot.
@@ -135,6 +140,11 @@ export function webSearchOffReason(cfg: PrivacyConfig): WebSearchOffReason | nul
  */
 export function claudeCodeEffective(cfg: PrivacyConfig): boolean {
   return cfg.cloud && cfg.claudeCode;
+}
+
+/** Modo escrita: só com o Claude Code efetivo E RODRIGO_CLAUDE_CODE_WRITE=1 explícito (padrão desligado). */
+export function claudeCodeWriteEffective(cfg: PrivacyConfig): boolean {
+  return claudeCodeEffective(cfg) && cfg.claudeCodeWrite === true;
 }
 
 export type ClaudeCodeOffReason = 'master-off' | 'channel-off';
@@ -257,6 +267,7 @@ export function parsePrivacyConfig(env: Env): PrivacyConfig {
     webSearch: parseFlag(env, 'RODRIGO_WEB_SEARCH', false),
     outboundGuard: parseGuardMode(env, 'RODRIGO_OUTBOUND_GUARD', 'redact'),
     claudeCode: parseFlag(env, 'RODRIGO_CLAUDE_CODE', false),
+    claudeCodeWrite: parseFlag(env, 'RODRIGO_CLAUDE_CODE_WRITE', false),
     autoDesktop: parseFlag(env, 'RODRIGO_AUTO_DESKTOP', false),
     ogra: parseFlag(env, 'RODRIGO_OGRA', false),
     ograFallback: parseFlag(env, 'RODRIGO_OGRA_FALLBACK', true),

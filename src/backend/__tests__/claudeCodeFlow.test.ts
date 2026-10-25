@@ -39,6 +39,9 @@ class FakeChild extends EventEmitter {
   pid: number | undefined = undefined;
   stdout = new PassThrough(); stderr = new PassThrough(); stdinText = ''; killed = false;
   stdin = new Writable({ write: (c: Buffer, _e, cb) => { this.stdinText += c.toString(); cb(); } });
+  fd3 = '';
+  nonceFd = new Writable({ write: (c: Buffer, _e, cb) => { this.fd3 += c.toString(); cb(); } });
+  get stdio(): unknown[] { return [this.stdin, this.stdout, this.stderr, this.nonceFd]; }
   kill(): boolean { this.killed = true; return true; }
 }
 

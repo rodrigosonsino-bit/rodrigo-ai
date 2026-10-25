@@ -28,6 +28,7 @@ describe('parsePrivacyConfig (Fase 12)', () => {
       webSearch: false,
       outboundGuard: 'redact',
       claudeCode: false,
+      claudeCodeWrite: false,
       autoDesktop: false,
       ogra: false,
       ograFallback: true,

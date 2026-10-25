@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ClaudeCodeSubAgent, registerClaudeCodeAgent } from '../agents/claudeCodeSubAgent.js';
 import { SubAgentCoordinator, type SubAgentTaskRequest } from '../agents/subAgent.js';
-import { DEFAULT_PRIVACY, type PrivacyConfig } from '../privacy.js';
+import { DEFAULT_PRIVACY, parsePrivacyConfig, claudeCodeWriteEffective, type PrivacyConfig } from '../privacy.js';
 import { fakeIsolation } from './helpers/claudeIsolation.js';
 
 function buildRequest(turnId: string, prompt: string, confirmationToken?: string): SubAgentTaskRequest {
@@ -82,10 +82,30 @@ test('registerClaudeCodeAgent — registra apenas quando claudeCode está ativo'
   assert.equal(resOff, null);
   assert.equal(coordinator.get('claude_code'), undefined);
 
-  const privacyOn = makePrivacy(true);
+  // Canal ligado SEM a flag de escrita: o modo escrita continua desligado (padrão).
+  assert.equal(registerClaudeCodeAgent(coordinator, makePrivacy(true), fakeIsolation()), null);
+  assert.equal(coordinator.get('claude_code'), undefined);
+
+  const privacyOn = { ...makePrivacy(true), claudeCodeWrite: true };
   const resOn = registerClaudeCodeAgent(coordinator, privacyOn, fakeIsolation());
 
   assert.ok(resOn);
   assert.equal(resOn.id, 'claude_code');
   assert.equal(coordinator.get('claude_code'), resOn);
+});
+
+test('modo escrita DESLIGADO por padrão: só RODRIGO_CLAUDE_CODE_WRITE=1 explícito liga; inválido aborta o boot', () => {
+  const base = { RODRIGO_CLOUD: '1', RODRIGO_CLAUDE_CODE: '1' };
+  assert.equal(DEFAULT_PRIVACY.claudeCodeWrite, false);
+  assert.equal(parsePrivacyConfig(base).claudeCodeWrite, false, 'ausente => desligado');
+  assert.equal(claudeCodeWriteEffective(parsePrivacyConfig(base)), false);
+  assert.equal(claudeCodeWriteEffective(parsePrivacyConfig({ ...base, RODRIGO_CLAUDE_CODE_WRITE: '0' })), false);
+  assert.equal(claudeCodeWriteEffective(parsePrivacyConfig({ ...base, RODRIGO_CLAUDE_CODE_WRITE: '1' })), true);
+  // a flag sozinha não basta: precisa do canal e do mestre
+  assert.equal(claudeCodeWriteEffective(parsePrivacyConfig({ RODRIGO_CLOUD: '1', RODRIGO_CLAUDE_CODE_WRITE: '1' })), false);
+  assert.equal(claudeCodeWriteEffective(parsePrivacyConfig({ RODRIGO_CLOUD: '0', RODRIGO_CLAUDE_CODE: '1', RODRIGO_CLAUDE_CODE_WRITE: '1' })), false);
+  assert.throws(() => parsePrivacyConfig({ ...base, RODRIGO_CLAUDE_CODE_WRITE: 'talvez' }));
+  const c = new SubAgentCoordinator();
+  assert.equal(registerClaudeCodeAgent(c, parsePrivacyConfig(base), fakeIsolation()), null);
+  assert.equal(c.get('claude_code'), undefined, 'sem a flag o agente de escrita não existe no manifesto');
 });

@@ -1,10 +1,8 @@
 #!/bin/sh
-# Fase 17 (A1 do Code): o Claude delegado NÃO usa o ~/.claude do usuário. Ele tem configuração e login PRÓPRIOS em
-# .runtime/claude-home. Rode isto UMA vez, abra o Claude e digite /login (depois /exit).
+# Fase 17 (A1/R1 + N2 do Code): o Claude delegado NÃO usa o ~/.claude nem o Keychain do usuário. Ele tem configuração própria
+# em .runtime/claude-home e se autentica por um token dedicado e revogável (claude setup-token) guardado em
+# ~/.config/rodrigo-ai/claude-oauth-token (0600, fora do repositório). Este script só confere o arquivo e mostra os passos.
+# Requer `npm run build:server` antes.
 set -eu
 cd "$(dirname "$0")/.."
-DIR="$(pwd)/.runtime/claude-home"
-mkdir -p "$DIR" && chmod 700 "$DIR"
-echo "Configuração própria do Claude delegado: $DIR"
-echo "Faça /login quando o Claude abrir; depois /exit."
-CLAUDE_CONFIG_DIR="$DIR" exec claude
+exec node scripts/claude-code-login.mjs

@@ -11,6 +11,8 @@ import {
   findClaudeBinary,
   profileFingerprint,
   resolveClaudeRoot,
+  resolveClaudeWriteRoot,
+  warmClaudeProxy,
   selftestMatches,
   SELFTEST_MARKER_FILE,
   spokenSummary,
@@ -180,20 +182,28 @@ export function createVoiceRuntime(rootDir: string): VoiceRuntime {
   // mas só fica disponível com o canal RODRIGO_CLAUDE_CODE=1, raiz válida, binário e a prova de isolamento (selftest).
   // Isolamento compartilhado pelo modo LEITURA (runner) e pelo modo ESCRITA (ClaudeCodeSubAgent): mesma raiz limpa,
   // mesmo perfil sandbox-exec e a mesma prova (selftest) exigida antes de qualquer execução.
-  const claudeSandboxDirs = claudeSandboxPaths(rootDir);
+  const claudeSandboxDirs = claudeSandboxPaths(rootDir, 'leitura');
+  const claudeWriteDirs = claudeSandboxPaths(rootDir, 'escrita');
   const claudeIsolation: IsolationDeps = {
     resolveRoot: () => resolveClaudeRoot(rootDir),
+    resolveWriteRoot: () => resolveClaudeWriteRoot(rootDir),
     claudeBin: () => findClaudeBinary(),
     home: os.homedir(),
     paths: claudeSandboxDirs,
+    writePaths: claudeWriteDirs,
     exists: (p) => fs.existsSync(p),
     selftestOk: (root, bin) =>
       selftestMatches(defaultRootFs.readConfig(path.join(rootDir, SELFTEST_MARKER_FILE)), {
         root,
         claudeBin: bin,
-        profileHash: profileFingerprint(root, os.homedir(), claudeSandboxDirs)
+        profileHash: profileFingerprint(root, os.homedir(), claudeSandboxDirs, (() => {
+          const w = resolveClaudeWriteRoot(rootDir);
+          return w.ok ? w.root : null;
+        })(), claudeWriteDirs)
       })
   };
+  // A3: sobe o proxy local cedo (só com o canal ligado) para a 1ª tarefa não esbarrar nele ainda subindo.
+  if (process.env.RODRIGO_CLAUDE_CODE === '1') warmClaudeProxy(os.homedir());
   // Ajuste 1 (F17): avisos de delegação para a Ogra (no-op sem RODRIGO_OGRA=1 e sem webhook). `sessionManager` ainda não existe
   // aqui; o callback é avaliado só quando um aviso sai.
   const delegationObserver = createOgraDelegationNotifier({ privacy, session: () => sessionManagerRef?.currentSessionId() ?? '' });
